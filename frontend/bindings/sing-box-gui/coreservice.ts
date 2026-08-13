@@ -21,6 +21,10 @@ export function GetConfig(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2439653156);
 }
 
+export function RollbackCore(): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(4012742113);
+}
+
 export function SaveURL(rawURL: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3210647596, rawURL);
 }

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +14,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,9 +27,9 @@ import (
 )
 
 const (
-	coreExecutableName = "sing-box.exe"
-	maxCoreDownload    = 200 << 20
-	maxCoreBinary      = 100 << 20
+	coreExecutableBaseName = "sing-box"
+	maxCoreDownload        = 200 << 20
+	maxCoreBinary          = 100 << 20
 )
 
 var (
@@ -34,21 +39,37 @@ var (
 )
 
 type CoreConfig struct {
-	URLTemplate      string `json:"urlTemplate"`
-	Version          string `json:"version"`
-	Channel          string `json:"channel"`
-	CorePath         string `json:"corePath"`
-	InstalledVersion string `json:"installedVersion"`
-	Installed        bool   `json:"installed"`
-	LatestVersion    string `json:"latestVersion"`
-	UpdateAvailable  bool   `json:"updateAvailable"`
-	PendingVersion   string `json:"pendingVersion"`
-	UpdatePending    bool   `json:"updatePending"`
+	URLTemplate       string `json:"urlTemplate"`
+	ConfiguredVersion string `json:"configuredVersion"`
+	Version           string `json:"version"`
+	VersionDetail     string `json:"versionDetail"`
+	Channel           string `json:"channel"`
+	CorePath          string `json:"corePath"`
+	InstalledVersion  string `json:"installedVersion"`
+	Installed         bool   `json:"installed"`
+	LatestVersion     string `json:"latestVersion"`
+	UpdateAvailable   bool   `json:"updateAvailable"`
+	BackupVersion     string `json:"backupVersion"`
+	BackupAvailable   bool   `json:"backupAvailable"`
+	PendingVersion    string `json:"pendingVersion"`
+	UpdatePending     bool   `json:"updatePending"`
 }
 
 type CoreService struct {
 	executableDir string
 	mu            sync.Mutex
+}
+
+type githubRelease struct {
+	TagName    string        `json:"tag_name"`
+	Prerelease bool          `json:"prerelease"`
+	Assets     []githubAsset `json:"assets"`
+}
+
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
 }
 
 func NewCoreService() (*CoreService, error) {
@@ -90,11 +111,16 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config.CorePath = s.corePath()
+	config.LatestVersion = ""
+	config.UpdateAvailable = false
 	config.Version = existing.Version
-	config.Channel = existing.Channel
+	config.VersionDetail = existing.VersionDetail
 	config.InstalledVersion = existing.InstalledVersion
-	config.Installed = fileExists(config.CorePath)
+	config.Installed = existing.Installed
+	config.BackupVersion = existing.BackupVersion
+	config.BackupAvailable = existing.BackupAvailable
+	config.PendingVersion = existing.PendingVersion
+	config.UpdatePending = existing.UpdatePending
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -114,9 +140,12 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 		return CoreConfig{}, errors.New("core download URL has not been configured")
 	}
 
-	targetVersion := config.LatestVersion
+	targetVersion := normalizeCoreVersion(config.LatestVersion)
 	if targetVersion == "" {
-		targetVersion, err = findLatestTagForConfig(config)
+		targetVersion = normalizeCoreVersion(config.ConfiguredVersion)
+	}
+	if targetVersion == "" {
+		targetVersion, err = findLatestReleaseForConfig(config)
 		if err != nil {
 			return CoreConfig{}, err
 		}
@@ -127,7 +156,15 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 		return CoreConfig{}, errors.New("core download URL is invalid")
 	}
 
-	archivePath, err := s.download(downloadURL)
+	expectedSHA256 := ""
+	if owner, repository, repositoryErr := githubRepository(config.URLTemplate); repositoryErr == nil {
+		expectedSHA256, err = findReleaseAssetDigest(owner, repository, targetVersion, downloadURL)
+		if err != nil {
+			return CoreConfig{}, err
+		}
+	}
+
+	archivePath, err := s.download(downloadURL, expectedSHA256)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -141,11 +178,12 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 
 	config.CorePath = corePath
 	if installed {
-		installedVersion, versionErr := readCoreVersion(corePath)
+		installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath)
 		if versionErr != nil {
 			return CoreConfig{}, versionErr
 		}
 		config.Version = installedVersion
+		config.VersionDetail = versionDetail
 		config.Channel = coreChannel(installedVersion)
 		config.InstalledVersion = installedVersion
 		config.Installed = true
@@ -154,7 +192,7 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 		config.PendingVersion = ""
 		config.UpdatePending = false
 	} else {
-		pendingVersion, versionErr := readCoreVersion(s.pendingCorePath())
+		pendingVersion, _, versionErr := readCoreVersionDetail(s.pendingCorePath())
 		if versionErr != nil {
 			return CoreConfig{}, versionErr
 		}
@@ -163,6 +201,7 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 		config.UpdateAvailable = true
 		config.UpdatePending = true
 	}
+	s.applyBackupVersion(&config)
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -184,9 +223,17 @@ func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 
 	owner, repository, err := githubRepository(config.URLTemplate)
 	if err != nil {
-		return CoreConfig{}, err
+		if config.ConfiguredVersion == "" {
+			return CoreConfig{}, err
+		}
+		config.LatestVersion = config.ConfiguredVersion
+		config.UpdateAvailable = config.Version == "" || compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(config.Version)) > 0
+		if err := s.saveConfigLocked(config); err != nil {
+			return CoreConfig{}, err
+		}
+		return config, nil
 	}
-	latest, err := findLatestTag(owner, repository, config.Channel)
+	latest, err := findLatestRelease(owner, repository, config.Channel)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -202,10 +249,65 @@ func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 	return config, nil
 }
 
+func (s *CoreService) RollbackCore() (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	backupPath := s.backupCorePath()
+	if !fileExists(backupPath) {
+		return CoreConfig{}, errors.New("no previous sing-box core is available")
+	}
+
+	currentPath := s.corePath()
+	temporaryPath := currentPath + ".rollback"
+	_ = os.Remove(temporaryPath)
+	if fileExists(currentPath) {
+		if err := os.Rename(currentPath, temporaryPath); err != nil {
+			if isFileLockedError(err) {
+				return CoreConfig{}, errors.New("the current sing-box core is still running")
+			}
+			return CoreConfig{}, fmt.Errorf("prepare core rollback: %w", err)
+		}
+	}
+	if err := os.Rename(backupPath, currentPath); err != nil {
+		_ = os.Rename(temporaryPath, currentPath)
+		return CoreConfig{}, fmt.Errorf("restore previous core: %w", err)
+	}
+	if fileExists(temporaryPath) {
+		if err := os.Rename(temporaryPath, backupPath); err != nil {
+			return CoreConfig{}, fmt.Errorf("save current core backup: %w", err)
+		}
+	}
+
+	version, detail, err := readCoreVersionDetail(currentPath)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.Version = version
+	config.VersionDetail = detail
+	config.InstalledVersion = version
+	config.Installed = true
+	config.Channel = coreChannel(version)
+	config.PendingVersion = ""
+	config.UpdatePending = false
+	config.UpdateAvailable = config.LatestVersion != "" && compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(version)) > 0
+	s.applyBackupVersion(&config)
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	return config, nil
+}
+
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	config := CoreConfig{CorePath: s.corePath()}
 	data, err := os.ReadFile(s.configPath())
 	if errors.Is(err, os.ErrNotExist) {
+		s.applyCurrentVersion(&config, "")
+		s.applyBackupVersion(&config)
 		return config, nil
 	}
 	if err != nil {
@@ -216,10 +318,6 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	}
 	config.CorePath = s.corePath()
 	config.Installed = fileExists(config.CorePath)
-	// The running core is authoritative; persisted version fields are only legacy metadata.
-	config.Version = ""
-	config.InstalledVersion = ""
-	config.Channel = ""
 	s.applyCurrentVersion(&config, "")
 	if config.UpdatePending && config.PendingVersion != "" && fileExists(s.pendingCorePath()) {
 		installed, err := s.installPendingCore()
@@ -227,11 +325,12 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 			return CoreConfig{}, err
 		}
 		if installed {
-			installedVersion, versionErr := readCoreVersion(s.corePath())
+			installedVersion, versionDetail, versionErr := readCoreVersionDetail(s.corePath())
 			if versionErr != nil {
 				return CoreConfig{}, versionErr
 			}
 			config.Version = installedVersion
+			config.VersionDetail = versionDetail
 			config.InstalledVersion = installedVersion
 			config.Channel = coreChannel(installedVersion)
 			config.UpdateAvailable = config.LatestVersion != "" && compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(installedVersion)) > 0
@@ -243,6 +342,7 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 			}
 		}
 	}
+	s.applyBackupVersion(&config)
 	return config, nil
 }
 
@@ -262,7 +362,7 @@ func newCoreHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
-func (s *CoreService) download(downloadURL string) (string, error) {
+func (s *CoreService) download(downloadURL, expectedSHA256 string) (string, error) {
 	client := newCoreHTTPClient(20 * time.Minute)
 	response, err := client.Get(downloadURL)
 	if err != nil {
@@ -276,7 +376,17 @@ func (s *CoreService) download(downloadURL string) (string, error) {
 		return "", errors.New("core archive is too large")
 	}
 
-	temporary, err := os.CreateTemp(s.executableDir, ".core-download-*.zip")
+	suffix := ".archive"
+	if parsed, parseErr := url.Parse(downloadURL); parseErr == nil {
+		lowerPath := strings.ToLower(parsed.Path)
+		switch {
+		case strings.HasSuffix(lowerPath, ".tar.gz"):
+			suffix = ".tar.gz"
+		case strings.HasSuffix(lowerPath, ".zip"):
+			suffix = ".zip"
+		}
+	}
+	temporary, err := os.CreateTemp(s.executableDir, ".core-download-*"+suffix)
 	if err != nil {
 		return "", fmt.Errorf("create core archive: %w", err)
 	}
@@ -287,7 +397,12 @@ func (s *CoreService) download(downloadURL string) (string, error) {
 		}
 	}()
 
-	written, err := io.Copy(temporary, io.LimitReader(response.Body, maxCoreDownload+1))
+	var writer io.Writer = temporary
+	var digest = sha256.New()
+	if expectedSHA256 != "" {
+		writer = io.MultiWriter(temporary, digest)
+	}
+	written, err := io.Copy(writer, io.LimitReader(response.Body, maxCoreDownload+1))
 	if err != nil {
 		temporary.Close()
 		os.Remove(path)
@@ -302,6 +417,10 @@ func (s *CoreService) download(downloadURL string) (string, error) {
 		os.Remove(path)
 		return "", fmt.Errorf("close core archive: %w", err)
 	}
+	if expectedSHA256 != "" && !strings.EqualFold(fmt.Sprintf("%x", digest.Sum(nil)), expectedSHA256) {
+		os.Remove(path)
+		return "", errors.New("core archive checksum does not match the release digest")
+	}
 	temporary = nil
 	return path, nil
 }
@@ -310,19 +429,23 @@ func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) 
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return false, fmt.Errorf("create core directory: %w", err)
 	}
+	if strings.HasSuffix(strings.ToLower(archivePath), ".tar.gz") {
+		return s.extractTarGZCore(archivePath, targetPath)
+	}
+	return s.extractZIPCore(archivePath, targetPath)
+}
+
+func (s *CoreService) extractZIPCore(archivePath, targetPath string) (bool, error) {
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return false, fmt.Errorf("open core archive: %w", err)
+		return false, fmt.Errorf("open core ZIP archive: %w", err)
 	}
 	defer archive.Close()
 
 	var selected *zip.File
 	for _, entry := range archive.File {
 		name := filepath.Base(strings.ReplaceAll(entry.Name, "\\", "/"))
-		if name != coreExecutableName && name != "sing-box" {
-			continue
-		}
-		if entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > maxCoreBinary {
+		if !isCoreArchiveName(name) || entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > maxCoreBinary {
 			continue
 		}
 		if selected == nil || strings.Count(entry.Name, "/") < strings.Count(selected.Name, "/") {
@@ -330,7 +453,7 @@ func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) 
 		}
 	}
 	if selected == nil {
-		return false, errors.New("sing-box executable was not found in the core archive")
+		return false, errors.New("sing-box executable was not found in the core ZIP archive")
 	}
 
 	reader, err := selected.Open()
@@ -338,13 +461,47 @@ func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) 
 		return false, fmt.Errorf("read core executable: %w", err)
 	}
 	defer reader.Close()
+	return s.installExtractedCore(reader, targetPath)
+}
 
-	temporary, err := os.CreateTemp(filepath.Dir(targetPath), ".sing-box-*.exe")
+func (s *CoreService) extractTarGZCore(archivePath, targetPath string) (bool, error) {
+	archiveFile, err := os.Open(archivePath)
+	if err != nil {
+		return false, fmt.Errorf("open core TAR.GZ archive: %w", err)
+	}
+	defer archiveFile.Close()
+
+	gzipReader, err := gzip.NewReader(archiveFile)
+	if err != nil {
+		return false, fmt.Errorf("open core gzip archive: %w", err)
+	}
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, nextErr := tarReader.Next()
+		if nextErr == io.EOF {
+			break
+		}
+		if nextErr != nil {
+			return false, fmt.Errorf("read core TAR archive: %w", nextErr)
+		}
+		if header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size > maxCoreBinary || !isCoreArchiveName(filepath.Base(header.Name)) {
+			continue
+		}
+		return s.installExtractedCore(io.LimitReader(tarReader, header.Size), targetPath)
+	}
+	return false, errors.New("sing-box executable was not found in the core TAR.GZ archive")
+}
+
+func (s *CoreService) installExtractedCore(reader io.Reader, targetPath string) (bool, error) {
+	temporary, err := os.CreateTemp(filepath.Dir(targetPath), ".sing-box-*"+filepath.Ext(targetPath))
 	if err != nil {
 		return false, fmt.Errorf("create core file: %w", err)
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
+
 	written, err := io.Copy(temporary, io.LimitReader(reader, maxCoreBinary+1))
 	if err != nil {
 		temporary.Close()
@@ -378,24 +535,38 @@ func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) 
 	return false, nil
 }
 
+func isCoreArchiveName(name string) bool {
+	return strings.EqualFold(name, coreExecutableName()) || strings.EqualFold(name, coreExecutableBaseName)
+}
+
+func coreExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return coreExecutableBaseName + ".exe"
+	}
+	return coreExecutableBaseName
+}
+
 func (s *CoreService) installPendingCore() (bool, error) {
 	return s.replaceCoreExecutable(s.pendingCorePath(), s.corePath())
 }
 
 func (s *CoreService) replaceCoreExecutable(sourcePath, targetPath string) (bool, error) {
-	backupPath := targetPath + ".old"
-	_ = os.Remove(backupPath)
-	if err := os.Rename(targetPath, backupPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		if isFileLockedError(err) {
-			return false, nil
+	backupPath := targetPath + ".bak"
+	if fileExists(targetPath) {
+		_ = os.Remove(backupPath)
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			if isFileLockedError(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("prepare core replacement: %w", err)
 		}
-		return false, fmt.Errorf("prepare core replacement: %w", err)
 	}
 	if err := os.Rename(sourcePath, targetPath); err != nil {
-		_ = os.Rename(backupPath, targetPath)
+		if fileExists(backupPath) {
+			_ = os.Rename(backupPath, targetPath)
+		}
 		return false, fmt.Errorf("replace core executable: %w", err)
 	}
-	_ = os.Remove(backupPath)
 	return true, nil
 }
 
@@ -413,13 +584,18 @@ func parseCoreURL(rawURL string) (CoreConfig, error) {
 
 	tag := segments[4]
 	channel := ""
+	configuredVersion := ""
 	if !strings.Contains(tag, "{version}") {
-		channel = coreChannel(tag)
-		parsedURL.Path = strings.ReplaceAll(parsedURL.Path, tag, "{version}")
-		tagVersion := strings.TrimPrefix(strings.TrimPrefix(tag, "v"), "V")
-		if tagVersion != tag {
-			parsedURL.Path = strings.ReplaceAll(parsedURL.Path, tagVersion, "{version}")
+		configuredVersion = normalizeCoreVersion(tag)
+		if configuredVersion == "" && !strings.EqualFold(tag, "latest") {
+			return CoreConfig{}, errors.New("无法从地址识别版本号")
 		}
+		channel = coreChannel(configuredVersion)
+		replacement := "{version}"
+		if strings.HasPrefix(tag, "v") || strings.HasPrefix(tag, "V") {
+			replacement = tag[:1] + "{version}"
+		}
+		parsedURL.Path = strings.Replace(parsedURL.Path, tag, replacement, 1)
 	}
 	parsedURL.RawPath = ""
 	templateURL := parsedURL.String()
@@ -427,8 +603,9 @@ func parseCoreURL(rawURL string) (CoreConfig, error) {
 	templateURL = strings.ReplaceAll(templateURL, "%7bversion%7d", "{version}")
 
 	return CoreConfig{
-		URLTemplate: templateURL,
-		Channel:     channel,
+		URLTemplate:       templateURL,
+		ConfiguredVersion: configuredVersion,
+		Channel:           channel,
 	}, nil
 }
 
@@ -477,70 +654,99 @@ func githubRepository(template string) (string, string, error) {
 	return segments[0], segments[1], nil
 }
 
-type githubTag struct {
-	Name string `json:"name"`
-}
-
-func findLatestTag(owner, repository, channel string) (string, error) {
+func findLatestRelease(owner, repository, channel string) (string, error) {
 	client := newCoreHTTPClient(30 * time.Second)
-	var latest string
-	var latestVersion coreVersion
-	for page := 1; page <= 100; page++ {
-		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/tags?per_page=100&page=%d", url.PathEscape(owner), url.PathEscape(repository), page)
-		request, err := http.NewRequest(http.MethodGet, endpoint, nil)
-		if err != nil {
-			return "", fmt.Errorf("check core update: %w", err)
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
+	if channel == "test" {
+		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100", url.PathEscape(owner), url.PathEscape(repository))
+	}
+	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", fmt.Errorf("check core update: %w", err)
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("User-Agent", "sing-box-gui")
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("check core update: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("check core update: GitHub returned %s", response.Status)
+	}
+	if channel == "test" {
+		var releases []githubRelease
+		if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&releases); err != nil {
+			return "", fmt.Errorf("parse GitHub releases: %w", err)
 		}
-		request.Header.Set("Accept", "application/vnd.github+json")
-		request.Header.Set("User-Agent", "sing-box-gui")
-
-		response, err := client.Do(request)
-		if err != nil {
-			return "", fmt.Errorf("check core update: %w", err)
-		}
-		var tags []githubTag
-		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&tags)
-		closeErr := response.Body.Close()
-		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			return "", fmt.Errorf("check core update: GitHub returned %s", response.Status)
-		}
-		if decodeErr != nil {
-			return "", fmt.Errorf("parse GitHub tags: %w", decodeErr)
-		}
-		if closeErr != nil {
-			return "", fmt.Errorf("close GitHub response: %w", closeErr)
-		}
-
-		for _, tag := range tags {
-			version, err := parseCoreVersion(tag.Name)
-			if err != nil || (channel != "" && coreChannel(version) != channel) {
+		for _, release := range releases {
+			if !release.Prerelease {
 				continue
 			}
-			parsed, err := parseCoreVersionParts(version)
-			if err != nil {
-				continue
-			}
-			if latest == "" || compareCoreVersions(parsed, latestVersion) > 0 {
-				latest = version
-				latestVersion = parsed
+			if version := normalizeCoreVersion(release.TagName); version != "" {
+				return version, nil
 			}
 		}
-		if len(tags) < 100 {
-			break
-		}
+		return "", errors.New("no test core release found")
 	}
-	if latest == "" {
-		return "", fmt.Errorf("no %s core tags found", channel)
+	var release githubRelease
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
+		return "", fmt.Errorf("parse GitHub release: %w", err)
 	}
-	return latest, nil
+	version := normalizeCoreVersion(release.TagName)
+	if version == "" {
+		return "", errors.New("GitHub release has no valid core version")
+	}
+	return version, nil
 }
 
-func findLatestTagForConfig(config CoreConfig) (string, error) {
+func findLatestReleaseForConfig(config CoreConfig) (string, error) {
 	owner, repository, err := githubRepository(config.URLTemplate)
 	if err != nil {
 		return "", err
 	}
-	return findLatestTag(owner, repository, config.Channel)
+	return findLatestRelease(owner, repository, config.Channel)
+}
+
+func findReleaseAssetDigest(owner, repository, version, downloadURL string) (string, error) {
+	client := newCoreHTTPClient(30 * time.Second)
+	for _, tag := range []string{"v" + version, version} {
+		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), url.PathEscape(tag))
+		request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			return "", err
+		}
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("User-Agent", "sing-box-gui")
+		response, err := client.Do(request)
+		if err != nil {
+			return "", err
+		}
+		var release githubRelease
+		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release)
+		response.Body.Close()
+		if response.StatusCode == http.StatusNotFound {
+			continue
+		}
+		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			return "", fmt.Errorf("lookup core release: GitHub returned %s", response.Status)
+		}
+		if decodeErr != nil {
+			return "", fmt.Errorf("parse GitHub release: %w", decodeErr)
+		}
+		assetName := path.Base(strings.SplitN(downloadURL, "?", 2)[0])
+		for _, asset := range release.Assets {
+			if asset.Name != assetName && !strings.HasSuffix(asset.BrowserDownloadURL, "/"+assetName) {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(asset.Digest), "sha256:") {
+				return strings.TrimSpace(asset.Digest[len("sha256:"):]), nil
+			}
+			return "", nil
+		}
+		return "", nil
+	}
+	return "", nil
 }
 
 type coreVersion struct {
@@ -637,17 +843,21 @@ func (s *CoreService) coreDir() string {
 }
 
 func (s *CoreService) corePath() string {
-	return filepath.Join(s.coreDir(), coreExecutableName)
+	return filepath.Join(s.coreDir(), coreExecutableName())
 }
 
 func (s *CoreService) pendingCorePath() string {
-	return filepath.Join(s.coreDir(), ".sing-box.pending.exe")
+	return filepath.Join(s.coreDir(), ".sing-box.pending"+filepath.Ext(s.corePath()))
+}
+
+func (s *CoreService) backupCorePath() string {
+	return s.corePath() + ".bak"
 }
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	version := normalizeCoreVersion(supplied)
 	if version == "" && fileExists(s.corePath()) {
-		version, _ = readCoreVersion(s.corePath())
+		version, _, _ = readCoreVersionDetail(s.corePath())
 	}
 	if version == "" {
 		return
@@ -676,20 +886,36 @@ func normalizeCoreVersion(value string) string {
 }
 
 func readCoreVersion(path string) (string, error) {
-	if !fileExists(path) {
-		return "", errors.New("sing-box core is not installed")
+	version, _, err := readCoreVersionDetail(path)
+	return version, err
+}
+
+func readCoreVersionDetail(corePath string) (string, string, error) {
+	if !fileExists(corePath) {
+		return "", "", errors.New("sing-box core is not installed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
+	command := exec.CommandContext(ctx, corePath, "version")
+	configureCoreCommand(command)
+	output, err := command.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("read sing-box core version: %w", err)
+		return "", "", fmt.Errorf("read sing-box core version: %w", err)
 	}
 	version := normalizeCoreVersion(string(output))
 	if version == "" {
-		return "", errors.New("unable to read sing-box core version")
+		return "", "", errors.New("unable to read sing-box core version")
 	}
-	return version, nil
+	return version, strings.TrimSpace(string(output)), nil
+}
+
+func (s *CoreService) applyBackupVersion(config *CoreConfig) {
+	config.BackupAvailable = fileExists(s.backupCorePath())
+	config.BackupVersion = ""
+	if !config.BackupAvailable {
+		return
+	}
+	config.BackupVersion, _, _ = readCoreVersionDetail(s.backupCorePath())
 }
 
 func fileExists(path string) bool {

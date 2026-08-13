@@ -3,13 +3,17 @@
 
 export interface CoreConfig {
     "urlTemplate": string;
+    "configuredVersion": string;
     "version": string;
+    "versionDetail": string;
     "channel": string;
     "corePath": string;
     "installedVersion": string;
     "installed": boolean;
     "latestVersion": string;
     "updateAvailable": boolean;
+    "backupVersion": string;
+    "backupAvailable": boolean;
     "pendingVersion": string;
     "updatePending": boolean;
 }
