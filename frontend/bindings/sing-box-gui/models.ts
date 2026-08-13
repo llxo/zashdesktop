@@ -16,4 +16,11 @@ export interface CoreConfig {
     "backupAvailable": boolean;
     "pendingVersion": string;
     "updatePending": boolean;
+    "runArgs": string;
+    "configURL": string;
+    "running": boolean;
+    "pid": number;
+    "logPath": string;
+    "configPath": string;
+    "configAvailable": boolean;
 }

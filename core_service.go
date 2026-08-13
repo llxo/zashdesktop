@@ -30,6 +30,8 @@ const (
 	coreExecutableBaseName = "sing-box"
 	maxCoreDownload        = 200 << 20
 	maxCoreBinary          = 100 << 20
+	maxCoreConfig          = 20 << 20
+	defaultCoreRunArgs     = "run -c config.json -D ."
 )
 
 var (
@@ -53,11 +55,20 @@ type CoreConfig struct {
 	BackupAvailable   bool   `json:"backupAvailable"`
 	PendingVersion    string `json:"pendingVersion"`
 	UpdatePending     bool   `json:"updatePending"`
+	RunArgs           string `json:"runArgs"`
+	ConfigURL         string `json:"configURL"`
+	Running           bool   `json:"running"`
+	PID               int    `json:"pid"`
+	LogPath           string `json:"logPath"`
+	ConfigPath        string `json:"configPath"`
+	ConfigAvailable   bool   `json:"configAvailable"`
 }
 
 type CoreService struct {
 	executableDir string
 	mu            sync.Mutex
+	process       *exec.Cmd
+	processDone   chan struct{}
 }
 
 type githubRelease struct {
@@ -89,6 +100,10 @@ func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions
 	return nil
 }
 
+func (s *CoreService) ServiceShutdown() error {
+	return s.stopCoreProcess()
+}
+
 func (s *CoreService) ServiceName() string {
 	return "CoreService"
 }
@@ -96,7 +111,12 @@ func (s *CoreService) ServiceName() string {
 func (s *CoreService) GetConfig() (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.loadConfigLocked()
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
 }
 
 func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
@@ -121,9 +141,63 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	config.BackupAvailable = existing.BackupAvailable
 	config.PendingVersion = existing.PendingVersion
 	config.UpdatePending = existing.UpdatePending
+	config.RunArgs = existing.RunArgs
+	config.ConfigURL = existing.ConfigURL
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) DownloadConfig(rawURL string) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if err := validateHTTPURL(rawURL, "配置下载地址"); err != nil {
+		return CoreConfig{}, err
+	}
+
+	client := newCoreHTTPClient(5 * time.Minute)
+	response, err := client.Get(rawURL)
+	if err != nil {
+		return CoreConfig{}, fmt.Errorf("download sing-box config: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return CoreConfig{}, fmt.Errorf("download sing-box config: server returned %s", response.Status)
+	}
+	if response.ContentLength > maxCoreConfig {
+		return CoreConfig{}, errors.New("sing-box config is too large")
+	}
+
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxCoreConfig+1))
+	if err != nil {
+		return CoreConfig{}, fmt.Errorf("read sing-box config: %w", err)
+	}
+	if len(data) == 0 {
+		return CoreConfig{}, errors.New("sing-box config is empty")
+	}
+	if len(data) > maxCoreConfig {
+		return CoreConfig{}, errors.New("sing-box config is too large")
+	}
+	if err := os.MkdirAll(s.coreDir(), 0o755); err != nil {
+		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
+	}
+	if err := writeFileAtomically(s.singboxConfigPath(), data, 0o600); err != nil {
+		return CoreConfig{}, fmt.Errorf("write sing-box config: %w", err)
+	}
+
+	config.ConfigURL = rawURL
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
 	return config, nil
 }
 
@@ -205,6 +279,7 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	s.applyRuntimeState(&config)
 	return config, nil
 }
 
@@ -231,6 +306,7 @@ func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 		if err := s.saveConfigLocked(config); err != nil {
 			return CoreConfig{}, err
 		}
+		s.applyRuntimeState(&config)
 		return config, nil
 	}
 	latest, err := findLatestRelease(owner, repository, config.Channel)
@@ -246,6 +322,7 @@ func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	s.applyRuntimeState(&config)
 	return config, nil
 }
 
@@ -299,7 +376,173 @@ func (s *CoreService) RollbackCore() (CoreConfig, error) {
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	s.applyRuntimeState(&config)
 	return config, nil
+}
+
+func (s *CoreService) SaveRunArgs(rawArgs string) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.RunArgs = strings.TrimSpace(rawArgs)
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) StartCore(rawArgs string) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.process != nil {
+		return CoreConfig{}, errors.New("sing-box core is already running")
+	}
+
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	if !fileExists(s.corePath()) {
+		return CoreConfig{}, errors.New("sing-box core is not installed")
+	}
+
+	runArgs := strings.TrimSpace(rawArgs)
+	if runArgs == "" {
+		runArgs = strings.TrimSpace(config.RunArgs)
+	}
+	if runArgs == "" {
+		runArgs = defaultCoreRunArgs
+	}
+	args, err := parseCoreCommandLine(runArgs)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	if len(args) == 0 {
+		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
+	}
+
+	if err := os.MkdirAll(s.coreDir(), 0o755); err != nil {
+		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
+	}
+	logFile, err := os.OpenFile(s.coreLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return CoreConfig{}, fmt.Errorf("open core log: %w", err)
+	}
+
+	command := exec.Command(s.corePath(), args...)
+	command.Dir = s.coreDir()
+	command.Stdout = logFile
+	command.Stderr = logFile
+	configureCoreCommand(command)
+	if err := command.Start(); err != nil {
+		_ = logFile.Close()
+		return CoreConfig{}, fmt.Errorf("start sing-box core: %w", err)
+	}
+
+	config.RunArgs = runArgs
+	if err := s.saveConfigLocked(config); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		_ = logFile.Close()
+		return CoreConfig{}, err
+	}
+
+	done := make(chan struct{})
+	s.process = command
+	s.processDone = done
+	go s.waitForCore(command, logFile, done)
+
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) StopCore() (CoreConfig, error) {
+	if err := s.stopCoreProcess(); err != nil {
+		return CoreConfig{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) RestartCore(rawArgs string) (CoreConfig, error) {
+	if err := s.stopCoreProcess(); err != nil {
+		return CoreConfig{}, err
+	}
+	return s.StartCore(rawArgs)
+}
+
+func (s *CoreService) stopCoreProcess() error {
+	s.mu.Lock()
+	process := s.process
+	done := s.processDone
+	s.mu.Unlock()
+	if process == nil {
+		return nil
+	}
+
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+
+	if err := process.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		select {
+		case <-done:
+			return nil
+		default:
+		}
+		return fmt.Errorf("stop sing-box core: %w", err)
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(10 * time.Second):
+		return errors.New("timed out waiting for sing-box core to stop")
+	}
+}
+
+func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan struct{}) {
+	err := command.Wait()
+	if err != nil {
+		_, _ = fmt.Fprintf(logFile, "\n[sing-box exited: %v]\n", err)
+	}
+	_ = logFile.Close()
+
+	s.mu.Lock()
+	if s.process == command {
+		s.process = nil
+		s.processDone = nil
+	}
+	s.mu.Unlock()
+	close(done)
+}
+
+func (s *CoreService) applyRuntimeState(config *CoreConfig) {
+	config.Running = s.process != nil
+	config.PID = 0
+	config.LogPath = s.coreLogPath()
+	config.ConfigPath = s.singboxConfigPath()
+	config.ConfigAvailable = fileExists(config.ConfigPath)
+	if config.RunArgs == "" {
+		config.RunArgs = defaultCoreRunArgs
+	}
+	if config.Running {
+		config.PID = s.process.Process.Pid
+	}
 }
 
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
@@ -348,6 +591,10 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {
 	config.CorePath = s.corePath()
+	config.Running = false
+	config.PID = 0
+	config.LogPath = ""
+	config.ConfigPath = ""
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
@@ -846,6 +1093,14 @@ func (s *CoreService) corePath() string {
 	return filepath.Join(s.coreDir(), coreExecutableName())
 }
 
+func (s *CoreService) coreLogPath() string {
+	return filepath.Join(s.coreDir(), "sing-box.log")
+}
+
+func (s *CoreService) singboxConfigPath() string {
+	return filepath.Join(s.coreDir(), "config.json")
+}
+
 func (s *CoreService) pendingCorePath() string {
 	return filepath.Join(s.coreDir(), ".sing-box.pending"+filepath.Ext(s.corePath()))
 }
@@ -883,6 +1138,64 @@ func normalizeCoreVersion(value string) string {
 		return ""
 	}
 	return match[2]
+}
+
+func validateHTTPURL(rawURL, label string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return fmt.Errorf("请输入有效的 HTTP(S) %s", label)
+	}
+	return nil
+}
+
+func parseCoreCommandLine(input string) ([]string, error) {
+	var args []string
+	var current strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	tokenStarted := false
+
+	flush := func() {
+		if !tokenStarted {
+			return
+		}
+		args = append(args, current.String())
+		current.Reset()
+		tokenStarted = false
+	}
+
+	for index := 0; index < len(input); index++ {
+		char := input[index]
+		switch {
+		case char == 0:
+			return nil, errors.New("命令行参数包含无效字符")
+		case char == '\\' && index+1 < len(input) && input[index+1] == '"' && !inSingleQuote:
+			current.WriteByte('"')
+			tokenStarted = true
+			index++
+		case char == '\\' && index+1 < len(input) && input[index+1] == '\'' && !inDoubleQuote:
+			current.WriteByte('\'')
+			tokenStarted = true
+			index++
+		case char == '"' && !inSingleQuote:
+			inDoubleQuote = !inDoubleQuote
+			tokenStarted = true
+		case char == '\'' && !inDoubleQuote:
+			inSingleQuote = !inSingleQuote
+			tokenStarted = true
+		case (char == ' ' || char == '\t' || char == '\r' || char == '\n') && !inSingleQuote && !inDoubleQuote:
+			flush()
+		default:
+			current.WriteByte(char)
+			tokenStarted = true
+		}
+	}
+
+	if inSingleQuote || inDoubleQuote {
+		return nil, errors.New("命令行参数包含未闭合的引号")
+	}
+	flush()
+	return args, nil
 }
 
 func readCoreVersion(path string) (string, error) {

@@ -13,6 +13,10 @@ export function CheckUpdate(currentVersion: string): $CancellablePromise<$models
     return $Call.ByID(2721282167, currentVersion);
 }
 
+export function DownloadConfig(rawURL: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(3689975968, rawURL);
+}
+
 export function DownloadCore(currentVersion: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2731700857, currentVersion);
 }
@@ -21,10 +25,26 @@ export function GetConfig(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2439653156);
 }
 
+export function RestartCore(rawArgs: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2020121754, rawArgs);
+}
+
 export function RollbackCore(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(4012742113);
 }
 
+export function SaveRunArgs(rawArgs: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(1182958737, rawArgs);
+}
+
 export function SaveURL(rawURL: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3210647596, rawURL);
+}
+
+export function StartCore(rawArgs: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(879345873, rawArgs);
+}
+
+export function StopCore(): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(1224211689);
 }
