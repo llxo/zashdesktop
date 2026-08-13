@@ -33,6 +33,10 @@ export function RollbackCore(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(4012742113);
 }
 
+export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore);
+}
+
 export function SaveRunArgs(rawArgs: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1182958737, rawArgs);
 }

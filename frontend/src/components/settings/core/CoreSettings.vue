@@ -248,6 +248,23 @@
       </div>
     </div>
     </section>
+    <section class="bg-base-100 rounded-xl p-4">
+      <div class="flex w-full flex-col gap-1">
+        <div class="setting-item-label mb-2">{{ $t('coreBehavior') }}</div>
+        <label class="flex items-center justify-between gap-3 py-2">
+          <span>{{ $t('coreRunAsAdmin') }}</span>
+          <input v-model="config.runAsAdmin" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+        </label>
+        <label class="flex items-center justify-between gap-3 py-2">
+          <span>{{ $t('coreAutoStart') }}</span>
+          <input v-model="config.autoStart" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+        </label>
+        <label class="flex items-center justify-between gap-3 py-2">
+          <span>{{ $t('coreAutoStartCore') }}</span>
+          <input v-model="config.autoStartCore" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+        </label>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -288,6 +305,9 @@ const config = reactive<CoreConfig>({
   logPath: '',
   configPath: '',
   configAvailable: false,
+  runAsAdmin: false,
+  autoStart: false,
+  autoStartCore: false,
 })
 const urlInput = ref('')
 const runArgsInput = ref('')
@@ -300,6 +320,7 @@ const isStopping = ref(false)
 const isRestarting = ref(false)
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
+const isSavingBehavior = ref(false)
 
 const applyConfig = (next: CoreConfig) => {
   Object.assign(config, next)
@@ -378,6 +399,20 @@ const loadConfig = async () => {
     applyConfig(await CoreService.GetConfig())
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  }
+}
+
+const saveBehavior = async () => {
+  if (isSavingBehavior.value) return
+  isSavingBehavior.value = true
+  try {
+    applyConfig(await CoreService.SaveBehavior(config.runAsAdmin, config.autoStart, config.autoStartCore))
+    showNotification({ content: 'coreBehaviorSaved', type: 'alert-success' })
+  } catch (error) {
+    await loadConfig()
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  } finally {
+    isSavingBehavior.value = false
   }
 }
 

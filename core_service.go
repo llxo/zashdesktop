@@ -62,13 +62,17 @@ type CoreConfig struct {
 	LogPath           string `json:"logPath"`
 	ConfigPath        string `json:"configPath"`
 	ConfigAvailable   bool   `json:"configAvailable"`
+	RunAsAdmin        bool   `json:"runAsAdmin"`
+	AutoStart         bool   `json:"autoStart"`
+	AutoStartCore     bool   `json:"autoStartCore"`
 }
 
 type CoreService struct {
-	executableDir string
-	mu            sync.Mutex
-	process       *exec.Cmd
-	processDone   chan struct{}
+	executableDir   string
+	applicationPath string
+	mu              sync.Mutex
+	process         *exec.Cmd
+	processDone     chan struct{}
 }
 
 type githubRelease struct {
@@ -88,7 +92,10 @@ func NewCoreService() (*CoreService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate executable: %w", err)
 	}
-	return &CoreService{executableDir: filepath.Dir(executable)}, nil
+	return &CoreService{
+		executableDir:   filepath.Dir(executable),
+		applicationPath: executable,
+	}, nil
 }
 
 func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions) error {
@@ -97,12 +104,12 @@ func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions
 		return fmt.Errorf("locate executable: %w", err)
 	}
 	s.executableDir = filepath.Dir(executable)
+	s.applicationPath = executable
+	go s.startCoreOnStartup()
 	return nil
 }
 
-func (s *CoreService) ServiceShutdown() error {
-	return s.stopCoreProcess()
-}
+func (*CoreService) ServiceShutdown() error { return nil }
 
 func (s *CoreService) ServiceName() string {
 	return "CoreService"
@@ -115,6 +122,7 @@ func (s *CoreService) GetConfig() (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	s.applySystemBehavior(&config)
 	s.applyRuntimeState(&config)
 	return config, nil
 }
@@ -143,6 +151,9 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	config.UpdatePending = existing.UpdatePending
 	config.RunArgs = existing.RunArgs
 	config.ConfigURL = existing.ConfigURL
+	config.RunAsAdmin = existing.RunAsAdmin
+	config.AutoStart = existing.AutoStart
+	config.AutoStartCore = existing.AutoStartCore
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -396,6 +407,34 @@ func (s *CoreService) SaveRunArgs(rawArgs string) (CoreConfig, error) {
 	return config, nil
 }
 
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore bool) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+
+	if runtime.GOOS == "windows" {
+		if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
+			return CoreConfig{}, err
+		}
+		if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
+			return CoreConfig{}, err
+		}
+	}
+
+	config.RunAsAdmin = runAsAdmin
+	config.AutoStart = autoStart
+	config.AutoStartCore = autoStartCore
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
 func (s *CoreService) StartCore(rawArgs string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -545,12 +584,39 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	}
 }
 
+func (s *CoreService) applySystemBehavior(config *CoreConfig) {
+	if runtime.GOOS != "windows" || s.applicationPath == "" {
+		return
+	}
+	if runAsAdmin, err := readRunAsAdminSetting(s.applicationPath); err == nil {
+		config.RunAsAdmin = runAsAdmin
+	}
+	if autoStart, err := readAutoStartSetting(); err == nil {
+		config.AutoStart = autoStart
+	}
+}
+
+func (s *CoreService) startCoreOnStartup() {
+	s.mu.Lock()
+	config, err := s.loadConfigLocked()
+	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePath()) && fileExists(s.singboxConfigPath())
+	runArgs := config.RunArgs
+	s.mu.Unlock()
+	if !shouldStart {
+		return
+	}
+	if _, err := s.StartCore(runArgs); err != nil {
+		fmt.Printf("sing-box-gui: start core on startup: %v\n", err)
+	}
+}
+
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	config := CoreConfig{CorePath: s.corePath()}
 	data, err := os.ReadFile(s.configPath())
 	if errors.Is(err, os.ErrNotExist) {
 		s.applyCurrentVersion(&config, "")
 		s.applyBackupVersion(&config)
+		s.applySystemBehavior(&config)
 		return config, nil
 	}
 	if err != nil {
@@ -559,6 +625,7 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return CoreConfig{}, fmt.Errorf("parse core config: %w", err)
 	}
+	s.applySystemBehavior(&config)
 	config.CorePath = s.corePath()
 	config.Installed = fileExists(config.CorePath)
 	s.applyCurrentVersion(&config, "")
