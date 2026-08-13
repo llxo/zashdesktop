@@ -57,8 +57,6 @@ func (c LaunchConfig) windowOptions() application.WebviewWindowOptions {
 		URL:              launchURL(c),
 		Width:            1280,
 		Height:           820,
-		MinWidth:         960,
-		MinHeight:        620,
 		BackgroundColour: application.NewRGBA(18, 18, 18, 255),
 	}
 }
