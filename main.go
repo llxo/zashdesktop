@@ -21,7 +21,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "sing-box-gui",
 		Description: "A native sing-box dashboard using the Clash API",
-		Icon:        trayIcon,
+		Icon:        appIcon,
 		Assets: application.AssetOptions{
 			Handler:        application.AssetFileServerFS(assets),
 			DisableLogging: true,

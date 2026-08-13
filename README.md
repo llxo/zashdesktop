@@ -4,19 +4,18 @@ Windows x64 desktop host. It uses Wails v3 and the system WebView2 runtime, so t
 
 ## Build
 
-Prepare the frontend assets in `frontend/dist` before building:
+The frontend is the zashboard application under `frontend/`. The desktop build
+uses system fonts and writes its static assets to `frontend/dist`.
+
+Build the frontend assets and Windows executable:
 
 ```powershell
-pnpm exec vite build --mode desktop --outDir frontend/dist --emptyOutDir
+.\build.ps1
 ```
 
-Build the Windows executable:
-
-```powershell
-cd desktop
-go mod tidy
-go build -o build/bin/sing-box-gui.exe .
-```
+The build script clears the Go build cache and old binaries, embeds
+`build/windows/icon.ico` as the application and tray icon, and embeds the same
+icon into the Windows executable resources.
 
 ## Command line
 

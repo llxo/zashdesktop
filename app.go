@@ -73,7 +73,7 @@ func (a *App) setupTray() {
 	})
 
 	a.tray = tray
-	tray.SetIcon(trayIcon)
+	tray.SetIcon(appIcon)
 	tray.SetTooltip("sing-box-gui")
 	tray.SetMenu(menu)
 	tray.OnClick(a.showWindow)

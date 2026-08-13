@@ -1,12 +1,13 @@
-# Local zashboard checkout. It is kept beside this repository for builds.
-zashboard/
-
 # Generated frontend, binaries, packaging files, and build caches.
-frontend/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
 build/*
 !build/windows/
 build/windows/*
 !build/windows/icon.ico
+!build/windows/info.json
+!build/windows/wails.exe.manifest
 node_modules/
 **/node_modules/
 .pnpm-store/
@@ -18,6 +19,7 @@ temp/
 
 # Go build and test output.
 *.exe
+*.syso
 *.test
 *.out
 coverage/
