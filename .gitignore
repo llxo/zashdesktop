@@ -1,0 +1,29 @@
+# Local zashboard checkout. It is kept beside this repository for builds.
+zashboard/
+
+# Generated frontend, binaries, packaging files, and build caches.
+frontend/
+build/*
+!build/windows/
+build/windows/*
+!build/windows/icon.ico
+node_modules/
+**/node_modules/
+.pnpm-store/
+.npm/
+.vite/
+.cache/
+tmp/
+temp/
+
+# Go build and test output.
+*.exe
+*.test
+*.out
+coverage/
+
+# Local editor and OS files.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
