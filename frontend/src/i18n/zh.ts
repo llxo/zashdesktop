@@ -560,7 +560,7 @@ const zh: LANG_MESSAGE = {
   settingsMenuConnections: '连接',
   settingsMenuOverview: '概览',
   ports: '端口',
-  coreSettings: '核心设置',
+  coreSettings: '核心',
   coreDownload: '下载核心',
   coreDownloadURL: '核心下载地址',
   coreDownloadURLPlaceholder: '粘贴 GitHub Release ZIP 地址',

@@ -5,7 +5,6 @@
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="setting-item-label">{{ $t('coreRun') }}</div>
-            <div class="text-base-content/55 mt-1 text-xs">{{ $t('coreRunTip') }}</div>
           </div>
           <span
             class="badge badge-sm"
@@ -15,19 +14,12 @@
           </span>
         </div>
 
-        <div class="text-base-content/55 text-xs break-all">
-          {{ $t('corePath') }}: {{ config.corePath || 'sing-box.exe' }}
-        </div>
-        <label class="flex flex-col gap-1">
-          <span class="text-base-content/70 text-xs">{{ $t('coreRunArgs') }}</span>
-          <textarea
-            v-model="runArgsInput"
-            class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
-            :placeholder="$t('coreRunArgsPlaceholder')"
-            :disabled="config.running || isStarting || isStopping || isRestarting"
-          ></textarea>
-        </label>
-        <div class="text-base-content/55 text-xs">{{ $t('coreRunArgsTip') }}</div>
+        <textarea
+          v-model="runArgsInput"
+          class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
+          :aria-label="$t('coreRunArgs')"
+          :disabled="config.running || isStarting || isStopping || isRestarting"
+        ></textarea>
 
         <div class="flex flex-wrap gap-2">
           <button
@@ -94,31 +86,18 @@
           </button>
         </div>
 
-        <div
-          v-if="config.running"
-          class="text-base-content/55 text-xs"
-        >
-          {{ $t('coreProcess') }}: {{ config.pid }}
-        </div>
-        <div class="text-base-content/55 text-xs break-all">
-          {{ $t('coreLogPath') }}: {{ config.logPath || 'sing-box/sing-box.log' }}
-        </div>
       </div>
     </section>
 
     <section class="bg-base-100 rounded-xl p-4">
       <div class="flex w-full flex-col gap-3">
         <div class="setting-item-label">{{ $t('coreConfigDownload') }}</div>
-        <div class="text-base-content/55 text-xs">{{ $t('coreConfigDownloadTip') }}</div>
         <input
           v-model="configURLInput"
           class="input input-sm w-full"
           type="url"
-          :placeholder="$t('coreConfigURLPlaceholder')"
+          :aria-label="$t('coreConfigURLPlaceholder')"
         />
-        <div class="text-base-content/55 text-xs break-all">
-          {{ $t('coreConfigPath') }}: {{ config.configPath || 'sing-box/config.json' }}
-        </div>
         <div class="flex flex-wrap items-center gap-2">
           <button
             class="btn btn-primary btn-sm"
@@ -135,12 +114,6 @@
             />
             {{ $t('downloadConfig') }}
           </button>
-          <span
-            v-if="config.configAvailable"
-            class="text-success text-xs"
-          >
-            {{ $t('coreConfigAvailable') }}
-          </span>
         </div>
       </div>
     </section>
@@ -152,52 +125,9 @@
         v-model="urlInput"
         class="input input-sm w-full"
         type="url"
-        :placeholder="$t('coreDownloadURLPlaceholder')"
+        :aria-label="$t('coreDownloadURLPlaceholder')"
         @change="saveURL"
       />
-      <div class="text-base-content/55 text-xs">{{ $t('coreDownloadURLTip') }}</div>
-
-      <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <div class="rounded-box bg-base-200/50 p-2">
-          <div class="text-base-content/55 text-xs">{{ $t('coreVersion') }}</div>
-          <div class="font-medium">{{ version || $t('unknown') }}</div>
-        </div>
-        <div class="rounded-box bg-base-200/50 p-2">
-          <div class="text-base-content/55 text-xs">{{ $t('coreChannel') }}</div>
-          <div class="font-medium">
-            {{ config.channel === 'test' ? $t('coreTestBuild') : $t('coreStableBuild') }}
-          </div>
-        </div>
-        <div class="rounded-box bg-base-200/50 p-2">
-          <div class="text-base-content/55 text-xs">{{ $t('coreInstallStatus') }}</div>
-          <div class="font-medium">
-            {{
-              config.installed
-                ? $t('coreInstalled')
-                : $t('coreNotInstalled')
-            }}
-          </div>
-        </div>
-        <div class="rounded-box bg-base-200/50 p-2">
-          <div class="text-base-content/55 text-xs">{{ $t('coreLatestVersion') }}</div>
-          <div class="font-medium">{{ config.latestVersion || $t('unknown') }}</div>
-        </div>
-      </div>
-
-      <div
-        v-if="config.latestVersion"
-        class="text-xs"
-        :class="config.updateAvailable ? 'text-warning' : 'text-success'"
-      >
-        {{ config.updateAvailable ? $t('coreUpdateAvailable') : $t('coreUpToDate') }}
-      </div>
-
-      <div
-        v-if="config.updatePending"
-        class="text-warning text-xs"
-      >
-        {{ $t('coreUpdatePending') }}
-      </div>
 
       <div class="flex flex-wrap gap-2">
         <button
