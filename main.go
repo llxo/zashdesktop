@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -39,26 +38,28 @@ func main() {
 	})
 	controller.app = app
 
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "main",
-		Title:            "sing-box-gui",
-		URL:              launchURL(launch),
-		Width:            1280,
-		Height:           820,
-		MinWidth:         960,
-		MinHeight:        620,
-		Hidden:           launch.StartHidden && !launch.NoTray,
-		BackgroundColour: application.NewRGBA(18, 18, 18, 255),
-	})
-	controller.window = window
-
 	if !launch.NoTray {
-		window.RegisterHook(events.Common.WindowClosing, controller.hideOnClose)
 		controller.setupTray()
+	}
+	if !launch.StartHidden || launch.NoTray {
+		controller.createWindow()
 	}
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "sing-box-gui:", err)
+	}
+}
+
+func (c LaunchConfig) windowOptions() application.WebviewWindowOptions {
+	return application.WebviewWindowOptions{
+		Name:             "main",
+		Title:            "sing-box-gui",
+		URL:              launchURL(c),
+		Width:            1280,
+		Height:           820,
+		MinWidth:         960,
+		MinHeight:        620,
+		BackgroundColour: application.NewRGBA(18, 18, 18, 255),
 	}
 }
 

@@ -26,4 +26,5 @@ sing-box-gui.exe --start-hidden
 sing-box-gui.exe --no-tray
 ```
 
-Closing the window hides it to the system tray. Use the tray menu to open it again or exit the process.
+With the tray enabled, closing the window destroys the WebView2 instance to reduce background memory
+usage. Use the tray menu to create the window again or exit the process.

@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 type App struct {
@@ -16,22 +17,47 @@ type App struct {
 }
 
 func (a *App) showWindow() {
-	if a.window == nil {
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
 		return
 	}
-	a.window.Show().Focus()
+	window := a.window
+	if window == nil {
+		window = a.createWindowLocked()
+	}
+	a.mu.Unlock()
+
+	window.Show().Focus()
 }
 
-func (a *App) hideOnClose(event *application.WindowEvent) {
+func (a *App) createWindow() {
 	a.mu.Lock()
-	quitting := a.quitting
-	a.mu.Unlock()
-	if quitting {
-		return
+	defer a.mu.Unlock()
+	if a.window == nil && !a.quitting {
+		a.createWindowLocked()
+	}
+}
+
+func (a *App) createWindowLocked() *application.WebviewWindow {
+	if a.window != nil {
+		return a.window
 	}
 
-	a.window.Hide()
-	event.Cancel()
+	window := a.app.Window.NewWithOptions(a.launch.windowOptions())
+	if !a.launch.NoTray {
+		window.RegisterHook(events.Common.WindowClosing, a.releaseWindow)
+	}
+	a.window = window
+	return window
+}
+
+func (a *App) releaseWindow(*application.WindowEvent) {
+	// Do not cancel the close event. Wails will destroy the window and release
+	// WebView2, including the page's workers, sockets, and graphics resources.
+	a.mu.Lock()
+	a.window = nil
+	a.mu.Unlock()
 }
 
 func (a *App) setupTray() {
@@ -50,7 +76,6 @@ func (a *App) setupTray() {
 	tray.SetIcon(trayIcon)
 	tray.SetTooltip("sing-box-gui")
 	tray.SetMenu(menu)
-	tray.AttachWindow(a.window).WindowOffset(5)
 }
 
 func (a *App) quit() {
