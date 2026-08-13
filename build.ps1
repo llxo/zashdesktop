@@ -33,9 +33,7 @@ function Invoke-NativeCommand {
 
 Push-Location $projectRoot
 try {
-    if (Test-Path -LiteralPath $binDir) {
-        Get-ChildItem -LiteralPath $binDir -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    } else {
+    if (-not (Test-Path -LiteralPath $binDir)) {
         New-Item -ItemType Directory -Path $binDir | Out-Null
     }
     Remove-Item -LiteralPath $sysoPath -Force -ErrorAction SilentlyContinue
@@ -55,7 +53,6 @@ try {
         Pop-Location
     }
 
-    go clean -cache -testcache
     Invoke-NativeCommand "wails3" @("generate", "syso", "-arch", "amd64", "-icon", $iconPath, "-manifest", $manifestPath, "-info", $infoPath, "-out", $sysoPath)
     Invoke-NativeCommand "go" @("build", "-a", "-tags", "production", "-trimpath", "-buildvcs=false", "-ldflags=-w -s -H windowsgui", "-o", $exePath, ".")
 } finally {

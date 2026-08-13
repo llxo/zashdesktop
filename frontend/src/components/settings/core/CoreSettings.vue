@@ -14,7 +14,7 @@
       <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div class="rounded-box bg-base-200/50 p-2">
           <div class="text-base-content/55 text-xs">{{ $t('coreVersion') }}</div>
-          <div class="font-medium">{{ config.version || $t('unknown') }}</div>
+          <div class="font-medium">{{ version || $t('unknown') }}</div>
         </div>
         <div class="rounded-box bg-base-200/50 p-2">
           <div class="text-base-content/55 text-xs">{{ $t('coreChannel') }}</div>
@@ -27,7 +27,7 @@
           <div class="font-medium">
             {{
               config.installed
-                ? config.installedVersion || $t('coreInstalled')
+                ? $t('coreInstalled')
                 : $t('coreNotInstalled')
             }}
           </div>
@@ -44,6 +44,13 @@
         :class="config.updateAvailable ? 'text-warning' : 'text-success'"
       >
         {{ config.updateAvailable ? '有更新可用' : '当前已是最新版本' }}
+      </div>
+
+      <div
+        v-if="config.updatePending"
+        class="text-warning text-xs"
+      >
+        新核心已下载，当前核心退出后会自动替换。
       </div>
 
       <div class="text-base-content/55 text-xs break-all">
@@ -68,7 +75,7 @@
         </button>
         <button
           class="btn btn-sm"
-          :disabled="isSaving || isChecking || isDownloading || !config.version"
+          :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
           @click="checkUpdate"
         >
           <span
@@ -83,7 +90,7 @@
         </button>
         <button
           class="btn btn-sm"
-          :disabled="isSaving || isChecking || isDownloading || !config.version"
+          :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
           @click="downloadCore"
         >
           <span
@@ -104,6 +111,7 @@
 <script setup lang="ts">
 import * as CoreService from '../../../../bindings/sing-box-gui/coreservice'
 import type { CoreConfig } from '../../../../bindings/sing-box-gui/models'
+import { version } from '@/assembly/version'
 import { showNotification } from '@/helper/notification'
 import { ArrowDownCircleIcon, ArrowDownTrayIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { onMounted, reactive, ref } from 'vue'
@@ -117,6 +125,8 @@ const config = reactive<CoreConfig>({
   installed: false,
   latestVersion: '',
   updateAvailable: false,
+  pendingVersion: '',
+  updatePending: false,
 })
 const urlInput = ref('')
 const isSaving = ref(false)
@@ -150,10 +160,10 @@ const saveURL = async () => {
 }
 
 const checkUpdate = async () => {
-  if (isChecking.value || !config.version) return
+  if (isChecking.value || !urlInput.value.trim()) return
   isChecking.value = true
   try {
-    applyConfig(await CoreService.CheckUpdate())
+    applyConfig(await CoreService.CheckUpdate(version.value || ''))
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
@@ -165,7 +175,7 @@ const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
   try {
-    applyConfig(await CoreService.DownloadCore())
+    applyConfig(await CoreService.DownloadCore(version.value || ''))
     showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })

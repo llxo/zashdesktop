@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -27,8 +28,9 @@ const (
 )
 
 var (
-	coreTagPattern     = regexp.MustCompile(`(?i)^v?(\d+\.\d+\.\d+(?:-[0-9a-z]+(?:[.-][0-9a-z]+)*)?)$`)
-	testChannelPattern = regexp.MustCompile(`(?i)(?:^|[-._])(alpha|beta|rc|dev|nightly|preview)(?:[-._]|\d|$)`)
+	coreTagPattern     = regexp.MustCompile(`(?i)^v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)$`)
+	coreOutputPattern  = regexp.MustCompile(`(?i)(^|[^0-9a-z])v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)([^0-9a-z]|$)`)
+	testChannelPattern = regexp.MustCompile(`(?i)(^|[-._])(alpha|beta|rc|dev|nightly|preview)([-._]|\d|$)`)
 )
 
 type CoreConfig struct {
@@ -40,6 +42,8 @@ type CoreConfig struct {
 	Installed        bool   `json:"installed"`
 	LatestVersion    string `json:"latestVersion"`
 	UpdateAvailable  bool   `json:"updateAvailable"`
+	PendingVersion   string `json:"pendingVersion"`
+	UpdatePending    bool   `json:"updatePending"`
 }
 
 type CoreService struct {
@@ -78,12 +82,18 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	existing, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
 	config, err := parseCoreURL(rawURL)
 	if err != nil {
 		return CoreConfig{}, err
 	}
 	config.CorePath = s.corePath()
-	config.InstalledVersion = ""
+	config.Version = existing.Version
+	config.Channel = existing.Channel
+	config.InstalledVersion = existing.InstalledVersion
 	config.Installed = fileExists(config.CorePath)
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
@@ -91,7 +101,7 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) DownloadCore() (CoreConfig, error) {
+func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,13 +109,17 @@ func (s *CoreService) DownloadCore() (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	if config.URLTemplate == "" || config.Version == "" {
+	s.applyCurrentVersion(&config, currentVersion)
+	if config.URLTemplate == "" {
 		return CoreConfig{}, errors.New("core download URL has not been configured")
 	}
 
-	targetVersion := config.Version
-	if config.UpdateAvailable && config.LatestVersion != "" {
-		targetVersion = config.LatestVersion
+	targetVersion := config.LatestVersion
+	if targetVersion == "" {
+		targetVersion, err = findLatestTagForConfig(config)
+		if err != nil {
+			return CoreConfig{}, err
+		}
 	}
 	downloadURL := strings.ReplaceAll(config.URLTemplate, "{version}", targetVersion)
 	parsedURL, err := url.Parse(downloadURL)
@@ -120,23 +134,42 @@ func (s *CoreService) DownloadCore() (CoreConfig, error) {
 	defer os.Remove(archivePath)
 
 	corePath := s.corePath()
-	if err := s.extractCore(archivePath, corePath); err != nil {
+	installed, err := s.extractCore(archivePath, corePath)
+	if err != nil {
 		return CoreConfig{}, err
 	}
 
 	config.CorePath = corePath
-	config.Version = targetVersion
-	config.InstalledVersion = targetVersion
-	config.Installed = true
-	config.LatestVersion = targetVersion
-	config.UpdateAvailable = false
+	if installed {
+		installedVersion, versionErr := readCoreVersion(corePath)
+		if versionErr != nil {
+			return CoreConfig{}, versionErr
+		}
+		config.Version = installedVersion
+		config.Channel = coreChannel(installedVersion)
+		config.InstalledVersion = installedVersion
+		config.Installed = true
+		config.LatestVersion = targetVersion
+		config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(targetVersion), mustParseCoreVersion(installedVersion)) > 0
+		config.PendingVersion = ""
+		config.UpdatePending = false
+	} else {
+		pendingVersion, versionErr := readCoreVersion(s.pendingCorePath())
+		if versionErr != nil {
+			return CoreConfig{}, versionErr
+		}
+		config.LatestVersion = targetVersion
+		config.PendingVersion = pendingVersion
+		config.UpdateAvailable = true
+		config.UpdatePending = true
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
 	return config, nil
 }
 
-func (s *CoreService) CheckUpdate() (CoreConfig, error) {
+func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -144,7 +177,8 @@ func (s *CoreService) CheckUpdate() (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	if config.URLTemplate == "" || config.Version == "" {
+	s.applyCurrentVersion(&config, currentVersion)
+	if config.URLTemplate == "" {
 		return CoreConfig{}, errors.New("core download URL has not been configured")
 	}
 
@@ -156,13 +190,12 @@ func (s *CoreService) CheckUpdate() (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	current, err := parseCoreVersionParts(config.Version)
-	if err != nil {
-		return CoreConfig{}, fmt.Errorf("current core version is invalid: %w", err)
-	}
-
 	config.LatestVersion = latest
-	config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(latest), current) > 0
+	if config.Version == "" {
+		config.UpdateAvailable = true
+	} else {
+		config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(latest), mustParseCoreVersion(config.Version)) > 0
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -183,6 +216,33 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	}
 	config.CorePath = s.corePath()
 	config.Installed = fileExists(config.CorePath)
+	// The running core is authoritative; persisted version fields are only legacy metadata.
+	config.Version = ""
+	config.InstalledVersion = ""
+	config.Channel = ""
+	s.applyCurrentVersion(&config, "")
+	if config.UpdatePending && config.PendingVersion != "" && fileExists(s.pendingCorePath()) {
+		installed, err := s.installPendingCore()
+		if err != nil {
+			return CoreConfig{}, err
+		}
+		if installed {
+			installedVersion, versionErr := readCoreVersion(s.corePath())
+			if versionErr != nil {
+				return CoreConfig{}, versionErr
+			}
+			config.Version = installedVersion
+			config.InstalledVersion = installedVersion
+			config.Channel = coreChannel(installedVersion)
+			config.UpdateAvailable = config.LatestVersion != "" && compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(installedVersion)) > 0
+			config.PendingVersion = ""
+			config.UpdatePending = false
+			config.Installed = true
+			if err := s.saveConfigLocked(config); err != nil {
+				return CoreConfig{}, err
+			}
+		}
+	}
 	return config, nil
 }
 
@@ -196,8 +256,14 @@ func (s *CoreService) saveConfigLocked(config CoreConfig) error {
 	return writeFileAtomically(s.configPath(), data, 0o600)
 }
 
+func newCoreHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = systemProxy
+	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
 func (s *CoreService) download(downloadURL string) (string, error) {
-	client := &http.Client{Timeout: 20 * time.Minute}
+	client := newCoreHTTPClient(20 * time.Minute)
 	response, err := client.Get(downloadURL)
 	if err != nil {
 		return "", fmt.Errorf("download core: %w", err)
@@ -240,10 +306,13 @@ func (s *CoreService) download(downloadURL string) (string, error) {
 	return path, nil
 }
 
-func (s *CoreService) extractCore(archivePath, targetPath string) error {
+func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return false, fmt.Errorf("create core directory: %w", err)
+	}
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return fmt.Errorf("open core archive: %w", err)
+		return false, fmt.Errorf("open core archive: %w", err)
 	}
 	defer archive.Close()
 
@@ -261,49 +330,73 @@ func (s *CoreService) extractCore(archivePath, targetPath string) error {
 		}
 	}
 	if selected == nil {
-		return errors.New("sing-box executable was not found in the core archive")
+		return false, errors.New("sing-box executable was not found in the core archive")
 	}
 
 	reader, err := selected.Open()
 	if err != nil {
-		return fmt.Errorf("read core executable: %w", err)
+		return false, fmt.Errorf("read core executable: %w", err)
 	}
 	defer reader.Close()
 
-	temporary, err := os.CreateTemp(s.executableDir, ".sing-box-*.exe")
+	temporary, err := os.CreateTemp(filepath.Dir(targetPath), ".sing-box-*.exe")
 	if err != nil {
-		return fmt.Errorf("create core file: %w", err)
+		return false, fmt.Errorf("create core file: %w", err)
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	written, err := io.Copy(temporary, io.LimitReader(reader, maxCoreBinary+1))
 	if err != nil {
 		temporary.Close()
-		return fmt.Errorf("extract core executable: %w", err)
+		return false, fmt.Errorf("extract core executable: %w", err)
 	}
 	if written == 0 || written > maxCoreBinary {
 		temporary.Close()
-		return errors.New("core executable is invalid or too large")
+		return false, errors.New("core executable is invalid or too large")
 	}
 	if err := temporary.Chmod(0o755); err != nil {
 		temporary.Close()
-		return err
+		return false, err
 	}
 	if err := temporary.Close(); err != nil {
-		return err
+		return false, err
 	}
 
+	installed, err := s.replaceCoreExecutable(temporaryPath, targetPath)
+	if err != nil {
+		return false, err
+	}
+	if installed {
+		return true, nil
+	}
+
+	pendingPath := s.pendingCorePath()
+	_ = os.Remove(pendingPath)
+	if err := os.Rename(temporaryPath, pendingPath); err != nil {
+		return false, fmt.Errorf("save pending core replacement: %w", err)
+	}
+	return false, nil
+}
+
+func (s *CoreService) installPendingCore() (bool, error) {
+	return s.replaceCoreExecutable(s.pendingCorePath(), s.corePath())
+}
+
+func (s *CoreService) replaceCoreExecutable(sourcePath, targetPath string) (bool, error) {
 	backupPath := targetPath + ".old"
 	_ = os.Remove(backupPath)
 	if err := os.Rename(targetPath, backupPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("prepare core replacement: %w", err)
+		if isFileLockedError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("prepare core replacement: %w", err)
 	}
-	if err := os.Rename(temporaryPath, targetPath); err != nil {
+	if err := os.Rename(sourcePath, targetPath); err != nil {
 		_ = os.Rename(backupPath, targetPath)
-		return fmt.Errorf("replace core executable: %w", err)
+		return false, fmt.Errorf("replace core executable: %w", err)
 	}
 	_ = os.Remove(backupPath)
-	return nil
+	return true, nil
 }
 
 func parseCoreURL(rawURL string) (CoreConfig, error) {
@@ -319,13 +412,15 @@ func parseCoreURL(rawURL string) (CoreConfig, error) {
 	}
 
 	tag := segments[4]
-	version, err := parseCoreVersion(tag)
-	if err != nil {
-		return CoreConfig{}, errors.New("无法从地址识别版本号")
+	channel := ""
+	if !strings.Contains(tag, "{version}") {
+		channel = coreChannel(tag)
+		parsedURL.Path = strings.ReplaceAll(parsedURL.Path, tag, "{version}")
+		tagVersion := strings.TrimPrefix(strings.TrimPrefix(tag, "v"), "V")
+		if tagVersion != tag {
+			parsedURL.Path = strings.ReplaceAll(parsedURL.Path, tagVersion, "{version}")
+		}
 	}
-
-	channel := coreChannel(version)
-	parsedURL.Path = strings.ReplaceAll(parsedURL.Path, version, "{version}")
 	parsedURL.RawPath = ""
 	templateURL := parsedURL.String()
 	templateURL = strings.ReplaceAll(templateURL, "%7Bversion%7D", "{version}")
@@ -333,7 +428,6 @@ func parseCoreURL(rawURL string) (CoreConfig, error) {
 
 	return CoreConfig{
 		URLTemplate: templateURL,
-		Version:     version,
 		Channel:     channel,
 	}, nil
 }
@@ -355,7 +449,7 @@ func parseCoreVersion(value string) (string, error) {
 		return "", err
 	}
 	match := coreTagPattern.FindStringSubmatch(value)
-	if len(match) != 2 {
+	if len(match) < 2 {
 		return "", fmt.Errorf("unsupported version %q", value)
 	}
 	return match[1], nil
@@ -388,7 +482,7 @@ type githubTag struct {
 }
 
 func findLatestTag(owner, repository, channel string) (string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newCoreHTTPClient(30 * time.Second)
 	var latest string
 	var latestVersion coreVersion
 	for page := 1; page <= 100; page++ {
@@ -419,7 +513,7 @@ func findLatestTag(owner, repository, channel string) (string, error) {
 
 		for _, tag := range tags {
 			version, err := parseCoreVersion(tag.Name)
-			if err != nil || coreChannel(version) != channel {
+			if err != nil || (channel != "" && coreChannel(version) != channel) {
 				continue
 			}
 			parsed, err := parseCoreVersionParts(version)
@@ -439,6 +533,14 @@ func findLatestTag(owner, repository, channel string) (string, error) {
 		return "", fmt.Errorf("no %s core tags found", channel)
 	}
 	return latest, nil
+}
+
+func findLatestTagForConfig(config CoreConfig) (string, error) {
+	owner, repository, err := githubRepository(config.URLTemplate)
+	if err != nil {
+		return "", err
+	}
+	return findLatestTag(owner, repository, config.Channel)
 }
 
 type coreVersion struct {
@@ -530,8 +632,64 @@ func (s *CoreService) configPath() string {
 	return filepath.Join(s.executableDir, "core.json")
 }
 
+func (s *CoreService) coreDir() string {
+	return filepath.Join(s.executableDir, "sing-box")
+}
+
 func (s *CoreService) corePath() string {
-	return filepath.Join(s.executableDir, coreExecutableName)
+	return filepath.Join(s.coreDir(), coreExecutableName)
+}
+
+func (s *CoreService) pendingCorePath() string {
+	return filepath.Join(s.coreDir(), ".sing-box.pending.exe")
+}
+
+func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
+	version := normalizeCoreVersion(supplied)
+	if version == "" && fileExists(s.corePath()) {
+		version, _ = readCoreVersion(s.corePath())
+	}
+	if version == "" {
+		return
+	}
+	config.Version = version
+	config.Channel = coreChannel(version)
+	if fileExists(s.corePath()) {
+		config.InstalledVersion = version
+		config.Installed = true
+	}
+}
+
+func normalizeCoreVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if version, err := parseCoreVersion(value); err == nil {
+		return version
+	}
+	match := coreOutputPattern.FindStringSubmatch(value)
+	if len(match) != 6 {
+		return ""
+	}
+	return match[2]
+}
+
+func readCoreVersion(path string) (string, error) {
+	if !fileExists(path) {
+		return "", errors.New("sing-box core is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("read sing-box core version: %w", err)
+	}
+	version := normalizeCoreVersion(string(output))
+	if version == "" {
+		return "", errors.New("unable to read sing-box core version")
+	}
+	return version, nil
 }
 
 func fileExists(path string) bool {

@@ -10,4 +10,6 @@ export interface CoreConfig {
     "installed": boolean;
     "latestVersion": string;
     "updateAvailable": boolean;
+    "pendingVersion": string;
+    "updatePending": boolean;
 }
