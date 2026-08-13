@@ -395,6 +395,5 @@ export const settingsMenuOrder = useStorage<SETTINGS_MENU_KEY[]>(
   'config/settings-menu-order',
   SETTINGS_CATEGORIES.map((category) => category.key),
 )
-
 // settings page two columns mode
 export const settingsPageTwoColumns = useStorage<boolean>('config/settings-page-two-columns', true)

@@ -2,7 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = $PSScriptRoot
 $binDir = Join-Path $projectRoot "build\bin"
-$exePath = Join-Path $binDir "sing-box-gui.exe"
+$artifactName = Get-Random -Minimum 100000 -Maximum 1000000
+$exePath = Join-Path $binDir "$artifactName.exe"
 $frontendDir = Join-Path $projectRoot "frontend"
 $viteCommand = Join-Path $frontendDir "node_modules\.bin\vite.cmd"
 $sysoPath = Join-Path $projectRoot "wails_windows_amd64.syso"
@@ -33,7 +34,7 @@ function Invoke-NativeCommand {
 Push-Location $projectRoot
 try {
     if (Test-Path -LiteralPath $binDir) {
-        Get-ChildItem -LiteralPath $binDir -Force | Remove-Item -Recurse -Force
+        Get-ChildItem -LiteralPath $binDir -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     } else {
         New-Item -ItemType Directory -Path $binDir | Out-Null
     }

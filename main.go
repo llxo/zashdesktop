@@ -42,6 +42,9 @@ func main() {
 				controller.showWindow()
 			},
 		},
+		Services: []application.Service{
+			application.NewService(&CoreService{}),
+		},
 	})
 	controller.app = app
 

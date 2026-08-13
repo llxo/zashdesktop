@@ -90,5 +90,12 @@ export default defineConfig(({ mode }) => {
         net: fileURLToPath(new URL('./src/helper/netShim.ts', import.meta.url)),
       },
     },
+    build: isDesktop
+      ? {
+          rollupOptions: {
+            external: ['/wails/runtime.js'],
+          },
+        }
+      : undefined,
   }
 })
