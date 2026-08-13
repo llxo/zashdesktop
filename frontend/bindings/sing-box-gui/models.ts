@@ -12,10 +12,6 @@ export interface CoreConfig {
     "installed": boolean;
     "latestVersion": string;
     "updateAvailable": boolean;
-    "backupVersion": string;
-    "backupAvailable": boolean;
-    "pendingVersion": string;
-    "updatePending": boolean;
     "runArgs": string;
     "configURL": string;
     "running": boolean;

@@ -590,7 +590,6 @@ const zh: LANG_MESSAGE = {
   coreLatestVersion: '最新版本',
   coreUpdateAvailable: '有更新可用',
   coreUpToDate: '当前已是最新版本',
-  coreUpdatePending: '新核心已下载，当前核心退出后会自动替换。',
   checkUpdate: '检查更新',
   updateCore: '更新核心',
   coreVersion: '版本',

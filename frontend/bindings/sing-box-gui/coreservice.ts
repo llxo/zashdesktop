@@ -29,10 +29,6 @@ export function RestartCore(rawArgs: string): $CancellablePromise<$models.CoreCo
     return $Call.ByID(2020121754, rawArgs);
 }
 
-export function RollbackCore(): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(4012742113);
-}
-
 export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore);
 }
