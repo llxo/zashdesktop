@@ -2,10 +2,12 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -16,7 +18,12 @@ var assets embed.FS
 
 func main() {
 	launch := parseLaunchConfig(os.Args[1:])
-	controller := &App{launch: launch}
+	windowState, windowStatePath := loadWindowState()
+	controller := &App{
+		launch:          launch,
+		windowState:     windowState,
+		windowStatePath: windowStatePath,
+	}
 
 	app := application.New(application.Options{
 		Name:        "sing-box-gui",
@@ -50,15 +57,96 @@ func main() {
 	}
 }
 
-func (c LaunchConfig) windowOptions() application.WebviewWindowOptions {
-	return application.WebviewWindowOptions{
+const (
+	defaultWindowWidth  = 1280
+	defaultWindowHeight = 820
+)
+
+func (c LaunchConfig) windowOptions(state windowState) application.WebviewWindowOptions {
+	options := application.WebviewWindowOptions{
 		Name:             "main",
 		Title:            "sing-box-gui",
 		URL:              launchURL(c),
-		Width:            1280,
-		Height:           820,
+		Width:            defaultWindowWidth,
+		Height:           defaultWindowHeight,
 		BackgroundColour: application.NewRGBA(18, 18, 18, 255),
 	}
+	if state.valid() {
+		options.Width = state.Width
+		options.Height = state.Height
+		options.InitialPosition = application.WindowXY
+		options.X = state.X
+		options.Y = state.Y
+	}
+	return options
+}
+
+type windowState struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+func (s windowState) valid() bool {
+	return s.Width >= 320 && s.Height >= 240 && s.Width <= 10000 && s.Height <= 10000
+}
+
+func loadWindowState() (windowState, string) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return windowState{}, ""
+	}
+
+	path := filepath.Join(configDir, "sing-box-gui", "window.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return windowState{}, path
+	}
+
+	var state windowState
+	if err := json.Unmarshal(data, &state); err != nil || !state.valid() {
+		return windowState{}, path
+	}
+
+	return state, path
+}
+
+func saveWindowState(path string, state windowState) error {
+	if path == "" || !state.valid() {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".window-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(temporaryPath, path)
 }
 
 type LaunchConfig struct {
