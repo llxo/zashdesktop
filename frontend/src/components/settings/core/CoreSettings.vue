@@ -211,7 +211,7 @@ import {
   PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
 const config = reactive<CoreConfig>({
   urlTemplate: '',
@@ -247,6 +247,8 @@ const isRestarting = ref(false)
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
+const isRefreshing = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const applyConfig = (next: CoreConfig) => {
   Object.assign(config, next)
@@ -321,10 +323,14 @@ const downloadConfig = async () => {
 }
 
 const loadConfig = async () => {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
   try {
     applyConfig(await CoreService.GetConfig())
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  } finally {
+    isRefreshing.value = false
   }
 }
 
@@ -380,5 +386,19 @@ const downloadCore = async () => {
   }
 }
 
-onMounted(loadConfig)
+onMounted(() => {
+  void loadConfig()
+  refreshTimer = setInterval(() => {
+    if (!isStarting.value && !isStopping.value && !isRestarting.value && !isDownloading.value) {
+      void loadConfig()
+    }
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = undefined
+  }
+})
 </script>
