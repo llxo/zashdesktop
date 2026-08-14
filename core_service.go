@@ -38,11 +38,19 @@ const (
 )
 
 var (
-	coreTagPattern         = regexp.MustCompile(`(?i)^v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)$`)
-	coreOutputPattern      = regexp.MustCompile(`(?i)(^|[^0-9a-z])v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)([^0-9a-z]|$)`)
-	coreBuildTagPattern    = regexp.MustCompile(`(?i)^v?((?:alpha|beta|rc|dev|nightly|preview)(?:[-._][0-9a-z]+)*)$`)
-	coreBuildOutputPattern = regexp.MustCompile(`(?i)(^|[^0-9a-z])v?((?:alpha|beta|rc|dev|nightly|preview)(?:[-._][0-9a-z]+)*)([^0-9a-z]|$)`)
-	testChannelPattern     = regexp.MustCompile(`(?i)(^|[-._])(alpha|beta|rc|dev|nightly|preview)([-._]|\d|$)`)
+	coreTagPattern           = regexp.MustCompile(`(?i)^v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)$`)
+	coreOutputPattern        = regexp.MustCompile(`(?i)(^|[^0-9a-z])v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)([^0-9a-z]|$)`)
+	coreBuildTagPattern      = regexp.MustCompile(`(?i)^v?((?:alpha|beta|rc|dev|nightly|preview)(?:[-._][0-9a-z]+)*)$`)
+	coreBuildOutputPattern   = regexp.MustCompile(`(?i)(^|[^0-9a-z])v?((?:alpha|beta|rc|dev|nightly|preview)(?:[-._][0-9a-z]+)*)([^0-9a-z]|$)`)
+	coreBuildAssetPattern    = regexp.MustCompile(`(?i)(^|-)((?:alpha|beta|rc|dev|nightly|preview)-[0-9a-z]{7})\.(?:zip|tar\.gz)$`)
+	mihomoTestVersionPattern = regexp.MustCompile(`(?i)^alpha-[0-9a-z]{7}$`)
+	testChannelPattern       = regexp.MustCompile(`(?i)(^|[-._])(alpha|beta|rc|dev|nightly|preview)([-._]|\d|$)`)
+)
+
+const (
+	mihomoPrereleaseTag     = "Prerelease-Alpha"
+	mihomoTestURLTemplate   = "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-{version}.zip"
+	mihomoStableURLTemplate = "https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-v{version}.zip"
 )
 
 type CoreConfig struct {
@@ -409,10 +417,17 @@ func (s *CoreService) downloadCoreArchiveLocked(currentVersion string) (CoreConf
 	if config.URLTemplate == "" {
 		return CoreConfig{}, "", "", errors.New("core download URL has not been configured")
 	}
+	config.URLTemplate = canonicalMihomoURLTemplate(config)
 
 	targetVersion := normalizeCoreVersion(config.LatestVersion)
+	if isMihomoTestPlaceholderVersion(config, targetVersion) {
+		targetVersion = ""
+	}
 	if targetVersion == "" {
 		targetVersion = normalizeCoreVersion(config.ConfiguredVersion)
+		if isMihomoTestPlaceholderVersion(config, targetVersion) {
+			targetVersion = ""
+		}
 	}
 	if targetVersion == "" {
 		targetVersion, err = findLatestReleaseForConfig(config)
@@ -1188,15 +1203,17 @@ func parseCoreURL(rawURL string) (CoreConfig, error) {
 	configuredVersion := ""
 	if !strings.Contains(tag, "{version}") {
 		configuredVersion = normalizeCoreVersion(tag)
-		if configuredVersion == "" && !strings.EqualFold(tag, "latest") {
+		if configuredVersion == "" && !strings.EqualFold(tag, "latest") && !isCoreStaticReleaseTag(tag) {
 			return CoreConfig{}, errors.New("无法从地址识别版本号")
 		}
-		channel = coreChannel(configuredVersion)
-		replacement := "{version}"
-		if strings.HasPrefix(tag, "v") || strings.HasPrefix(tag, "V") {
-			replacement = tag[:1] + "{version}"
+		channel = coreChannel(tag)
+		if !isCoreStaticReleaseTag(tag) {
+			replacement := "{version}"
+			if strings.HasPrefix(tag, "v") || strings.HasPrefix(tag, "V") {
+				replacement = tag[:1] + "{version}"
+			}
+			parsedURL.Path = strings.Replace(parsedURL.Path, tag, replacement, 1)
 		}
-		parsedURL.Path = strings.Replace(parsedURL.Path, tag, replacement, 1)
 	}
 	parsedURL.RawPath = ""
 	templateURL := parsedURL.String()
@@ -1243,6 +1260,10 @@ func coreChannel(version string) string {
 	return coreChannelStable
 }
 
+func isCoreStaticReleaseTag(tag string) bool {
+	return strings.EqualFold(strings.TrimSpace(tag), mihomoPrereleaseTag)
+}
+
 func normalizeCoreChannel(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case coreChannelStable:
@@ -1260,7 +1281,7 @@ func githubRepository(template string) (string, string, error) {
 		return "", "", errors.New("核心地址必须来自 github.com")
 	}
 	segments := pathSegments(parsedURL.Path)
-	if len(segments) < 5 || !strings.EqualFold(segments[2], "releases") || !strings.EqualFold(segments[3], "download") || !strings.Contains(segments[4], "{version}") {
+	if len(segments) < 5 || !strings.EqualFold(segments[2], "releases") || !strings.EqualFold(segments[3], "download") || (!strings.Contains(segments[4], "{version}") && !isCoreStaticReleaseTag(segments[4])) {
 		return "", "", errors.New("核心地址不是有效的 GitHub Release 通用地址")
 	}
 	if segments[0] == "" || segments[1] == "" {
@@ -1295,7 +1316,7 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 			return "", fmt.Errorf("parse GitHub releases: %w", err)
 		}
 		for _, release := range releases {
-			version := normalizeCoreVersion(release.TagName)
+			version := releaseVersion(release)
 			if version == "" || (!release.Prerelease && coreChannel(version) != coreChannelTest) {
 				continue
 			}
@@ -1314,6 +1335,47 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 	return version, nil
 }
 
+func releaseVersion(release githubRelease) string {
+	for _, asset := range release.Assets {
+		match := coreBuildAssetPattern.FindStringSubmatch(asset.Name)
+		if len(match) >= 3 {
+			return match[2]
+		}
+	}
+	version := normalizeCoreVersion(release.TagName)
+	if isGenericCoreBuildVersion(version) {
+		return ""
+	}
+	return version
+}
+
+func isGenericCoreBuildVersion(version string) bool {
+	switch strings.ToLower(strings.TrimSpace(version)) {
+	case "alpha", "beta", "rc", "dev", "nightly", "preview":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMihomoTestPlaceholderVersion(config CoreConfig, version string) bool {
+	return normalizedCoreType(config.CoreType) == coreTypeMihomo && config.Channel == coreChannelTest && !mihomoTestVersionPattern.MatchString(strings.TrimSpace(version))
+}
+
+func canonicalMihomoURLTemplate(config CoreConfig) string {
+	if normalizedCoreType(config.CoreType) != coreTypeMihomo {
+		return config.URLTemplate
+	}
+	owner, repository, err := githubRepository(config.URLTemplate)
+	if err != nil || !strings.EqualFold(owner, "MetaCubeX") || !strings.EqualFold(repository, "mihomo") {
+		return config.URLTemplate
+	}
+	if config.Channel == coreChannelTest {
+		return mihomoTestURLTemplate
+	}
+	return mihomoStableURLTemplate
+}
+
 func findLatestReleaseForConfig(config CoreConfig) (string, error) {
 	owner, repository, err := githubRepository(config.URLTemplate)
 	if err != nil {
@@ -1324,7 +1386,23 @@ func findLatestReleaseForConfig(config CoreConfig) (string, error) {
 
 func findReleaseAssetDigest(owner, repository, version, downloadURL string) (string, error) {
 	client := newCoreHTTPClient(30 * time.Second)
-	for _, tag := range []string{"v" + version, version} {
+	tags := make([]string, 0, 3)
+	if parsedURL, err := url.Parse(downloadURL); err == nil {
+		segments := pathSegments(parsedURL.Path)
+		if len(segments) >= 5 {
+			tags = append(tags, segments[4])
+		}
+	}
+	tags = append(tags, "v"+version, version)
+	seenTags := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		if _, exists := seenTags[tag]; exists {
+			continue
+		}
+		seenTags[tag] = struct{}{}
 		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), url.PathEscape(tag))
 		request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 		if err != nil {

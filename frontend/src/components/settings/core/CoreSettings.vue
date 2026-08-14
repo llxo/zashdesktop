@@ -300,7 +300,7 @@ type CoreChannel = 'stable' | 'test'
 type DownloadSource = {
   label: string
   url: string
-  channel?: CoreChannel
+  channelURLs?: Partial<Record<CoreChannel, string>>
 }
 
 const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
@@ -320,14 +320,11 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
   ],
   mihomo: [
     {
-      label: 'MetaCubeX/mihomo 稳定版',
+      label: 'MetaCubeX/mihomo',
       url: 'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-v{version}.zip',
-      channel: 'stable',
-    },
-    {
-      label: 'MetaCubeX/mihomo 测试版',
-      url: 'https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-windows-amd64-{version}.zip',
-      channel: 'test',
+      channelURLs: {
+        test: 'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-{version}.zip',
+      },
     },
   ],
 }
@@ -399,6 +396,8 @@ const sourceOptions = computed(() => [
   ...builtInDownloadSources[coreType.value],
   ...customDownloadSources.value,
 ])
+const sourceURL = (source: DownloadSource, channel = currentChannel.value) =>
+  source.channelURLs?.[channel] ?? source.url
 
 const sourceLabel = (rawURL: string) => {
   try {
@@ -414,7 +413,12 @@ const loadDownloadSources = () => {
   try {
     const stored = JSON.parse(localStorage.getItem(sourceStorageKey.value) || '[]')
     if (!Array.isArray(stored)) return
-    const builtInURLs = new Set(builtInDownloadSources[coreType.value].map((source) => source.url))
+    const builtInURLs = new Set(
+      builtInDownloadSources[coreType.value].flatMap((source) => [
+        source.url,
+        ...Object.values(source.channelURLs ?? {}),
+      ]),
+    )
     customDownloadSources.value = stored
       .filter((url): url is string => typeof url === 'string' && url.trim() !== '')
       .map((url) => url.trim())
@@ -456,7 +460,9 @@ const applyConfig = (next: CoreConfig) => {
   }
   configURLInput.value = next.configURL
   if (!urlDirty.value || nextCoreType !== props.coreType) {
-    selectedSourceURL.value = sourceOptions.value.some((source) => source.url === next.urlTemplate)
+    selectedSourceURL.value = sourceOptions.value.some(
+      (source) => sourceURL(source) === next.urlTemplate,
+    )
       ? next.urlTemplate
       : ''
   }
@@ -475,13 +481,15 @@ const saveChannel = async (rawChannel: string) => {
   try {
     let next = await CoreService.SaveChannel(rawChannel)
     const selectedBuiltInSource = builtInDownloadSources[coreType.value].some(
-      (source) => source.url === next.urlTemplate,
+      (source) =>
+        source.url === next.urlTemplate ||
+        Object.values(source.channelURLs ?? {}).includes(next.urlTemplate),
     )
     const channelSource = builtInDownloadSources[coreType.value].find(
-      (source) => source.channel === rawChannel,
+      (source) => sourceURL(source, rawChannel) !== '',
     )
     if (coreType.value === 'mihomo' && channelSource && (selectedBuiltInSource || !next.urlTemplate)) {
-      next = await CoreService.SaveURL(channelSource.url)
+      next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel))
     }
     applyConfig(next)
   } catch (error) {
