@@ -612,6 +612,8 @@ const loadConfig = async (useActiveCore = false) => {
 
 const saveBehavior = async () => {
   if (isSavingBehavior.value) return
+  // Do not let an in-flight refresh restore the values from before this save.
+  refreshRequest += 1
   isSavingBehavior.value = true
   try {
     applyConfig(
@@ -684,7 +686,8 @@ onMounted(() => {
       !isStarting.value &&
       !isStopping.value &&
       !isRestarting.value &&
-      !isDownloading.value
+      !isDownloading.value &&
+      !isSavingBehavior.value
     ) {
       void loadConfig()
     }
