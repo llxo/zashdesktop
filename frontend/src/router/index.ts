@@ -81,6 +81,11 @@ const router = createRouter({
       component: SetupPage,
     },
     {
+      path: '/core-entry',
+      name: ROUTE_NAME.coreEntry,
+      component: CorePage,
+    },
+    {
       path: '/:catchAll(.*)',
       redirect: ROUTE_NAME.proxies,
     },
@@ -110,7 +115,11 @@ router.beforeEach((to, from) => {
     to.meta.transition = toIndex < fromIndex ? 'slide-right' : 'slide-left'
   }
 
-  if (!activeBackend.value && to.name !== ROUTE_NAME.setup) {
+  if (
+    !activeBackend.value &&
+    to.name !== ROUTE_NAME.setup &&
+    to.name !== ROUTE_NAME.coreEntry
+  ) {
     router.push({ name: ROUTE_NAME.setup })
     return
   }

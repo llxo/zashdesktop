@@ -2,6 +2,14 @@
   <div class="relative flex h-full min-h-0 flex-col">
     <CtrlsBar>
       <div class="flex items-center gap-2 p-2">
+        <button
+          v-if="!activeBackend"
+          class="btn btn-ghost btn-sm"
+          @click="router.push({ name: ROUTE_NAME.setup })"
+        >
+          <ArrowLeftIcon class="h-4 w-4" />
+          {{ $t('setup') }}
+        </button>
         <SegmentedControl
           :model-value="coreType"
           :options="coreTypeOptions"
@@ -31,6 +39,10 @@ import SegmentedControl, { type SegmentOption } from '@/components/common/Segmen
 import CoreSettings from '@/components/settings/core/CoreSettings.vue'
 import { usePaddingForViews } from '@/composables/paddingViews'
 import { showNotification } from '@/helper/notification'
+import { ROUTE_NAME } from '@/constant'
+import router from '@/router'
+import { activeBackend } from '@/store/setup'
+import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { ref } from 'vue'
 
 type CoreType = 'singbox' | 'mihomo'

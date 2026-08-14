@@ -106,6 +106,14 @@
         {{ $t('submit') }}
       </button>
 
+      <button
+        class="btn btn-sm w-full"
+        @click="router.push({ name: ROUTE_NAME.coreEntry })"
+      >
+        <CpuChipIcon class="h-4 w-4" />
+        {{ $t('coreSettings') }}
+      </button>
+
       <template v-if="backendList.length">
         <div class="text-base-content/50 mt-2 text-xs">{{ $t('backend') }}</div>
         <Draggable
@@ -177,6 +185,7 @@ import { activeUuid, addBackend, backendList, removeBackend } from '@/store/setu
 import type { Backend, BackendType } from '@/types'
 import {
   ChevronUpDownIcon,
+  CpuChipIcon,
   PencilIcon,
   QuestionMarkCircleIcon,
   TrashIcon,

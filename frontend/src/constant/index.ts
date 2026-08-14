@@ -164,6 +164,7 @@ export enum ROUTE_NAME {
   rules = 'rules',
   tools = 'tools',
   core = 'coreSettings',
+  coreEntry = 'coreEntry',
   settings = 'settings',
   setup = 'setup',
 }

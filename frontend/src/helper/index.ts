@@ -129,7 +129,7 @@ export const renderRoutes = computed(() => {
     [ROUTE_NAME.tools]: can('tools'),
   }
   return Object.values(ROUTE_NAME).filter((r) => {
-    if (r === ROUTE_NAME.setup) return false
+    if (r === ROUTE_NAME.setup || r === ROUTE_NAME.coreEntry) return false
     if (!splitOverviewPage.value && r === ROUTE_NAME.overview) return false
     if (r in routeCapable && routeCapable[r] === false) return false
     return true
