@@ -28,10 +28,14 @@ import (
 
 const (
 	coreExecutableBaseName = "sing-box"
+	mihomoExecutableName   = "mihomo"
+	coreTypeSingbox        = "singbox"
+	coreTypeMihomo         = "mihomo"
 	maxCoreDownload        = 200 << 20
 	maxCoreBinary          = 100 << 20
 	maxCoreConfig          = 20 << 20
 	defaultCoreRunArgs     = "run -c config.json -D ."
+	defaultMihomoRunArgs   = "-d ."
 )
 
 var (
@@ -41,6 +45,7 @@ var (
 )
 
 type CoreConfig struct {
+	CoreType          string `json:"coreType"`
 	URLTemplate       string `json:"urlTemplate"`
 	ConfiguredVersion string `json:"configuredVersion"`
 	Version           string `json:"version"`
@@ -143,6 +148,7 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	config.InstalledVersion = existing.InstalledVersion
 	config.Installed = existing.Installed
 	config.RunArgs = existing.RunArgs
+	config.CoreType = existing.CoreType
 	config.ConfigURL = existing.ConfigURL
 	config.RunAsAdmin = existing.RunAsAdmin
 	config.AutoStart = existing.AutoStart
@@ -190,10 +196,10 @@ func (s *CoreService) DownloadConfig(rawURL string) (CoreConfig, error) {
 	if len(data) > maxCoreConfig {
 		return CoreConfig{}, errors.New("sing-box config is too large")
 	}
-	if err := os.MkdirAll(s.coreDir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	if err := writeFileAtomically(s.singboxConfigPath(), data, 0o600); err != nil {
+	if err := writeFileAtomically(s.configFilePath(config.CoreType), data, 0o600); err != nil {
 		return CoreConfig{}, fmt.Errorf("write sing-box config: %w", err)
 	}
 
@@ -233,7 +239,7 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	s.mu.Unlock()
 
 	if wasRunning {
-		restarted, restartErr := s.startCore(runArgs)
+		restarted, restartErr := s.startCore(runArgs, config.CoreType)
 		if restartErr != nil {
 			if err != nil {
 				return CoreConfig{}, fmt.Errorf("%v; restart sing-box core: %w", err, restartErr)
@@ -289,7 +295,7 @@ func (s *CoreService) downloadCoreArchiveLocked(currentVersion string) (CoreConf
 }
 
 func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, targetVersion string) (CoreConfig, error) {
-	corePath := s.corePath()
+	corePath := s.corePathFor(config.CoreType)
 	installed, err := s.extractCore(archivePath, corePath)
 	if err != nil {
 		return CoreConfig{}, err
@@ -299,7 +305,7 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 	}
 
 	config.CorePath = corePath
-	installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath)
+	installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath, config.CoreType)
 	if versionErr != nil {
 		return CoreConfig{}, versionErr
 	}
@@ -360,7 +366,7 @@ func (s *CoreService) CheckUpdate(currentVersion string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveRunArgs(rawArgs string) (CoreConfig, error) {
+func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -368,7 +374,41 @@ func (s *CoreService) SaveRunArgs(rawArgs string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.CoreType = coreType
 	config.RunArgs = strings.TrimSpace(rawArgs)
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.process != nil {
+		return CoreConfig{}, errors.New("请先停止当前核心再切换核心类型")
+	}
+
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	if config.CoreType != coreType && (strings.TrimSpace(config.RunArgs) == "" || isDefaultCoreRunArgs(config.RunArgs)) {
+		config.RunArgs = defaultRunArgs(coreType)
+	}
+	config.CoreType = coreType
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -404,13 +444,13 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore bool) (C
 	return config, nil
 }
 
-func (s *CoreService) StartCore(rawArgs string) (CoreConfig, error) {
+func (s *CoreService) StartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
-	return s.startCore(rawArgs)
+	return s.startCore(rawArgs, rawCoreType)
 }
 
-func (s *CoreService) startCore(rawArgs string) (CoreConfig, error) {
+func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -422,7 +462,12 @@ func (s *CoreService) startCore(rawArgs string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	if !fileExists(s.corePath()) {
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.CoreType = coreType
+	if !fileExists(s.corePathFor(config.CoreType)) {
 		return CoreConfig{}, errors.New("sing-box core is not installed")
 	}
 
@@ -431,7 +476,7 @@ func (s *CoreService) startCore(rawArgs string) (CoreConfig, error) {
 		runArgs = strings.TrimSpace(config.RunArgs)
 	}
 	if runArgs == "" {
-		runArgs = defaultCoreRunArgs
+		runArgs = defaultRunArgs(coreType)
 	}
 	args, err := parseCoreCommandLine(runArgs)
 	if err != nil {
@@ -441,16 +486,16 @@ func (s *CoreService) startCore(rawArgs string) (CoreConfig, error) {
 		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
 	}
 
-	if err := os.MkdirAll(s.coreDir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	logFile, err := os.OpenFile(s.coreLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := os.OpenFile(s.logFilePath(config.CoreType), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return CoreConfig{}, fmt.Errorf("open core log: %w", err)
 	}
 
-	command := exec.Command(s.corePath(), args...)
-	command.Dir = s.coreDir()
+	command := exec.Command(s.corePathFor(config.CoreType), args...)
+	command.Dir = s.coreDirFor(config.CoreType)
 	command.Stdout = logFile
 	command.Stderr = logFile
 	configureCoreCommand(command)
@@ -497,13 +542,13 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) RestartCore(rawArgs string) (CoreConfig, error) {
+func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	if err := s.stopCoreProcess(); err != nil {
 		return CoreConfig{}, err
 	}
-	return s.startCore(rawArgs)
+	return s.startCore(rawArgs, rawCoreType)
 }
 
 func (s *CoreService) stopCoreProcess() error {
@@ -554,13 +599,14 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 }
 
 func (s *CoreService) applyRuntimeState(config *CoreConfig) {
+	config.CoreType = normalizedCoreType(config.CoreType)
 	config.Running = s.process != nil
 	config.PID = 0
-	config.LogPath = s.coreLogPath()
-	config.ConfigPath = s.singboxConfigPath()
+	config.LogPath = s.logFilePath(config.CoreType)
+	config.ConfigPath = s.configFilePath(config.CoreType)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	if config.RunArgs == "" {
-		config.RunArgs = defaultCoreRunArgs
+		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
 	if config.Running {
 		config.PID = s.process.Process.Pid
@@ -582,19 +628,19 @@ func (s *CoreService) applySystemBehavior(config *CoreConfig) {
 func (s *CoreService) startCoreOnStartup() {
 	s.mu.Lock()
 	config, err := s.loadConfigLocked()
-	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePath()) && fileExists(s.singboxConfigPath())
+	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config.CoreType))
 	runArgs := config.RunArgs
 	s.mu.Unlock()
 	if !shouldStart {
 		return
 	}
-	if _, err := s.StartCore(runArgs); err != nil {
+	if _, err := s.startCore(runArgs, config.CoreType); err != nil {
 		fmt.Printf("sing-box-gui: start core on startup: %v\n", err)
 	}
 }
 
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
-	config := CoreConfig{CorePath: s.corePath()}
+	config := CoreConfig{CoreType: coreTypeSingbox}
 	data, err := os.ReadFile(s.configPath())
 	if errors.Is(err, os.ErrNotExist) {
 		s.applyCurrentVersion(&config, "")
@@ -608,14 +654,16 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 		return CoreConfig{}, fmt.Errorf("parse core config: %w", err)
 	}
 	s.applySystemBehavior(&config)
-	config.CorePath = s.corePath()
+	config.CoreType = normalizedCoreType(config.CoreType)
+	config.CorePath = s.corePathFor(config.CoreType)
 	config.Installed = fileExists(config.CorePath)
 	s.applyCurrentVersion(&config, "")
 	return config, nil
 }
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {
-	config.CorePath = s.corePath()
+	config.CoreType = normalizedCoreType(config.CoreType)
+	config.CorePath = s.corePathFor(config.CoreType)
 	config.Running = false
 	config.PID = 0
 	config.LogPath = ""
@@ -802,14 +850,56 @@ func (s *CoreService) installExtractedCore(reader io.Reader, targetPath string) 
 }
 
 func isCoreArchiveName(name string) bool {
-	return strings.EqualFold(name, coreExecutableName()) || strings.EqualFold(name, coreExecutableBaseName)
+	return strings.EqualFold(name, coreExecutableName()) ||
+		strings.EqualFold(name, coreExecutableBaseName) ||
+		strings.EqualFold(name, mihomoExecutableName) ||
+		(runtime.GOOS == "windows" && strings.EqualFold(name, mihomoExecutableName+".exe"))
 }
 
 func coreExecutableName() string {
-	if runtime.GOOS == "windows" {
-		return coreExecutableBaseName + ".exe"
+	return coreExecutableNameFor(coreTypeSingbox)
+}
+
+func coreExecutableNameFor(coreType string) string {
+	baseName := coreExecutableBaseName
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		baseName = mihomoExecutableName
 	}
-	return coreExecutableBaseName
+	if runtime.GOOS == "windows" {
+		return baseName + ".exe"
+	}
+	return baseName
+}
+
+func normalizeCoreType(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", coreTypeSingbox:
+		return coreTypeSingbox, nil
+	case coreTypeMihomo:
+		return coreTypeMihomo, nil
+	default:
+		return "", fmt.Errorf("unsupported core type %q", raw)
+	}
+}
+
+func normalizedCoreType(raw string) string {
+	coreType, err := normalizeCoreType(raw)
+	if err != nil {
+		return coreTypeSingbox
+	}
+	return coreType
+}
+
+func defaultRunArgs(coreType string) string {
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		return defaultMihomoRunArgs
+	}
+	return defaultCoreRunArgs
+}
+
+func isDefaultCoreRunArgs(raw string) bool {
+	runArgs := strings.TrimSpace(raw)
+	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs
 }
 
 func (s *CoreService) replaceCoreExecutable(sourcePath, targetPath string) (bool, error) {
@@ -1101,33 +1191,38 @@ func (s *CoreService) configPath() string {
 	return filepath.Join(s.executableDir, "profiles.json")
 }
 
-func (s *CoreService) coreDir() string {
-	return filepath.Join(s.executableDir, "sing-box")
+func (s *CoreService) coreDirFor(coreType string) string {
+	directory := "sing-box"
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		directory = "mihomo"
+	}
+	return filepath.Join(s.executableDir, directory)
 }
 
-func (s *CoreService) corePath() string {
-	return filepath.Join(s.coreDir(), coreExecutableName())
+func (s *CoreService) corePathFor(coreType string) string {
+	return filepath.Join(s.coreDirFor(coreType), coreExecutableNameFor(coreType))
 }
 
-func (s *CoreService) coreLogPath() string {
-	return filepath.Join(s.coreDir(), "sing-box.log")
+func (s *CoreService) logFilePath(coreType string) string {
+	return filepath.Join(s.coreDirFor(coreType), "core.log")
 }
 
-func (s *CoreService) singboxConfigPath() string {
-	return filepath.Join(s.coreDir(), "config.json")
+func (s *CoreService) configFilePath(coreType string) string {
+	return filepath.Join(s.coreDirFor(coreType), "config.json")
 }
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	version := normalizeCoreVersion(supplied)
-	if version == "" && fileExists(s.corePath()) {
-		version, _, _ = readCoreVersionDetail(s.corePath())
+	corePath := s.corePathFor(config.CoreType)
+	if version == "" && fileExists(corePath) {
+		version, _, _ = readCoreVersionDetail(corePath, config.CoreType)
 	}
 	if version == "" {
 		return
 	}
 	config.Version = version
 	config.Channel = coreChannel(version)
-	if fileExists(s.corePath()) {
+	if fileExists(corePath) {
 		config.InstalledVersion = version
 		config.Installed = true
 	}
@@ -1207,17 +1302,21 @@ func parseCoreCommandLine(input string) ([]string, error) {
 }
 
 func readCoreVersion(path string) (string, error) {
-	version, _, err := readCoreVersionDetail(path)
+	version, _, err := readCoreVersionDetail(path, coreTypeSingbox)
 	return version, err
 }
 
-func readCoreVersionDetail(corePath string) (string, string, error) {
+func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
 	if !fileExists(corePath) {
 		return "", "", errors.New("sing-box core is not installed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, corePath, "version")
+	versionArgs := []string{"version"}
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		versionArgs = []string{"-v"}
+	}
+	command := exec.CommandContext(ctx, corePath, versionArgs...)
 	configureCoreCommand(command)
 	output, err := command.CombinedOutput()
 	if err != nil {

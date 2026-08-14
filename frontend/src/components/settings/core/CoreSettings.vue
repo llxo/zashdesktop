@@ -1,5 +1,13 @@
 <template>
   <div class="flex flex-col gap-3 text-sm">
+    <div class="flex p-2">
+      <SegmentedControl
+        :model-value="coreType"
+        :options="coreTypeOptions"
+        @update:model-value="changeCoreType"
+      />
+    </div>
+
     <section>
       <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
         {{ $t('coreRun') }}
@@ -19,7 +27,7 @@
             v-model="runArgsInput"
             class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
             :aria-label="$t('coreRunArgs')"
-            :placeholder="$t('coreRunArgsPlaceholder')"
+            :placeholder="defaultRunArgsPlaceholder"
             :disabled="config.running || isStarting || isStopping || isRestarting"
           ></textarea>
 
@@ -227,6 +235,7 @@
 import * as CoreService from '../../../../bindings/sing-box-gui/coreservice'
 import type { CoreConfig } from '../../../../bindings/sing-box-gui/models'
 import { version } from '@/assembly/version'
+import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import {
   ArrowDownCircleIcon,
@@ -236,9 +245,17 @@ import {
   PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+
+type CoreType = 'singbox' | 'mihomo'
+
+const coreTypeOptions: SegmentOption[] = [
+  { value: 'singbox', label: 'sing-box' },
+  { value: 'mihomo', label: 'mihomo' },
+]
 
 const config = reactive<CoreConfig>({
+  coreType: 'singbox',
   urlTemplate: '',
   configuredVersion: '',
   version: '',
@@ -260,6 +277,10 @@ const config = reactive<CoreConfig>({
   autoStart: false,
   autoStartCore: false,
 })
+const coreType = ref<CoreType>('singbox')
+const defaultRunArgsPlaceholder = computed(() =>
+  coreType.value === 'mihomo' ? '-d .' : 'run -c config.json -D .',
+)
 const urlInput = ref('')
 const runArgsInput = ref('')
 const configURLInput = ref('')
@@ -277,16 +298,26 @@ let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const applyConfig = (next: CoreConfig) => {
   Object.assign(config, next)
+  coreType.value = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
   urlInput.value = next.urlTemplate
   runArgsInput.value = next.runArgs
   configURLInput.value = next.configURL
+}
+
+const changeCoreType = async (nextType: string) => {
+  if (nextType === coreType.value) return
+  try {
+    applyConfig(await CoreService.SaveCoreType(nextType))
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  }
 }
 
 const saveRunArgs = async () => {
   if (isSavingRunArgs.value || config.running) return
   isSavingRunArgs.value = true
   try {
-    applyConfig(await CoreService.SaveRunArgs(runArgsInput.value))
+    applyConfig(await CoreService.SaveRunArgs(runArgsInput.value, coreType.value))
     showNotification({ content: 'coreRunArgsSaved', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -299,7 +330,7 @@ const startCore = async () => {
   if (isStarting.value || config.running) return
   isStarting.value = true
   try {
-    applyConfig(await CoreService.StartCore(runArgsInput.value))
+    applyConfig(await CoreService.StartCore(runArgsInput.value, coreType.value))
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -325,7 +356,7 @@ const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
   try {
-    applyConfig(await CoreService.RestartCore(runArgsInput.value))
+    applyConfig(await CoreService.RestartCore(runArgsInput.value, coreType.value))
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
