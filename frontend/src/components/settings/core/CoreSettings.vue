@@ -391,6 +391,7 @@ const isRefreshing = ref(false)
 const urlDirty = ref(false)
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 let refreshTimer: ReturnType<typeof setInterval> | undefined
+let refreshRequest = 0
 const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
 const sourceOptions = computed(() => [
   ...builtInDownloadSources[coreType.value],
@@ -589,17 +590,23 @@ const downloadConfig = async () => {
 }
 
 const loadConfig = async (useActiveCore = false) => {
-  if (isRefreshing.value) return
+  const request = ++refreshRequest
+  const requestedCoreType = coreType.value
   isRefreshing.value = true
   try {
     const next = useActiveCore
       ? await CoreService.GetConfig()
-      : await CoreService.GetConfigForType(coreType.value)
+      : await CoreService.GetConfigForType(requestedCoreType)
+    if (request !== refreshRequest) return
     applyConfig(next)
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (request === refreshRequest) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
-    isRefreshing.value = false
+    if (request === refreshRequest) {
+      isRefreshing.value = false
+    }
   }
 }
 
@@ -695,6 +702,7 @@ watch(
 )
 
 onUnmounted(() => {
+  refreshRequest += 1
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = undefined

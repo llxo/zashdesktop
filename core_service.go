@@ -89,6 +89,10 @@ type CoreService struct {
 	applicationPath  string
 	operationMu      sync.Mutex
 	mu               sync.Mutex
+	configGeneration uint64
+	startupCancel    context.CancelFunc
+	startupDone      chan struct{}
+	shuttingDown     bool
 	process          *exec.Cmd
 	processDone      chan struct{}
 	processCoreType  string
@@ -164,16 +168,24 @@ func configureCoreDebugLog(path string, enabled bool) error {
 	return nil
 }
 
-func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions) error {
+func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate executable: %w", err)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.executableDir = filepath.Dir(executable)
 	s.applicationPath = executable
+	startupContext, cancelStartup := context.WithCancel(ctx)
+	startupDone := make(chan struct{})
 	s.mu.Lock()
-	startupConfig, configErr := s.loadConfigLocked()
+	s.startupCancel = cancelStartup
+	s.startupDone = startupDone
+	s.shuttingDown = false
 	s.mu.Unlock()
+	startupConfig, configErr := s.loadConfigLocked()
 	if configErr == nil {
 		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
 			log.Printf("sing-box-gui: configure backend debug log: %v", debugErr)
@@ -181,15 +193,33 @@ func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions
 	}
 	coreDebugf("service startup: executable=%q directory=%q", s.applicationPath, s.executableDir)
 	go func() {
+		defer close(startupDone)
 		s.operationMu.Lock()
 		defer s.operationMu.Unlock()
-		s.startCoreOnStartup()
+		s.startCoreOnStartup(startupContext)
 	}()
 	return nil
 }
 
 func (s *CoreService) ServiceShutdown() error {
 	coreDebugf("service shutdown")
+	s.mu.Lock()
+	s.shuttingDown = true
+	cancelStartup := s.startupCancel
+	startupDone := s.startupDone
+	s.mu.Unlock()
+	if cancelStartup != nil {
+		cancelStartup()
+	}
+	if startupDone != nil {
+		<-startupDone
+	}
+	s.mu.Lock()
+	if s.startupDone == startupDone {
+		s.startupCancel = nil
+		s.startupDone = nil
+	}
+	s.mu.Unlock()
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	err := s.stopManagedCoreProcess()
@@ -205,21 +235,17 @@ func (s *CoreService) ServiceName() string {
 }
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	config, err := s.loadConfigLocked()
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.applySystemBehavior(&config)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
 	return config, nil
 }
 
 func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -228,19 +254,18 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
 	return config, nil
 }
 
 func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	existing, err := s.loadConfigForTypeLocked(coreType)
+	existing, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -267,6 +292,11 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	config.AutoStart = existing.AutoStart
 	config.AutoStartCore = existing.AutoStartCore
 	config.BackendDebugLog = existing.BackendDebugLog
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -275,9 +305,6 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 }
 
 func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	channel, err := normalizeCoreChannel(rawChannel)
 	if err != nil {
 		return CoreConfig{}, err
@@ -286,13 +313,18 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
 	config.Channel = channel
 	config.LatestVersion = ""
 	config.UpdateAvailable = false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -321,14 +353,11 @@ func (s *CoreService) ValidateURL(rawURL string) (string, error) {
 }
 
 func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -360,6 +389,12 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 	if len(data) > maxCoreConfig {
 		return CoreConfig{}, errors.New("sing-box config is too large")
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	}
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
@@ -376,17 +411,18 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 }
 
 func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConfig, error) {
-	s.operationMu.Lock()
-	defer s.operationMu.Unlock()
 	coreDebugf("download request: currentVersion=%q", currentVersion)
 
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.mu.Lock()
-	config, archivePath, targetVersion, err := s.downloadCoreArchiveLocked(currentVersion, coreType)
-	s.mu.Unlock()
+	config, generation, err := s.loadConfigSnapshot(coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	var archivePath, targetVersion string
+	config, archivePath, targetVersion, err = s.downloadCoreArchive(currentVersion, config)
 	if err != nil {
 		coreDebugf("download request failed during archive download: err=%v", err)
 		return CoreConfig{}, err
@@ -394,7 +430,17 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	defer os.Remove(archivePath)
 	coreDebugf("archive downloaded: type=%s version=%s path=%q", config.CoreType, targetVersion, archivePath)
 
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
 	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return CoreConfig{}, errors.New("core service is shutting down")
+	}
+	if s.configGeneration != generation {
+		s.mu.Unlock()
+		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	}
 	s.detectExternalProcessLocked(config.CoreType)
 	runningCoreType := ""
 	if s.process != nil {
@@ -418,15 +464,28 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	}
 
 	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return CoreConfig{}, errors.New("core service is shutting down")
+	}
+	if s.configGeneration != generation {
+		s.mu.Unlock()
+		if wasRunning {
+			if _, restartErr := s.startCore("", coreType); restartErr != nil {
+				return CoreConfig{}, fmt.Errorf("core configuration changed while downloading; restart core: %w", restartErr)
+			}
+		}
+		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	}
 	config, err = s.installCoreArchiveLocked(config, archivePath, targetVersion)
 	s.mu.Unlock()
 	if err != nil {
-		coreDebugf("install downloaded core failed: type=%s version=%s err=%v", config.CoreType, targetVersion, err)
+		coreDebugf("install downloaded core failed: type=%s version=%s err=%v", coreType, targetVersion, err)
 	}
 
 	if wasRunning {
-		coreDebugf("restarting core after replacement: type=%s", config.CoreType)
-		restarted, restartErr := s.startCore(runArgs, config.CoreType)
+		coreDebugf("restarting core after replacement: type=%s", coreType)
+		restarted, restartErr := s.startCore(runArgs, coreType)
 		if restartErr != nil {
 			coreDebugf("restart core after replacement failed: err=%v", restartErr)
 			if err != nil {
@@ -441,11 +500,8 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	return config, err
 }
 
-func (s *CoreService) downloadCoreArchiveLocked(currentVersion, coreType string) (CoreConfig, string, string, error) {
-	config, err := s.loadConfigForTypeLocked(coreType)
-	if err != nil {
-		return CoreConfig{}, "", "", err
-	}
+func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConfig) (CoreConfig, string, string, error) {
+	var err error
 	s.applyCurrentVersion(&config, currentVersion)
 	if config.URLTemplate == "" {
 		return CoreConfig{}, "", "", errors.New("core download URL has not been configured")
@@ -526,14 +582,11 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 }
 
 func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -549,11 +602,7 @@ func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfi
 		}
 		config.LatestVersion = config.ConfiguredVersion
 		config.UpdateAvailable = config.Version == "" || compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(config.Version)) > 0
-		if err := s.saveConfigLocked(config); err != nil {
-			return CoreConfig{}, err
-		}
-		s.applyRuntimeState(&config)
-		return config, nil
+		return s.saveCheckedConfig(config, generation)
 	}
 	latest, err := findLatestRelease(owner, repository, config.Channel)
 	if err != nil {
@@ -565,26 +614,24 @@ func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfi
 	} else {
 		config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(latest), mustParseCoreVersion(config.Version)) > 0
 	}
-	if err := s.saveConfigLocked(config); err != nil {
-		return CoreConfig{}, err
-	}
-	s.applyRuntimeState(&config)
-	return config, nil
+	return s.saveCheckedConfig(config, generation)
 }
 
 func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
 	config.RunArgs = strings.TrimSpace(rawArgs)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -596,14 +643,11 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -611,6 +655,11 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 		config.RunArgs = defaultRunArgs(coreType)
 	}
 	config.CoreType = coreType
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -619,14 +668,11 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 }
 
 func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigForTypeLocked(coreType)
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -644,6 +690,11 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backend
 	config.AutoStart = autoStart
 	config.AutoStartCore = autoStartCore
 	config.BackendDebugLog = backendDebugLog
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -763,12 +814,12 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 		return CoreConfig{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	config, err := s.loadConfigLocked()
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
 	return config, nil
 }
@@ -782,7 +833,16 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 	}
 	s.mu.Lock()
 	s.detectAnyExternalProcessLocked()
-	if s.process != nil && s.processCoreType != coreType {
+	managedProcessAlive := false
+	if s.process != nil {
+		alive, aliveErr := coreProcessAlive(s.process.Process)
+		if aliveErr != nil {
+			s.mu.Unlock()
+			return CoreConfig{}, fmt.Errorf("check core status: %w", aliveErr)
+		}
+		managedProcessAlive = alive
+	}
+	if managedProcessAlive && s.processCoreType != coreType {
 		runningCoreType := s.processCoreType
 		if runningCoreType == "" {
 			runningCoreType = coreTypeSingbox
@@ -1063,14 +1123,15 @@ func (s *CoreService) applySystemBehavior(config *CoreConfig) {
 	}
 }
 
-func (s *CoreService) startCoreOnStartup() {
-	s.mu.Lock()
+func (s *CoreService) startCoreOnStartup(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	config, err := s.loadConfigLocked()
 	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config.CoreType))
 	runArgs := config.RunArgs
-	s.mu.Unlock()
 	coreDebugf("startup check: loadErr=%v autoStartCore=%t coreInstalled=%t configAvailable=%t", err, config.AutoStartCore, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config.CoreType)))
-	if !shouldStart {
+	if !shouldStart || ctx.Err() != nil {
 		return
 	}
 	if _, err := s.startCore(runArgs, config.CoreType); err != nil {
@@ -1092,6 +1153,27 @@ func (s *CoreService) loadConfigForTypeLocked(coreType string) (CoreConfig, erro
 		return CoreConfig{}, err
 	}
 	return s.loadProfileFromStoreLocked(profiles, normalizedCoreType(coreType))
+}
+
+func (s *CoreService) loadConfigSnapshot(coreType string) (CoreConfig, uint64, error) {
+	s.mu.Lock()
+	generation := s.configGeneration
+	s.mu.Unlock()
+	config, err := s.loadConfigForTypeLocked(coreType)
+	return config, generation, err
+}
+
+func (s *CoreService) saveCheckedConfig(config CoreConfig, generation uint64) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while checking updates; please retry")
+	}
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
 }
 
 func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles, coreType string) (CoreConfig, error) {
@@ -1174,7 +1256,11 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 		return err
 	}
 	data = append(data, '\n')
-	return writeFileAtomically(s.configPath(), data, 0o600)
+	if err := writeFileAtomically(s.configPath(), data, 0o600); err != nil {
+		return err
+	}
+	s.configGeneration++
+	return nil
 }
 
 func (s *CoreService) archiveTools() coreArchiveTools {
