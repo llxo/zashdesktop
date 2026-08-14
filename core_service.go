@@ -35,7 +35,6 @@ const (
 	maxCoreConfig          = 20 << 20
 	defaultCoreRunArgs     = "run -c config.json -D ."
 	defaultMihomoRunArgs   = "-d . -f config.yaml"
-	legacyMihomoRunArgs    = "-d ."
 )
 
 var (
@@ -1043,8 +1042,6 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
-	} else if normalizedCoreType(config.CoreType) == coreTypeMihomo && config.RunArgs == legacyMihomoRunArgs {
-		config.RunArgs = defaultMihomoRunArgs
 	}
 	if s.process != nil && s.processCoreType == config.CoreType {
 		alive, err := coreProcessAlive(s.process.Process)
@@ -1206,19 +1203,6 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 		return persistedCoreProfiles{}, fmt.Errorf("parse core config: %w", err)
 	}
 	if profiles.Profiles == nil {
-		var legacy CoreConfig
-		if err := json.Unmarshal(data, &legacy); err != nil {
-			return persistedCoreProfiles{}, fmt.Errorf("parse legacy core config: %w", err)
-		}
-		coreType := normalizedCoreType(legacy.CoreType)
-		legacy.CoreType = coreType
-		profiles = persistedCoreProfiles{
-			ActiveCore: coreType,
-			Profiles:   map[string]CoreConfig{coreType: legacy},
-		}
-	}
-
-	if profiles.Profiles == nil {
 		profiles.Profiles = make(map[string]CoreConfig)
 	}
 	if profiles.ActiveCore == "" {
@@ -1322,7 +1306,7 @@ func defaultRunArgs(coreType string) string {
 
 func isDefaultCoreRunArgs(raw string) bool {
 	runArgs := strings.TrimSpace(raw)
-	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs || runArgs == legacyMihomoRunArgs
+	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs
 }
 
 func parseCoreURL(rawURL string) (CoreConfig, error) {
