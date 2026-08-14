@@ -1,11 +1,11 @@
 <template>
   <div class="flex flex-col gap-3 text-sm">
-    <section class="bg-base-100 rounded-xl p-4">
-      <div class="flex w-full flex-col gap-3">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="setting-item-label">{{ $t('coreRun') }}</div>
-          </div>
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('coreRun') }}
+      </div>
+      <div class="settings-grid">
+        <div class="setting-item justify-end">
           <span
             class="badge badge-sm"
             :class="config.running ? 'badge-success' : 'badge-ghost'"
@@ -14,184 +14,209 @@
           </span>
         </div>
 
-        <textarea
-          v-model="runArgsInput"
-          class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
-          :aria-label="$t('coreRunArgs')"
-          :disabled="config.running || isStarting || isStopping || isRestarting"
-        ></textarea>
+        <div class="setting-item flex-col !items-stretch py-3">
+          <textarea
+            v-model="runArgsInput"
+            class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
+            :aria-label="$t('coreRunArgs')"
+            :placeholder="$t('coreRunArgsPlaceholder')"
+            :disabled="config.running || isStarting || isStopping || isRestarting"
+          ></textarea>
 
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-if="!config.running"
-            class="btn btn-primary btn-sm"
-            :disabled="isStarting || isStopping || isRestarting || !config.installed"
-            @click="startCore"
-          >
-            <span
-              v-if="isStarting"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <PlayIcon
+          <div class="flex self-start flex-wrap gap-2">
+            <button
+              v-if="!config.running"
+              class="btn btn-primary btn-sm"
+              :disabled="isStarting || isStopping || isRestarting || !config.installed"
+              @click="startCore"
+            >
+              <span
+                v-if="isStarting"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <PlayIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('coreStart') }}
+            </button>
+            <button
               v-else
-              class="h-4 w-4"
-            />
-            {{ $t('coreStart') }}
-          </button>
-          <button
-            v-else
-            class="btn btn-error btn-sm"
-            :disabled="isStarting || isStopping || isRestarting"
-            @click="stopCore"
-          >
-            <span
-              v-if="isStopping"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <StopIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('coreStop') }}
-          </button>
-          <button
-            class="btn btn-sm"
-            :disabled="isStarting || isStopping || isRestarting || !config.installed"
-            @click="restartCore"
-          >
-            <span
-              v-if="isRestarting"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowPathIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('coreRestart') }}
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            :disabled="isSavingRunArgs || config.running"
-            @click="saveRunArgs"
-          >
-            <span
-              v-if="isSavingRunArgs"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <BookmarkSquareIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('save') }}
-          </button>
+              class="btn btn-error btn-sm"
+              :disabled="isStarting || isStopping || isRestarting"
+              @click="stopCore"
+            >
+              <span
+                v-if="isStopping"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <StopIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('coreStop') }}
+            </button>
+            <button
+              class="btn btn-sm"
+              :disabled="isStarting || isStopping || isRestarting || !config.installed"
+              @click="restartCore"
+            >
+              <span
+                v-if="isRestarting"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowPathIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('coreRestart') }}
+            </button>
+            <button
+              class="btn btn-ghost btn-sm"
+              :disabled="isSavingRunArgs || config.running"
+              @click="saveRunArgs"
+            >
+              <span
+                v-if="isSavingRunArgs"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <BookmarkSquareIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('save') }}
+            </button>
+          </div>
         </div>
-
-      </div>
-    </section>
-
-    <section class="bg-base-100 rounded-xl p-4">
-      <div class="flex w-full flex-col gap-3">
-        <div class="setting-item-label">{{ $t('coreConfigDownload') }}</div>
-        <input
-          v-model="configURLInput"
-          class="input input-sm w-full"
-          type="url"
-          :aria-label="$t('coreConfigURLPlaceholder')"
-        />
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            class="btn btn-primary btn-sm"
-            :disabled="isDownloadingConfig || !configURLInput.trim()"
-            @click="downloadConfig"
-          >
-            <span
-              v-if="isDownloadingConfig"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowDownTrayIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('downloadConfig') }}
-          </button>
+        <div class="setting-item flex-col !items-stretch py-3">
+          <input
+            v-model="configURLInput"
+            class="input input-sm w-full"
+            type="url"
+            :aria-label="$t('coreConfigURLPlaceholder')"
+            :placeholder="$t('coreConfigURLPlaceholder')"
+          />
+          <div class="flex self-start flex-wrap gap-2">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isDownloadingConfig || !configURLInput.trim()"
+              @click="downloadConfig"
+            >
+              <span
+                v-if="isDownloadingConfig"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowDownTrayIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('downloadConfig') }}
+            </button>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="bg-base-100 rounded-xl p-4">
-      <div class="flex w-full flex-col gap-3">
-      <div class="setting-item-label">{{ $t('coreDownloadURL') }}</div>
-      <input
-        v-model="urlInput"
-        class="input input-sm w-full"
-        type="url"
-        :aria-label="$t('coreDownloadURLPlaceholder')"
-        @change="saveURL"
-      />
-
-      <div class="flex flex-wrap gap-2">
-        <button
-          class="btn btn-primary btn-sm"
-          :disabled="isSaving || isDownloading || !urlInput.trim()"
-          @click="saveURL"
-        >
-          <span
-            v-if="isSaving"
-            class="loading loading-spinner h-4 w-4"
-          ></span>
-          <ArrowDownTrayIcon
-            v-else
-            class="h-4 w-4"
-          />
-          {{ $t('save') }}
-        </button>
-        <button
-          class="btn btn-sm"
-          :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
-          @click="checkUpdate"
-        >
-          <span
-            v-if="isChecking"
-            class="loading loading-spinner h-4 w-4"
-          ></span>
-          <ArrowPathIcon
-            v-else
-            class="h-4 w-4"
-          />
-          {{ $t('checkUpdate') }}
-        </button>
-        <button
-          class="btn btn-sm"
-          :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
-          @click="downloadCore"
-        >
-          <span
-            v-if="isDownloading"
-            class="loading loading-spinner h-4 w-4"
-          ></span>
-          <ArrowDownCircleIcon
-            v-else
-            class="h-4 w-4"
-          />
-          {{ config.updateAvailable ? $t('updateCore') : $t('downloadCore') }}
-        </button>
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('coreDownload') }}
       </div>
-    </div>
+      <div class="settings-grid">
+        <div class="setting-item flex-col !items-stretch py-3">
+          <input
+            v-model="urlInput"
+            class="input input-sm w-full"
+            type="url"
+            :aria-label="$t('coreDownloadURLPlaceholder')"
+            :placeholder="$t('coreDownloadURLPlaceholder')"
+            @change="saveURL"
+          />
+
+          <div class="flex self-start flex-wrap gap-2">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isSaving || isDownloading || !urlInput.trim()"
+              @click="saveURL"
+            >
+              <span
+                v-if="isSaving"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowDownTrayIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('save') }}
+            </button>
+            <button
+              class="btn btn-sm"
+              :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
+              @click="checkUpdate"
+            >
+              <span
+                v-if="isChecking"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowPathIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('checkUpdate') }}
+            </button>
+            <button
+              class="btn btn-sm"
+              :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
+              @click="downloadCore"
+            >
+              <span
+                v-if="isDownloading"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowDownCircleIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ config.updateAvailable ? $t('updateCore') : $t('downloadCore') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
-    <section class="bg-base-100 rounded-xl p-4">
-      <div class="flex w-full flex-col gap-1">
-        <div class="setting-item-label mb-2">{{ $t('coreBehavior') }}</div>
-        <label class="flex items-center justify-between gap-3 py-2">
-          <span>{{ $t('coreRunAsAdmin') }}</span>
-          <input v-model="config.runAsAdmin" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('coreBehavior') }}
+      </div>
+      <div class="settings-grid">
+        <label class="setting-item">
+          <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
+          <input
+            v-model="config.runAsAdmin"
+            class="toggle toggle-sm"
+            type="checkbox"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior"
+          />
         </label>
-        <label class="flex items-center justify-between gap-3 py-2">
-          <span>{{ $t('coreAutoStart') }}</span>
-          <input v-model="config.autoStart" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+        <label class="setting-item">
+          <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
+          <input
+            v-model="config.autoStart"
+            class="toggle toggle-sm"
+            type="checkbox"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior"
+          />
         </label>
-        <label class="flex items-center justify-between gap-3 py-2">
-          <span>{{ $t('coreAutoStartCore') }}</span>
-          <input v-model="config.autoStartCore" class="toggle toggle-sm" type="checkbox" :disabled="isSavingBehavior" @change="saveBehavior" />
+        <label class="setting-item">
+          <span class="setting-item-label">{{ $t('coreAutoStartCore') }}</span>
+          <input
+            v-model="config.autoStartCore"
+            class="toggle toggle-sm"
+            type="checkbox"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior"
+          />
         </label>
       </div>
     </section>
