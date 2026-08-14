@@ -26,7 +26,7 @@ import (
 const (
 	coreExecutableBaseName = "sing-box"
 	mihomoExecutableName   = "mihomo"
-	coreTypeSingbox        = "singbox"
+	coreTypeSingBox        = "sing-box"
 	coreTypeMihomo         = "mihomo"
 	coreChannelStable      = "stable"
 	coreChannelTest        = "test"
@@ -732,7 +732,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		if alive {
 			runningCoreType := s.processCoreType
 			if runningCoreType == "" {
-				runningCoreType = coreTypeSingbox
+				runningCoreType = coreTypeSingBox
 			}
 			return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
 		}
@@ -845,7 +845,7 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 	if managedProcessAlive && s.processCoreType != coreType {
 		runningCoreType := s.processCoreType
 		if runningCoreType == "" {
-			runningCoreType = coreTypeSingbox
+			runningCoreType = coreTypeSingBox
 		}
 		s.mu.Unlock()
 		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
@@ -1105,7 +1105,7 @@ func (s *CoreService) detectAnyExternalProcessLocked() {
 	if s.process != nil {
 		return
 	}
-	s.detectExternalProcessLocked(coreTypeSingbox)
+	s.detectExternalProcessLocked(coreTypeSingBox)
 	if s.externalProcess == nil {
 		s.detectExternalProcessLocked(coreTypeMihomo)
 	}
@@ -1193,7 +1193,7 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	data, err := os.ReadFile(s.configPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return persistedCoreProfiles{
-			ActiveCore: coreTypeSingbox,
+			ActiveCore: coreTypeSingBox,
 			Profiles:   make(map[string]CoreConfig),
 		}, nil
 	}
@@ -1222,7 +1222,7 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 		profiles.Profiles = make(map[string]CoreConfig)
 	}
 	if profiles.ActiveCore == "" {
-		profiles.ActiveCore = coreTypeSingbox
+		profiles.ActiveCore = coreTypeSingBox
 	}
 	profiles.ActiveCore = normalizedCoreType(profiles.ActiveCore)
 	return profiles, nil
@@ -1296,8 +1296,8 @@ func coreExecutableNameFor(coreType string) string {
 
 func normalizeCoreType(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", coreTypeSingbox:
-		return coreTypeSingbox, nil
+	case "", coreTypeSingBox:
+		return coreTypeSingBox, nil
 	case coreTypeMihomo:
 		return coreTypeMihomo, nil
 	default:
@@ -1308,7 +1308,7 @@ func normalizeCoreType(raw string) (string, error) {
 func normalizedCoreType(raw string) string {
 	coreType, err := normalizeCoreType(raw)
 	if err != nil {
-		return coreTypeSingbox
+		return coreTypeSingBox
 	}
 	return coreType
 }
@@ -1795,7 +1795,7 @@ func parseCoreCommandLine(input string) ([]string, error) {
 }
 
 func readCoreVersion(path string) (string, error) {
-	version, _, err := readCoreVersionDetail(path, coreTypeSingbox)
+	version, _, err := readCoreVersionDetail(path, coreTypeSingBox)
 	return version, err
 }
 

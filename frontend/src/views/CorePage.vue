@@ -45,20 +45,20 @@ import { activeBackend } from '@/store/setup'
 import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { ref } from 'vue'
 
-type CoreType = 'singbox' | 'mihomo'
+type CoreType = 'sing-box' | 'mihomo'
 
 const coreTypeOptions: SegmentOption[] = [
-  { value: 'singbox', label: 'sing-box' },
+  { value: 'sing-box', label: 'sing-box' },
   { value: 'mihomo', label: 'mihomo' },
 ]
 
-const coreType = ref<CoreType>('singbox')
+const coreType = ref<CoreType>('sing-box')
 
 const changeCoreType = async (nextType: string) => {
   if (nextType === coreType.value) return
   try {
     const config = await CoreService.SaveCoreType(nextType)
-    coreType.value = config.coreType === 'mihomo' ? 'mihomo' : 'singbox'
+    coreType.value = config.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   }

@@ -167,7 +167,7 @@ func parseLaunchConfig(args []string) LaunchConfig {
 	config := LaunchConfig{}
 	flags.StringVar(&config.APIURL, "api-url", "", "Clash API URL, for example http://127.0.0.1:9090")
 	flags.StringVar(&config.APISecret, "api-secret", "", "Clash API secret")
-	flags.StringVar(&config.APIType, "api-type", "clash", "API type: clash or singbox")
+	flags.StringVar(&config.APIType, "api-type", "clash", "API type: clash or sing-box")
 	flags.BoolVar(&config.StartHidden, "start-hidden", false, "Start in the system tray")
 	flags.BoolVar(&config.NoTray, "no-tray", false, "Disable the system tray icon")
 	_ = flags.Parse(args)
@@ -186,6 +186,9 @@ func launchURL(config LaunchConfig) string {
 	}
 
 	apiType := strings.ToLower(strings.TrimSpace(config.APIType))
+	if apiType == "sing-box" {
+		apiType = "singbox"
+	}
 	if apiType != "singbox" {
 		apiType = "clash"
 	}

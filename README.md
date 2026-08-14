@@ -99,7 +99,7 @@ zashdesktop.exe --no-tray
 | --- | --- |
 | `--api-url` | Clash API 地址 |
 | `--api-secret` | Clash API 密钥 |
-| `--api-type` | API 类型，可选 `clash` 或 `singbox` |
+| `--api-type` | API 类型，可选 `clash` 或 `sing-box` |
 | `--start-hidden` | 启动后直接进入系统托盘 |
 | `--no-tray` | 禁用系统托盘 |
 

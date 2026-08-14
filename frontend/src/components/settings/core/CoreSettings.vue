@@ -294,7 +294,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
-type CoreType = 'singbox' | 'mihomo'
+type CoreType = 'sing-box' | 'mihomo'
 type CoreChannel = 'stable' | 'test'
 
 type DownloadSource = {
@@ -304,7 +304,7 @@ type DownloadSource = {
 }
 
 const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
-  singbox: [
+  'sing-box': [
     {
       label: 'llxo/sing-box-releases',
       url: 'https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
@@ -338,7 +338,7 @@ const emit = defineEmits<{
 }>()
 
 const config = reactive<CoreConfig>({
-  coreType: 'singbox',
+  coreType: 'sing-box',
   urlTemplate: '',
   configuredVersion: '',
   version: '',
@@ -449,7 +449,7 @@ const rememberDownloadSource = (rawURL: string) => {
 }
 
 const applyConfig = (next: CoreConfig) => {
-  const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
+  const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
   Object.assign(config, next)
   if (nextCoreType !== props.coreType) emit('update:coreType', nextCoreType)
   if (!urlDirty.value || nextCoreType !== props.coreType) {
