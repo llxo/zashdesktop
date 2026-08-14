@@ -30,6 +30,7 @@
             :aria-label="$t('coreRunArgs')"
             :placeholder="defaultRunArgsPlaceholder"
             :disabled="config.running || isStarting || isStopping || isRestarting"
+            @input="runArgsDirty = true"
           />
 
           <div class="flex self-start flex-wrap gap-2">
@@ -296,6 +297,7 @@ const defaultRunArgsPlaceholder = computed(() =>
 const urlInput = ref('')
 const runArgsInput = ref('')
 const configURLInput = ref('')
+const runArgsDirty = ref(false)
 const isSaving = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
@@ -309,10 +311,14 @@ const isRefreshing = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const applyConfig = (next: CoreConfig) => {
+  const previousCoreType = coreType.value
   Object.assign(config, next)
   coreType.value = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
   urlInput.value = next.urlTemplate
-  runArgsInput.value = next.runArgs
+  if (!runArgsDirty.value || previousCoreType !== coreType.value) {
+    runArgsInput.value = next.runArgs
+    runArgsDirty.value = false
+  }
   configURLInput.value = next.configURL
 }
 
@@ -329,7 +335,9 @@ const saveRunArgs = async () => {
   if (isSavingRunArgs.value || config.running) return
   isSavingRunArgs.value = true
   try {
-    applyConfig(await CoreService.SaveRunArgs(runArgsInput.value, coreType.value))
+    const next = await CoreService.SaveRunArgs(runArgsInput.value, coreType.value)
+    runArgsDirty.value = false
+    applyConfig(next)
     showNotification({ content: 'coreRunArgsSaved', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -342,7 +350,9 @@ const startCore = async () => {
   if (isStarting.value || config.running) return
   isStarting.value = true
   try {
-    applyConfig(await CoreService.StartCore(runArgsInput.value, coreType.value))
+    const next = await CoreService.StartCore(runArgsInput.value, coreType.value)
+    runArgsDirty.value = false
+    applyConfig(next)
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -368,7 +378,9 @@ const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
   try {
-    applyConfig(await CoreService.RestartCore(runArgsInput.value, coreType.value))
+    const next = await CoreService.RestartCore(runArgsInput.value, coreType.value)
+    runArgsDirty.value = false
+    applyConfig(next)
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
