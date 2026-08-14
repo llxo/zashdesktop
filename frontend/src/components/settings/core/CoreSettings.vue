@@ -23,13 +23,14 @@
         </div>
 
         <div class="setting-item flex-col !items-stretch py-3">
-          <textarea
+          <input
             v-model="runArgsInput"
-            class="textarea textarea-sm min-h-20 w-full font-mono text-xs"
+            class="input input-sm w-full font-mono text-xs"
+            type="text"
             :aria-label="$t('coreRunArgs')"
             :placeholder="defaultRunArgsPlaceholder"
             :disabled="config.running || isStarting || isStopping || isRestarting"
-          ></textarea>
+          />
 
           <div class="flex self-start flex-wrap gap-2">
             <button
@@ -200,7 +201,7 @@
           <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
           <input
             v-model="config.runAsAdmin"
-            class="toggle toggle-sm"
+            class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
             @change="saveBehavior"
@@ -210,7 +211,7 @@
           <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
           <input
             v-model="config.autoStart"
-            class="toggle toggle-sm"
+            class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
             @change="saveBehavior"
@@ -220,7 +221,7 @@
           <span class="setting-item-label">{{ $t('coreAutoStartCore') }}</span>
           <input
             v-model="config.autoStartCore"
-            class="toggle toggle-sm"
+            class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
             @change="saveBehavior"

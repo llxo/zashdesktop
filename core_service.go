@@ -68,6 +68,11 @@ type CoreConfig struct {
 	AutoStartCore     bool   `json:"autoStartCore"`
 }
 
+type persistedCoreProfiles struct {
+	ActiveCore string                `json:"activeCore"`
+	Profiles   map[string]CoreConfig `json:"profiles"`
+}
+
 type CoreService struct {
 	executableDir   string
 	applicationPath string
@@ -370,15 +375,14 @@ func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	config, err := s.loadConfigLocked()
-	if err != nil {
-		return CoreConfig{}, err
-	}
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config.CoreType = coreType
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
 	config.RunArgs = strings.TrimSpace(rawArgs)
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
@@ -401,11 +405,11 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, err := s.loadConfigLocked()
+	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	if config.CoreType != coreType && (strings.TrimSpace(config.RunArgs) == "" || isDefaultCoreRunArgs(config.RunArgs)) {
+	if strings.TrimSpace(config.RunArgs) == "" || isDefaultCoreRunArgs(config.RunArgs) {
 		config.RunArgs = defaultRunArgs(coreType)
 	}
 	config.CoreType = coreType
@@ -458,15 +462,14 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		return CoreConfig{}, errors.New("sing-box core is already running")
 	}
 
-	config, err := s.loadConfigLocked()
-	if err != nil {
-		return CoreConfig{}, err
-	}
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config.CoreType = coreType
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
 	if !fileExists(s.corePathFor(config.CoreType)) {
 		return CoreConfig{}, errors.New("sing-box core is not installed")
 	}
@@ -640,35 +643,87 @@ func (s *CoreService) startCoreOnStartup() {
 }
 
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
-	config := CoreConfig{CoreType: coreTypeSingbox}
-	data, err := os.ReadFile(s.configPath())
-	if errors.Is(err, os.ErrNotExist) {
-		s.applyCurrentVersion(&config, "")
-		s.applySystemBehavior(&config)
-		return config, nil
-	}
+	profiles, err := s.loadProfilesLocked()
 	if err != nil {
-		return CoreConfig{}, fmt.Errorf("read core config: %w", err)
+		return CoreConfig{}, err
 	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return CoreConfig{}, fmt.Errorf("parse core config: %w", err)
+	return s.loadProfileFromStoreLocked(profiles, normalizedCoreType(profiles.ActiveCore))
+}
+
+func (s *CoreService) loadConfigForTypeLocked(coreType string) (CoreConfig, error) {
+	profiles, err := s.loadProfilesLocked()
+	if err != nil {
+		return CoreConfig{}, err
 	}
+	return s.loadProfileFromStoreLocked(profiles, normalizedCoreType(coreType))
+}
+
+func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles, coreType string) (CoreConfig, error) {
+	config, ok := profiles.Profiles[coreType]
+	if !ok {
+		config = CoreConfig{}
+	}
+	config.CoreType = coreType
 	s.applySystemBehavior(&config)
-	config.CoreType = normalizedCoreType(config.CoreType)
 	config.CorePath = s.corePathFor(config.CoreType)
 	config.Installed = fileExists(config.CorePath)
 	s.applyCurrentVersion(&config, "")
 	return config, nil
 }
 
+func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
+	data, err := os.ReadFile(s.configPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return persistedCoreProfiles{
+			ActiveCore: coreTypeSingbox,
+			Profiles:   make(map[string]CoreConfig),
+		}, nil
+	}
+	if err != nil {
+		return persistedCoreProfiles{}, fmt.Errorf("read core config: %w", err)
+	}
+
+	var profiles persistedCoreProfiles
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		return persistedCoreProfiles{}, fmt.Errorf("parse core config: %w", err)
+	}
+	if profiles.Profiles == nil {
+		var legacy CoreConfig
+		if err := json.Unmarshal(data, &legacy); err != nil {
+			return persistedCoreProfiles{}, fmt.Errorf("parse legacy core config: %w", err)
+		}
+		coreType := normalizedCoreType(legacy.CoreType)
+		legacy.CoreType = coreType
+		profiles = persistedCoreProfiles{
+			ActiveCore: coreType,
+			Profiles:   map[string]CoreConfig{coreType: legacy},
+		}
+	}
+
+	if profiles.Profiles == nil {
+		profiles.Profiles = make(map[string]CoreConfig)
+	}
+	if profiles.ActiveCore == "" {
+		profiles.ActiveCore = coreTypeSingbox
+	}
+	profiles.ActiveCore = normalizedCoreType(profiles.ActiveCore)
+	return profiles, nil
+}
+
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {
+	profiles, err := s.loadProfilesLocked()
+	if err != nil {
+		return err
+	}
 	config.CoreType = normalizedCoreType(config.CoreType)
 	config.CorePath = s.corePathFor(config.CoreType)
 	config.Running = false
 	config.PID = 0
 	config.LogPath = ""
 	config.ConfigPath = ""
-	data, err := json.MarshalIndent(config, "", "  ")
+	profiles.ActiveCore = config.CoreType
+	profiles.Profiles[config.CoreType] = config
+	data, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
 		return err
 	}
