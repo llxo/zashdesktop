@@ -1,13 +1,5 @@
 <template>
   <div class="flex flex-col gap-3 text-sm">
-    <div class="flex p-2">
-      <SegmentedControl
-        :model-value="coreType"
-        :options="coreTypeOptions"
-        @update:model-value="changeCoreType"
-      />
-    </div>
-
     <section>
       <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
         {{ $t('coreRun') }}
@@ -247,7 +239,6 @@
 import * as CoreService from '../../../../bindings/sing-box-gui/coreservice'
 import type { CoreConfig } from '../../../../bindings/sing-box-gui/models'
 import { version } from '@/assembly/version'
-import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import {
   ArrowDownCircleIcon,
@@ -261,10 +252,13 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
 type CoreType = 'singbox' | 'mihomo'
 
-const coreTypeOptions: SegmentOption[] = [
-  { value: 'singbox', label: 'sing-box' },
-  { value: 'mihomo', label: 'mihomo' },
-]
+const props = defineProps<{
+  coreType: CoreType
+}>()
+
+const emit = defineEmits<{
+  (event: 'update:coreType', value: CoreType): void
+}>()
 
 const config = reactive<CoreConfig>({
   coreType: 'singbox',
@@ -290,7 +284,7 @@ const config = reactive<CoreConfig>({
   autoStartCore: false,
   backendDebugLog: false,
 })
-const coreType = ref<CoreType>('singbox')
+const coreType = computed(() => props.coreType)
 const defaultRunArgsPlaceholder = computed(() =>
   coreType.value === 'mihomo' ? '-d .' : 'run -c config.json -D .',
 )
@@ -311,24 +305,15 @@ const isRefreshing = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const applyConfig = (next: CoreConfig) => {
-  const previousCoreType = coreType.value
+  const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
   Object.assign(config, next)
-  coreType.value = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
+  if (nextCoreType !== props.coreType) emit('update:coreType', nextCoreType)
   urlInput.value = next.urlTemplate
-  if (!runArgsDirty.value || previousCoreType !== coreType.value) {
+  if (!runArgsDirty.value || nextCoreType !== props.coreType) {
     runArgsInput.value = next.runArgs
     runArgsDirty.value = false
   }
   configURLInput.value = next.configURL
-}
-
-const changeCoreType = async (nextType: string) => {
-  if (nextType === coreType.value) return
-  try {
-    applyConfig(await CoreService.SaveCoreType(nextType))
-  } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-  }
 }
 
 const saveRunArgs = async () => {
