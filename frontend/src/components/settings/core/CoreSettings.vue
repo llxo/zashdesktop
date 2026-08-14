@@ -479,7 +479,7 @@ const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
   try {
-    let next = await CoreService.SaveChannel(rawChannel)
+    let next = await CoreService.SaveChannel(rawChannel, coreType.value)
     const selectedBuiltInSource = builtInDownloadSources[coreType.value].some(
       (source) =>
         source.url === next.urlTemplate ||
@@ -489,7 +489,7 @@ const saveChannel = async (rawChannel: string) => {
       (source) => sourceURL(source, rawChannel) !== '',
     )
     if (coreType.value === 'mihomo' && channelSource && (selectedBuiltInSource || !next.urlTemplate)) {
-      next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel))
+      next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel), coreType.value)
     }
     applyConfig(next)
   } catch (error) {
@@ -504,7 +504,7 @@ const validateAndAddURL = async () => {
   isValidatingURL.value = true
   try {
     const normalizedURL = await CoreService.ValidateURL(urlInput.value.trim())
-    const next = await CoreService.SaveURL(normalizedURL)
+    const next = await CoreService.SaveURL(normalizedURL, coreType.value)
     rememberDownloadSource(normalizedURL)
     selectedSourceURL.value = normalizedURL
     urlDirty.value = false
@@ -579,7 +579,7 @@ const downloadConfig = async () => {
   if (isDownloadingConfig.value || !configURLInput.value.trim()) return
   isDownloadingConfig.value = true
   try {
-    applyConfig(await CoreService.DownloadConfig(configURLInput.value))
+    applyConfig(await CoreService.DownloadConfig(configURLInput.value, coreType.value))
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -588,11 +588,14 @@ const downloadConfig = async () => {
   }
 }
 
-const loadConfig = async () => {
+const loadConfig = async (useActiveCore = false) => {
   if (isRefreshing.value) return
   isRefreshing.value = true
   try {
-    applyConfig(await CoreService.GetConfig())
+    const next = useActiveCore
+      ? await CoreService.GetConfig()
+      : await CoreService.GetConfigForType(coreType.value)
+    applyConfig(next)
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
@@ -610,6 +613,7 @@ const saveBehavior = async () => {
         config.autoStart,
         config.autoStartCore,
         config.backendDebugLog,
+        coreType.value,
       ),
     )
     showNotification({ content: 'coreBehaviorSaved', type: 'alert-success' })
@@ -625,7 +629,7 @@ const saveURL = async () => {
   if (isSaving.value || !urlInput.value.trim()) return
   isSaving.value = true
   try {
-    const next = await CoreService.SaveURL(urlInput.value.trim())
+    const next = await CoreService.SaveURL(urlInput.value.trim(), coreType.value)
     rememberDownloadSource(next.urlTemplate)
     urlDirty.value = false
     applyConfig(next)
@@ -641,7 +645,7 @@ const checkUpdate = async () => {
   if (isChecking.value || !urlInput.value.trim()) return
   isChecking.value = true
   try {
-    applyConfig(await CoreService.CheckUpdate(version.value || ''))
+    applyConfig(await CoreService.CheckUpdate(version.value || '', coreType.value))
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
@@ -653,7 +657,7 @@ const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
   try {
-    applyConfig(await CoreService.DownloadCore(version.value || ''))
+    applyConfig(await CoreService.DownloadCore(version.value || '', coreType.value))
     showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -664,7 +668,7 @@ const downloadCore = async () => {
 
 onMounted(() => {
   loadDownloadSources()
-  void loadConfig()
+  void loadConfig(true)
   refreshTimer = setInterval(() => {
     if (
       !urlDirty.value &&

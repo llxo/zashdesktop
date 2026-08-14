@@ -9,32 +9,36 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
-export function CheckUpdate(currentVersion: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(2721282167, currentVersion);
+export function CheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2721282167, currentVersion, rawCoreType);
 }
 
-export function DownloadConfig(rawURL: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(3689975968, rawURL);
+export function DownloadConfig(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(3689975968, rawURL, rawCoreType);
 }
 
-export function DownloadCore(currentVersion: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(2731700857, currentVersion);
+export function DownloadCore(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2731700857, currentVersion, rawCoreType);
 }
 
 export function GetConfig(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2439653156);
 }
 
+export function GetConfigForType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(798218691, rawCoreType);
+}
+
 export function RestartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean, backendDebugLog: boolean): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore, backendDebugLog);
+export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore, backendDebugLog, rawCoreType);
 }
 
-export function SaveChannel(rawChannel: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(825658706, rawChannel);
+export function SaveChannel(rawChannel: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(825658706, rawChannel, rawCoreType);
 }
 
 export function SaveCoreType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
@@ -45,8 +49,8 @@ export function SaveRunArgs(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(1182958737, rawArgs, rawCoreType);
 }
 
-export function SaveURL(rawURL: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(3210647596, rawURL);
+export function SaveURL(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(3210647596, rawURL, rawCoreType);
 }
 
 export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
