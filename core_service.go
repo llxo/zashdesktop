@@ -34,7 +34,8 @@ const (
 	maxCoreBinary          = 100 << 20
 	maxCoreConfig          = 20 << 20
 	defaultCoreRunArgs     = "run -c config.json -D ."
-	defaultMihomoRunArgs   = "-d ."
+	defaultMihomoRunArgs   = "-d . -f config.yaml"
+	legacyMihomoRunArgs    = "-d ."
 )
 
 var (
@@ -942,6 +943,8 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
+	} else if normalizedCoreType(config.CoreType) == coreTypeMihomo && config.RunArgs == legacyMihomoRunArgs {
+		config.RunArgs = defaultMihomoRunArgs
 	}
 	if s.process != nil && s.processCoreType == config.CoreType {
 		alive, err := coreProcessAlive(s.process.Process)
@@ -1183,7 +1186,7 @@ func defaultRunArgs(coreType string) string {
 
 func isDefaultCoreRunArgs(raw string) bool {
 	runArgs := strings.TrimSpace(raw)
-	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs
+	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs || runArgs == legacyMihomoRunArgs
 }
 
 func parseCoreURL(rawURL string) (CoreConfig, error) {
@@ -1552,7 +1555,11 @@ func (s *CoreService) logFilePath(coreType string) string {
 }
 
 func (s *CoreService) configFilePath(coreType string) string {
-	return filepath.Join(s.coreDirFor(coreType), "config.json")
+	fileName := "config.json"
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		fileName = "config.yaml"
+	}
+	return filepath.Join(s.coreDirFor(coreType), fileName)
 }
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {

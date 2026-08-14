@@ -368,7 +368,7 @@ const channelOptions = computed<SegmentOption[]>(() => [
   { value: 'test', label: t('coreTestBuild') },
 ])
 const defaultRunArgsPlaceholder = computed(() =>
-  coreType.value === 'mihomo' ? '-d .' : 'run -c config.json -D .',
+  coreType.value === 'mihomo' ? '-d . -f config.yaml' : 'run -c config.json -D .',
 )
 const urlInput = ref('')
 const selectedSourceURL = ref('')
