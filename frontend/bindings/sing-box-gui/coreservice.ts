@@ -33,6 +33,10 @@ export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartC
     return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore, backendDebugLog);
 }
 
+export function SaveChannel(rawChannel: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(825658706, rawChannel);
+}
+
 export function SaveCoreType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3983412536, rawCoreType);
 }

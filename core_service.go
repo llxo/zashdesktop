@@ -32,6 +32,8 @@ const (
 	mihomoExecutableName   = "mihomo"
 	coreTypeSingbox        = "singbox"
 	coreTypeMihomo         = "mihomo"
+	coreChannelStable      = "stable"
+	coreChannelTest        = "test"
 	maxCoreDownload        = 200 << 20
 	maxCoreBinary          = 100 << 20
 	maxCoreConfig          = 20 << 20
@@ -219,6 +221,12 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	if config.Channel == "" {
+		config.Channel = existing.Channel
+	}
+	if config.Channel == "" {
+		config.Channel = coreChannelStable
+	}
 	config.LatestVersion = ""
 	config.UpdateAvailable = false
 	config.Version = existing.Version
@@ -232,6 +240,28 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	config.AutoStart = existing.AutoStart
 	config.AutoStartCore = existing.AutoStartCore
 	config.BackendDebugLog = existing.BackendDebugLog
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) SaveChannel(rawChannel string) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	channel, err := normalizeCoreChannel(rawChannel)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config, err := s.loadConfigLocked()
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.Channel = channel
+	config.LatestVersion = ""
+	config.UpdateAvailable = false
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -313,23 +343,37 @@ func (s *CoreService) DownloadConfig(rawURL string) (CoreConfig, error) {
 func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	coreDebugf("download request: currentVersion=%q", currentVersion)
 
 	s.mu.Lock()
 	config, archivePath, targetVersion, err := s.downloadCoreArchiveLocked(currentVersion)
 	s.mu.Unlock()
 	if err != nil {
+		coreDebugf("download request failed during archive download: err=%v", err)
 		return CoreConfig{}, err
 	}
 	defer os.Remove(archivePath)
+	coreDebugf("archive downloaded: type=%s version=%s path=%q", config.CoreType, targetVersion, archivePath)
 
 	s.mu.Lock()
 	s.detectExternalProcessLocked(config.CoreType)
-	wasRunning := s.process != nil || s.externalProcess != nil
+	runningCoreType := ""
+	if s.process != nil {
+		runningCoreType = normalizedCoreType(s.processCoreType)
+	} else if s.externalProcess != nil {
+		runningCoreType = normalizedCoreType(s.externalCoreType)
+	}
+	wasRunning := runningCoreType == config.CoreType
 	runArgs := config.RunArgs
 	s.mu.Unlock()
+	if runningCoreType != "" && !wasRunning {
+		coreDebugf("leaving other core running during replacement: runningType=%s targetType=%s", runningCoreType, config.CoreType)
+	}
 
 	if wasRunning {
+		coreDebugf("stopping core before replacement: type=%s", config.CoreType)
 		if err := s.stopCoreProcess(); err != nil {
+			coreDebugf("stop core before replacement failed: err=%v", err)
 			return CoreConfig{}, err
 		}
 	}
@@ -337,10 +381,15 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	s.mu.Lock()
 	config, err = s.installCoreArchiveLocked(config, archivePath, targetVersion)
 	s.mu.Unlock()
+	if err != nil {
+		coreDebugf("install downloaded core failed: type=%s version=%s err=%v", config.CoreType, targetVersion, err)
+	}
 
 	if wasRunning {
+		coreDebugf("restarting core after replacement: type=%s", config.CoreType)
 		restarted, restartErr := s.startCore(runArgs, config.CoreType)
 		if restartErr != nil {
+			coreDebugf("restart core after replacement failed: err=%v", restartErr)
 			if err != nil {
 				return CoreConfig{}, fmt.Errorf("%v; restart sing-box core: %w", err, restartErr)
 			}
@@ -374,6 +423,7 @@ func (s *CoreService) downloadCoreArchiveLocked(currentVersion string) (CoreConf
 		}
 	}
 	downloadURL := strings.ReplaceAll(config.URLTemplate, "{version}", targetVersion)
+	coreDebugf("download target: type=%s channel=%s version=%s url=%q", config.CoreType, config.Channel, targetVersion, downloadURL)
 	parsedURL, err := url.Parse(downloadURL)
 	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		return CoreConfig{}, "", "", errors.New("core download URL is invalid")
@@ -385,6 +435,7 @@ func (s *CoreService) downloadCoreArchiveLocked(currentVersion string) (CoreConf
 		if err != nil {
 			return CoreConfig{}, "", "", err
 		}
+		coreDebugf("release digest resolved: repository=%s/%s version=%s present=%t", owner, repository, targetVersion, expectedSHA256 != "")
 	}
 
 	archivePath, err := s.download(downloadURL, expectedSHA256)
@@ -396,19 +447,24 @@ func (s *CoreService) downloadCoreArchiveLocked(currentVersion string) (CoreConf
 
 func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, targetVersion string) (CoreConfig, error) {
 	corePath := s.corePathFor(config.CoreType)
-	installed, err := s.extractCore(archivePath, corePath)
+	coreDebugf("install archive: type=%s archive=%q target=%q", config.CoreType, archivePath, corePath)
+	installed, err := s.extractCore(archivePath, corePath, config.CoreType)
 	if err != nil {
+		coreDebugf("extract archive failed: archive=%q err=%v", archivePath, err)
 		return CoreConfig{}, err
 	}
 	if !installed {
+		coreDebugf("replace archive completed without installation: target=%q", corePath)
 		return CoreConfig{}, errors.New("sing-box core could not be replaced after it stopped")
 	}
 
 	config.CorePath = corePath
 	installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath, config.CoreType)
 	if versionErr != nil {
+		coreDebugf("read installed core version failed: path=%q err=%v", corePath, versionErr)
 		return CoreConfig{}, versionErr
 	}
+	coreDebugf("core replacement verified: type=%s installedVersion=%s", config.CoreType, installedVersion)
 	config.Version = installedVersion
 	config.VersionDetail = versionDetail
 	config.Channel = coreChannel(installedVersion)
@@ -1062,16 +1118,21 @@ func newCoreHTTPClient(timeout time.Duration) *http.Client {
 }
 
 func (s *CoreService) download(downloadURL, expectedSHA256 string) (string, error) {
+	coreDebugf("HTTP download start: url=%q checksum=%t", downloadURL, expectedSHA256 != "")
 	client := newCoreHTTPClient(20 * time.Minute)
 	response, err := client.Get(downloadURL)
 	if err != nil {
+		coreDebugf("HTTP download request failed: url=%q err=%v", downloadURL, err)
 		return "", fmt.Errorf("download core: %w", err)
 	}
 	defer response.Body.Close()
+	coreDebugf("HTTP download response: status=%s contentLength=%d", response.Status, response.ContentLength)
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		coreDebugf("HTTP download rejected: status=%s", response.Status)
 		return "", fmt.Errorf("download core: server returned %s", response.Status)
 	}
 	if response.ContentLength > maxCoreDownload {
+		coreDebugf("HTTP download rejected: contentLength=%d limit=%d", response.ContentLength, maxCoreDownload)
 		return "", errors.New("core archive is too large")
 	}
 
@@ -1087,9 +1148,11 @@ func (s *CoreService) download(downloadURL, expectedSHA256 string) (string, erro
 	}
 	temporary, err := os.CreateTemp(s.executableDir, ".core-download-*"+suffix)
 	if err != nil {
+		coreDebugf("create archive temp file failed: suffix=%q err=%v", suffix, err)
 		return "", fmt.Errorf("create core archive: %w", err)
 	}
 	path := temporary.Name()
+	coreDebugf("archive temp file created: path=%q format=%s", path, suffix)
 	defer func() {
 		if temporary != nil {
 			temporary.Close()
@@ -1103,48 +1166,63 @@ func (s *CoreService) download(downloadURL, expectedSHA256 string) (string, erro
 	}
 	written, err := io.Copy(writer, io.LimitReader(response.Body, maxCoreDownload+1))
 	if err != nil {
+		coreDebugf("save downloaded archive failed: path=%q bytes=%d err=%v", path, written, err)
 		temporary.Close()
 		os.Remove(path)
 		return "", fmt.Errorf("save core archive: %w", err)
 	}
 	if written > maxCoreDownload {
+		coreDebugf("downloaded archive exceeded limit: path=%q bytes=%d limit=%d", path, written, maxCoreDownload)
 		temporary.Close()
 		os.Remove(path)
 		return "", errors.New("core archive is too large")
 	}
 	if err := temporary.Close(); err != nil {
+		coreDebugf("close archive temp file failed: path=%q err=%v", path, err)
 		os.Remove(path)
 		return "", fmt.Errorf("close core archive: %w", err)
 	}
-	if expectedSHA256 != "" && !strings.EqualFold(fmt.Sprintf("%x", digest.Sum(nil)), expectedSHA256) {
-		os.Remove(path)
-		return "", errors.New("core archive checksum does not match the release digest")
+	if expectedSHA256 != "" {
+		actualSHA256 := fmt.Sprintf("%x", digest.Sum(nil))
+		if !strings.EqualFold(actualSHA256, expectedSHA256) {
+			coreDebugf("archive checksum mismatch: path=%q expected=%s actual=%s", path, expectedSHA256, actualSHA256)
+			os.Remove(path)
+			return "", errors.New("core archive checksum does not match the release digest")
+		}
+		coreDebugf("archive checksum verified: path=%q sha256=%s", path, actualSHA256)
 	}
 	temporary = nil
+	coreDebugf("HTTP download complete: path=%q bytes=%d", path, written)
 	return path, nil
 }
 
-func (s *CoreService) extractCore(archivePath, targetPath string) (bool, error) {
+func (s *CoreService) extractCore(archivePath, targetPath, coreType string) (bool, error) {
+	coreDebugf("extract archive start: type=%s archive=%q target=%q", coreType, archivePath, targetPath)
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		coreDebugf("create core directory failed: path=%q err=%v", filepath.Dir(targetPath), err)
 		return false, fmt.Errorf("create core directory: %w", err)
 	}
 	if strings.HasSuffix(strings.ToLower(archivePath), ".tar.gz") {
-		return s.extractTarGZCore(archivePath, targetPath)
+		coreDebugf("extract archive format: tar.gz")
+		return s.extractTarGZCore(archivePath, targetPath, coreType)
 	}
-	return s.extractZIPCore(archivePath, targetPath)
+	coreDebugf("extract archive format: zip")
+	return s.extractZIPCore(archivePath, targetPath, coreType)
 }
 
-func (s *CoreService) extractZIPCore(archivePath, targetPath string) (bool, error) {
+func (s *CoreService) extractZIPCore(archivePath, targetPath, coreType string) (bool, error) {
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
+		coreDebugf("open ZIP archive failed: archive=%q err=%v", archivePath, err)
 		return false, fmt.Errorf("open core ZIP archive: %w", err)
 	}
 	defer archive.Close()
+	coreDebugf("ZIP archive opened: archive=%q entries=%d", archivePath, len(archive.File))
 
 	var selected *zip.File
 	for _, entry := range archive.File {
 		name := filepath.Base(strings.ReplaceAll(entry.Name, "\\", "/"))
-		if !isCoreArchiveName(name) || entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > maxCoreBinary {
+		if !isCoreArchiveName(name, coreType) || entry.FileInfo().IsDir() || entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > maxCoreBinary {
 			continue
 		}
 		if selected == nil || strings.Count(entry.Name, "/") < strings.Count(selected.Name, "/") {
@@ -1152,26 +1230,32 @@ func (s *CoreService) extractZIPCore(archivePath, targetPath string) (bool, erro
 		}
 	}
 	if selected == nil {
-		return false, errors.New("sing-box executable was not found in the core ZIP archive")
+		name := coreArchiveExecutableLabel(coreType)
+		coreDebugf("ZIP %s executable not found: archive=%q", name, archivePath)
+		return false, fmt.Errorf("%s executable was not found in the core ZIP archive", name)
 	}
+	coreDebugf("ZIP core executable selected: entry=%q size=%d", selected.Name, selected.UncompressedSize64)
 
 	reader, err := selected.Open()
 	if err != nil {
+		coreDebugf("open ZIP core executable failed: entry=%q err=%v", selected.Name, err)
 		return false, fmt.Errorf("read core executable: %w", err)
 	}
 	defer reader.Close()
 	return s.installExtractedCore(reader, targetPath)
 }
 
-func (s *CoreService) extractTarGZCore(archivePath, targetPath string) (bool, error) {
+func (s *CoreService) extractTarGZCore(archivePath, targetPath, coreType string) (bool, error) {
 	archiveFile, err := os.Open(archivePath)
 	if err != nil {
+		coreDebugf("open TAR.GZ archive failed: archive=%q err=%v", archivePath, err)
 		return false, fmt.Errorf("open core TAR.GZ archive: %w", err)
 	}
 	defer archiveFile.Close()
 
 	gzipReader, err := gzip.NewReader(archiveFile)
 	if err != nil {
+		coreDebugf("open gzip stream failed: archive=%q err=%v", archivePath, err)
 		return false, fmt.Errorf("open core gzip archive: %w", err)
 	}
 	defer gzipReader.Close()
@@ -1183,60 +1267,79 @@ func (s *CoreService) extractTarGZCore(archivePath, targetPath string) (bool, er
 			break
 		}
 		if nextErr != nil {
+			coreDebugf("read TAR archive failed: archive=%q err=%v", archivePath, nextErr)
 			return false, fmt.Errorf("read core TAR archive: %w", nextErr)
 		}
-		if header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size > maxCoreBinary || !isCoreArchiveName(filepath.Base(header.Name)) {
+		if header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size > maxCoreBinary || !isCoreArchiveName(filepath.Base(header.Name), coreType) {
 			continue
 		}
+		coreDebugf("TAR core executable selected: entry=%q size=%d", header.Name, header.Size)
 		return s.installExtractedCore(io.LimitReader(tarReader, header.Size), targetPath)
 	}
-	return false, errors.New("sing-box executable was not found in the core TAR.GZ archive")
+	name := coreArchiveExecutableLabel(coreType)
+	coreDebugf("TAR %s executable not found: archive=%q", name, archivePath)
+	return false, fmt.Errorf("%s executable was not found in the core TAR.GZ archive", name)
 }
 
 func (s *CoreService) installExtractedCore(reader io.Reader, targetPath string) (bool, error) {
 	temporary, err := os.CreateTemp(filepath.Dir(targetPath), ".sing-box-*"+filepath.Ext(targetPath))
 	if err != nil {
+		coreDebugf("create extracted core temp file failed: target=%q err=%v", targetPath, err)
 		return false, fmt.Errorf("create core file: %w", err)
 	}
 	temporaryPath := temporary.Name()
+	coreDebugf("extracted core temp file created: path=%q target=%q", temporaryPath, targetPath)
 	defer os.Remove(temporaryPath)
 
 	written, err := io.Copy(temporary, io.LimitReader(reader, maxCoreBinary+1))
 	if err != nil {
+		coreDebugf("write extracted core failed: path=%q bytes=%d err=%v", temporaryPath, written, err)
 		temporary.Close()
 		return false, fmt.Errorf("extract core executable: %w", err)
 	}
 	if written == 0 || written > maxCoreBinary {
+		coreDebugf("extracted core size invalid: path=%q bytes=%d limit=%d", temporaryPath, written, maxCoreBinary)
 		temporary.Close()
 		return false, errors.New("core executable is invalid or too large")
 	}
 	if err := temporary.Chmod(0o755); err != nil {
+		coreDebugf("set extracted core permissions failed: path=%q err=%v", temporaryPath, err)
 		temporary.Close()
 		return false, err
 	}
 	if err := temporary.Close(); err != nil {
+		coreDebugf("close extracted core temp file failed: path=%q err=%v", temporaryPath, err)
 		return false, err
 	}
+	coreDebugf("extracted core ready for replacement: path=%q bytes=%d", temporaryPath, written)
 
 	installed, err := s.replaceCoreExecutable(temporaryPath, targetPath)
 	if err != nil {
+		coreDebugf("core executable replacement failed: source=%q target=%q err=%v", temporaryPath, targetPath, err)
 		return false, err
 	}
 	if installed {
+		coreDebugf("core executable replacement succeeded: target=%q", targetPath)
 		return true, nil
 	}
+	coreDebugf("core executable replacement deferred: target=%q", targetPath)
 	return false, nil
 }
 
-func isCoreArchiveName(name string) bool {
-	return strings.EqualFold(name, coreExecutableName()) ||
-		strings.EqualFold(name, coreExecutableBaseName) ||
-		strings.EqualFold(name, mihomoExecutableName) ||
-		(runtime.GOOS == "windows" && strings.EqualFold(name, mihomoExecutableName+".exe"))
+func isCoreArchiveName(name, coreType string) bool {
+	name = strings.ToLower(strings.TrimSuffix(filepath.Base(name), ".exe"))
+	prefix := coreExecutableBaseName
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		prefix = mihomoExecutableName
+	}
+	return name == prefix || strings.HasPrefix(name, prefix+"-")
 }
 
-func coreExecutableName() string {
-	return coreExecutableNameFor(coreTypeSingbox)
+func coreArchiveExecutableLabel(coreType string) string {
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		return mihomoExecutableName
+	}
+	return coreExecutableBaseName
 }
 
 func coreExecutableNameFor(coreType string) string {
@@ -1283,22 +1386,32 @@ func isDefaultCoreRunArgs(raw string) bool {
 
 func (s *CoreService) replaceCoreExecutable(sourcePath, targetPath string) (bool, error) {
 	previousPath := targetPath + ".replacing"
+	coreDebugf("replace executable start: source=%q target=%q", sourcePath, targetPath)
 	_ = os.Remove(previousPath)
 	if fileExists(targetPath) {
+		coreDebugf("existing executable found, moving aside: path=%q backup=%q", targetPath, previousPath)
 		if err := os.Rename(targetPath, previousPath); err != nil {
 			if isFileLockedError(err) {
+				coreDebugf("existing executable is locked: path=%q", targetPath)
 				return false, nil
 			}
+			coreDebugf("move existing executable aside failed: path=%q err=%v", targetPath, err)
 			return false, fmt.Errorf("prepare core replacement: %w", err)
 		}
 	}
 	if err := os.Rename(sourcePath, targetPath); err != nil {
+		coreDebugf("move new executable into place failed: source=%q target=%q err=%v", sourcePath, targetPath, err)
 		if fileExists(previousPath) {
-			_ = os.Rename(previousPath, targetPath)
+			if restoreErr := os.Rename(previousPath, targetPath); restoreErr != nil {
+				coreDebugf("restore previous executable failed: backup=%q target=%q err=%v", previousPath, targetPath, restoreErr)
+			} else {
+				coreDebugf("previous executable restored: target=%q", targetPath)
+			}
 		}
 		return false, fmt.Errorf("replace core executable: %w", err)
 	}
 	_ = os.Remove(previousPath)
+	coreDebugf("replace executable complete: target=%q", targetPath)
 	return true, nil
 }
 
@@ -1366,9 +1479,20 @@ func parseCoreVersion(value string) (string, error) {
 
 func coreChannel(version string) string {
 	if testChannelPattern.MatchString(version) {
-		return "test"
+		return coreChannelTest
 	}
-	return "stable"
+	return coreChannelStable
+}
+
+func normalizeCoreChannel(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case coreChannelStable:
+		return coreChannelStable, nil
+	case coreChannelTest:
+		return coreChannelTest, nil
+	default:
+		return "", errors.New("核心渠道必须是稳定版或测试版")
+	}
 }
 
 func githubRepository(template string) (string, string, error) {
@@ -1389,7 +1513,7 @@ func githubRepository(template string) (string, string, error) {
 func findLatestRelease(owner, repository, channel string) (string, error) {
 	client := newCoreHTTPClient(30 * time.Second)
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
-	if channel == "test" {
+	if channel == coreChannelTest {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100", url.PathEscape(owner), url.PathEscape(repository))
 	}
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -1406,7 +1530,7 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return "", fmt.Errorf("check core update: GitHub returned %s", response.Status)
 	}
-	if channel == "test" {
+	if channel == coreChannelTest {
 		var releases []githubRelease
 		if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&releases); err != nil {
 			return "", fmt.Errorf("parse GitHub releases: %w", err)
@@ -1604,7 +1728,9 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 		return
 	}
 	config.Version = version
-	config.Channel = coreChannel(version)
+	if config.Channel == "" {
+		config.Channel = coreChannel(version)
+	}
 	if fileExists(corePath) {
 		config.InstalledVersion = version
 		config.Installed = true

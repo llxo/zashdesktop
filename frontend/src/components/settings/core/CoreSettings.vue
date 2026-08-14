@@ -99,6 +99,21 @@
       </div>
       <div class="settings-grid">
         <div class="setting-item flex-col !items-stretch py-3">
+          <div class="flex items-center justify-between gap-3">
+            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
+            <div
+              :class="{
+                'pointer-events-none opacity-60':
+                  isSavingChannel || isSaving || isChecking || isDownloading,
+              }"
+            >
+              <SegmentedControl
+                :model-value="currentChannel"
+                :options="channelOptions"
+                @update:model-value="saveChannel"
+              />
+            </div>
+          </div>
           <div class="flex w-full flex-wrap gap-2">
             <select
               v-model="selectedSourceURL"
@@ -266,6 +281,7 @@
 import * as CoreService from '../../../../bindings/sing-box-gui/coreservice'
 import type { CoreConfig } from '../../../../bindings/sing-box-gui/models'
 import { version } from '@/assembly/version'
+import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import {
   ArrowDownCircleIcon,
@@ -275,6 +291,7 @@ import {
   PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'singbox' | 'mihomo'
@@ -340,6 +357,11 @@ const config = reactive<CoreConfig>({
   backendDebugLog: false,
 })
 const coreType = computed(() => props.coreType)
+const { t } = useI18n()
+const channelOptions = computed<SegmentOption[]>(() => [
+  { value: 'stable', label: t('coreStableBuild') },
+  { value: 'test', label: t('coreTestBuild') },
+])
 const defaultRunArgsPlaceholder = computed(() =>
   coreType.value === 'mihomo' ? '-d .' : 'run -c config.json -D .',
 )
@@ -350,6 +372,7 @@ const runArgsInput = ref('')
 const configURLInput = ref('')
 const runArgsDirty = ref(false)
 const isSaving = ref(false)
+const isSavingChannel = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
 const isValidatingURL = ref(false)
@@ -361,6 +384,7 @@ const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
 const urlDirty = ref(false)
+const currentChannel = computed(() => (config.channel === 'test' ? 'test' : 'stable'))
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
 const sourceOptions = computed(() => [
@@ -434,6 +458,18 @@ const selectDownloadSource = () => {
   if (selectedSourceURL.value) {
     urlInput.value = selectedSourceURL.value
     urlDirty.value = true
+  }
+}
+
+const saveChannel = async (rawChannel: string) => {
+  if (isSavingChannel.value || rawChannel === currentChannel.value) return
+  isSavingChannel.value = true
+  try {
+    applyConfig(await CoreService.SaveChannel(rawChannel))
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  } finally {
+    isSavingChannel.value = false
   }
 }
 
