@@ -16,7 +16,7 @@ import (
 
 const (
 	behaviorLayersKey = `Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers`
-	autoStartTaskName = "sing-box-gui"
+	autoStartTaskName = "zashdesktop"
 	autoStartDelay    = 30
 )
 
@@ -188,7 +188,7 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 
 	var args []string
 	if enabled {
-		temporary, err := os.CreateTemp("", "sing-box-gui-autostart-*.xml")
+		temporary, err := os.CreateTemp("", "zashdesktop-autostart-*.xml")
 		if err != nil {
 			return fmt.Errorf("create startup task file: %w", err)
 		}

@@ -278,8 +278,8 @@
 </template>
 
 <script setup lang="ts">
-import * as CoreService from '../../../../bindings/sing-box-gui/coreservice'
-import type { CoreConfig } from '../../../../bindings/sing-box-gui/models'
+import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
+import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
 import { version } from '@/assembly/version'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'

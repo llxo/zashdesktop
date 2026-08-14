@@ -137,7 +137,7 @@ func coreDebugf(format string, args ...any) {
 	coreDebugLogState.Lock()
 	defer coreDebugLogState.Unlock()
 	if coreDebugLogState.enabled && coreDebugLogState.logger != nil {
-		coreDebugLogState.logger.Printf("sing-box-gui: core: "+format, args...)
+	coreDebugLogState.logger.Printf("zashdesktop: core: "+format, args...)
 	}
 }
 
@@ -188,7 +188,7 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 	startupConfig, configErr := s.loadConfigLocked()
 	if configErr == nil {
 		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
-			log.Printf("sing-box-gui: configure backend debug log: %v", debugErr)
+			log.Printf("zashdesktop: configure backend debug log: %v", debugErr)
 		}
 	}
 	coreDebugf("service startup: executable=%q directory=%q", s.applicationPath, s.executableDir)
@@ -1440,7 +1440,7 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 		return "", fmt.Errorf("check core update: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "sing-box-gui")
+	request.Header.Set("User-Agent", "zashdesktop")
 	response, err := client.Do(request)
 	if err != nil {
 		return "", fmt.Errorf("check core update: %w", err)
@@ -1548,7 +1548,7 @@ func findReleaseAssetDigest(owner, repository, version, downloadURL string) (str
 			return "", err
 		}
 		request.Header.Set("Accept", "application/vnd.github+json")
-		request.Header.Set("User-Agent", "sing-box-gui")
+	request.Header.Set("User-Agent", "zashdesktop")
 		response, err := client.Do(request)
 		if err != nil {
 			return "", err

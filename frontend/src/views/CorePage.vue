@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import * as CoreService from '../../bindings/sing-box-gui/coreservice'
+import * as CoreService from '../../bindings/zashdesktop/coreservice'
 import CtrlsBar from '@/components/common/CtrlsBar.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import CoreSettings from '@/components/settings/core/CoreSettings.vue'

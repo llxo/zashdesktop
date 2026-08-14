@@ -1,4 +1,4 @@
-# sing-box-gui
+# zashdesktop
 
 Windows x64 desktop host. It uses Wails v3 and the system WebView2 runtime, so the frontend stays embedded without opening an external browser.
 
@@ -20,9 +20,9 @@ icon into the Windows executable resources.
 ## Command line
 
 ```text
-sing-box-gui.exe --api-url http://127.0.0.1:9090 --api-secret secret
-sing-box-gui.exe --start-hidden
-sing-box-gui.exe --no-tray
+zashdesktop.exe --api-url http://127.0.0.1:9090 --api-secret secret
+zashdesktop.exe --start-hidden
+zashdesktop.exe --no-tray
 ```
 
 With the tray enabled, closing the window destroys the WebView2 instance to reduce background memory

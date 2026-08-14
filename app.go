@@ -88,7 +88,7 @@ func (a *App) saveWindowState() {
 	width, height := window.Size()
 	state := windowState{X: x, Y: y, Width: width, Height: height}
 	if err := saveWindowState(a.windowStatePath, state); err != nil {
-		fmt.Printf("sing-box-gui: save window state: %v\n", err)
+		fmt.Printf("zashdesktop: save window state: %v\n", err)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (a *App) setupTray() {
 	tray := a.app.SystemTray.New()
 	menu := a.app.Menu.New()
 
-	menu.Add("打开 sing-box-gui").OnClick(func(*application.Context) {
+	menu.Add("打开 zashdesktop").OnClick(func(*application.Context) {
 		a.showWindow()
 	})
 	menu.AddSeparator()
@@ -126,7 +126,7 @@ func (a *App) setupTray() {
 
 	a.tray = tray
 	tray.SetIcon(appIcon)
-	tray.SetTooltip("sing-box-gui")
+	tray.SetTooltip("zashdesktop")
 	tray.SetMenu(menu)
 	tray.OnClick(a.showWindow)
 }

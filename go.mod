@@ -1,4 +1,4 @@
-module sing-box-gui
+module zashdesktop
 
 go 1.25.0
 

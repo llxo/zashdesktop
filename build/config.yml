@@ -1,9 +1,9 @@
 version: '3'
 
 info:
-  companyName: "sing-box-gui"
-  productName: "sing-box-gui"
-  productIdentifier: "com.singbox.gui"
+  companyName: "zashdesktop"
+  productName: "zashdesktop"
+  productIdentifier: "com.zashdesktop.app"
   description: "A native sing-box dashboard using the Clash API"
   copyright: ""
   comments: ""

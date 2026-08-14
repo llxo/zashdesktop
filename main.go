@@ -26,7 +26,7 @@ func main() {
 	}
 
 	app := application.New(application.Options{
-		Name:        "sing-box-gui",
+		Name:        "zashdesktop",
 		Description: "A native sing-box dashboard using the Clash API",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
@@ -37,7 +37,7 @@ func main() {
 			DisableQuitOnLastWindowClosed: !launch.NoTray,
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "sing-box-gui-single-instance",
+			UniqueID: "zashdesktop-single-instance",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				controller.showWindow()
 			},
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	if err := app.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "sing-box-gui:", err)
+		fmt.Fprintln(os.Stderr, "zashdesktop:", err)
 	}
 }
 
@@ -68,7 +68,7 @@ const (
 func (c LaunchConfig) windowOptions(state windowState) application.WebviewWindowOptions {
 	options := application.WebviewWindowOptions{
 		Name:             "main",
-		Title:            "sing-box-gui",
+		Title:            "zashdesktop",
 		URL:              launchURL(c),
 		Width:            defaultWindowWidth,
 		Height:           defaultWindowHeight,
@@ -101,7 +101,7 @@ func loadWindowState() (windowState, string) {
 		return windowState{}, ""
 	}
 
-	path := filepath.Join(configDir, "sing-box-gui", "window.json")
+	path := filepath.Join(configDir, "zashdesktop", "window.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return windowState{}, path
@@ -161,7 +161,7 @@ type LaunchConfig struct {
 }
 
 func parseLaunchConfig(args []string) LaunchConfig {
-	flags := flag.NewFlagSet("sing-box-gui", flag.ContinueOnError)
+	flags := flag.NewFlagSet("zashdesktop", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
 	config := LaunchConfig{}

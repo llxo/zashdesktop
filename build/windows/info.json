@@ -5,10 +5,10 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "sing-box-gui",
-			"FileDescription": "sing-box-gui",
-			"LegalCopyright": "Copyright (c) 2026 sing-box-gui",
-			"ProductName": "sing-box-gui",
+			"CompanyName": "zashdesktop",
+			"FileDescription": "zashdesktop",
+			"LegalCopyright": "Copyright (c) 2026 zashdesktop",
+			"ProductName": "zashdesktop",
 			"Comments": "A native sing-box dashboard using the Clash API"
 		}
 	}
