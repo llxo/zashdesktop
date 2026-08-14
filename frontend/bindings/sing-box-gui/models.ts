@@ -23,4 +23,5 @@ export interface CoreConfig {
     "runAsAdmin": boolean;
     "autoStart": boolean;
     "autoStartCore": boolean;
+    "backendDebugLog": boolean;
 }

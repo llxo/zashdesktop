@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +67,7 @@ type CoreConfig struct {
 	RunAsAdmin        bool   `json:"runAsAdmin"`
 	AutoStart         bool   `json:"autoStart"`
 	AutoStartCore     bool   `json:"autoStartCore"`
+	BackendDebugLog   bool   `json:"backendDebugLog"`
 }
 
 type persistedCoreProfiles struct {
@@ -74,12 +76,17 @@ type persistedCoreProfiles struct {
 }
 
 type CoreService struct {
-	executableDir   string
-	applicationPath string
-	operationMu     sync.Mutex
-	mu              sync.Mutex
-	process         *exec.Cmd
-	processDone     chan struct{}
+	executableDir    string
+	applicationPath  string
+	operationMu      sync.Mutex
+	mu               sync.Mutex
+	process          *exec.Cmd
+	processDone      chan struct{}
+	externalProcess  *os.Process
+	externalCoreType string
+	stateLogged      bool
+	lastRunning      bool
+	lastPID          int
 }
 
 type githubRelease struct {
@@ -105,6 +112,48 @@ func NewCoreService() (*CoreService, error) {
 	}, nil
 }
 
+var coreDebugLogState struct {
+	sync.Mutex
+	enabled bool
+	file    *os.File
+	logger  *log.Logger
+}
+
+func coreDebugf(format string, args ...any) {
+	coreDebugLogState.Lock()
+	defer coreDebugLogState.Unlock()
+	if coreDebugLogState.enabled && coreDebugLogState.logger != nil {
+		coreDebugLogState.logger.Printf("sing-box-gui: core: "+format, args...)
+	}
+}
+
+func configureCoreDebugLog(path string, enabled bool) error {
+	coreDebugLogState.Lock()
+	defer coreDebugLogState.Unlock()
+
+	if !enabled {
+		if coreDebugLogState.file != nil {
+			_ = coreDebugLogState.file.Close()
+		}
+		coreDebugLogState.enabled = false
+		coreDebugLogState.file = nil
+		coreDebugLogState.logger = nil
+		return nil
+	}
+	if coreDebugLogState.enabled && coreDebugLogState.file != nil {
+		return nil
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("open backend debug log: %w", err)
+	}
+	coreDebugLogState.file = file
+	coreDebugLogState.logger = log.New(file, "", log.LstdFlags)
+	coreDebugLogState.enabled = true
+	return nil
+}
+
 func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions) error {
 	executable, err := os.Executable()
 	if err != nil {
@@ -112,11 +161,34 @@ func (s *CoreService) ServiceStartup(context.Context, application.ServiceOptions
 	}
 	s.executableDir = filepath.Dir(executable)
 	s.applicationPath = executable
-	go s.startCoreOnStartup()
+	s.mu.Lock()
+	startupConfig, configErr := s.loadConfigLocked()
+	s.mu.Unlock()
+	if configErr == nil {
+		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
+			log.Printf("sing-box-gui: configure backend debug log: %v", debugErr)
+		}
+	}
+	coreDebugf("service startup: executable=%q directory=%q", s.applicationPath, s.executableDir)
+	go func() {
+		s.operationMu.Lock()
+		defer s.operationMu.Unlock()
+		s.startCoreOnStartup()
+	}()
 	return nil
 }
 
-func (*CoreService) ServiceShutdown() error { return nil }
+func (s *CoreService) ServiceShutdown() error {
+	coreDebugf("service shutdown")
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	err := s.stopManagedCoreProcess()
+	if err != nil {
+		coreDebugf("service shutdown: stop failed: %v", err)
+	}
+	_ = configureCoreDebugLog("", false)
+	return err
+}
 
 func (s *CoreService) ServiceName() string {
 	return "CoreService"
@@ -158,6 +230,7 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	config.RunAsAdmin = existing.RunAsAdmin
 	config.AutoStart = existing.AutoStart
 	config.AutoStartCore = existing.AutoStartCore
+	config.BackendDebugLog = existing.BackendDebugLog
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -229,7 +302,8 @@ func (s *CoreService) DownloadCore(currentVersion string) (CoreConfig, error) {
 	defer os.Remove(archivePath)
 
 	s.mu.Lock()
-	wasRunning := s.process != nil
+	s.detectExternalProcessLocked(config.CoreType)
+	wasRunning := s.process != nil || s.externalProcess != nil
 	runArgs := config.RunArgs
 	s.mu.Unlock()
 
@@ -397,7 +471,14 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.process != nil {
+	if s.process == nil && s.externalProcess == nil {
+		current, currentErr := s.loadConfigLocked()
+		if currentErr != nil {
+			return CoreConfig{}, currentErr
+		}
+		s.detectExternalProcessLocked(current.CoreType)
+	}
+	if s.process != nil || s.externalProcess != nil {
 		return CoreConfig{}, errors.New("请先停止当前核心再切换核心类型")
 	}
 
@@ -420,7 +501,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore bool) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backendDebugLog bool) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -441,7 +522,11 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore bool) (C
 	config.RunAsAdmin = runAsAdmin
 	config.AutoStart = autoStart
 	config.AutoStartCore = autoStartCore
+	config.BackendDebugLog = backendDebugLog
 	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
@@ -458,14 +543,28 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.process != nil {
-		return CoreConfig{}, errors.New("sing-box core is already running")
-	}
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	s.detectExternalProcessLocked(coreType)
+	if s.externalProcess != nil {
+		return CoreConfig{}, fmt.Errorf("%s core is already running (PID %d)", coreType, s.externalProcess.Pid)
+	}
+	if s.process != nil {
+		alive, aliveErr := coreProcessAlive(s.process.Process)
+		coreDebugf("start request: existing pid=%d alive=%t checkErr=%v", s.process.Process.Pid, alive, aliveErr)
+		if aliveErr != nil {
+			return CoreConfig{}, fmt.Errorf("check sing-box core status: %w", aliveErr)
+		}
+		if alive {
+			return CoreConfig{}, errors.New("sing-box core is already running")
+		}
+	}
+	if s.process != nil && s.processDone == nil {
+		return CoreConfig{}, errors.New("sing-box core is already running")
+	}
+
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -488,6 +587,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if len(args) == 0 {
 		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
 	}
+	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType), len(args), fileExists(s.configFilePath(config.CoreType)))
 
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
@@ -506,9 +606,11 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		_ = logFile.Close()
 		return CoreConfig{}, fmt.Errorf("start sing-box core: %w", err)
 	}
+	coreDebugf("process started: type=%s pid=%d", config.CoreType, command.Process.Pid)
 
 	config.RunArgs = runArgs
 	if err := s.saveConfigLocked(config); err != nil {
+		coreDebugf("process startup cleanup: save config failed: %v", err)
 		_ = command.Process.Kill()
 		_ = command.Wait()
 		_ = logFile.Close()
@@ -554,21 +656,74 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 	return s.startCore(rawArgs, rawCoreType)
 }
 
-func (s *CoreService) stopCoreProcess() error {
+func (s *CoreService) stopManagedCoreProcess() error {
 	s.mu.Lock()
 	process := s.process
 	done := s.processDone
 	s.mu.Unlock()
 	if process == nil {
+		coreDebugf("stop request: no managed core process")
 		return nil
+	}
+	return s.stopManagedProcess(process, done)
+}
+
+func (s *CoreService) stopCoreProcess() error {
+	s.mu.Lock()
+	process := s.process
+	done := s.processDone
+	external := s.externalProcess
+	s.mu.Unlock()
+	if process == nil && external == nil {
+		coreDebugf("stop request: no core process")
+		return nil
+	}
+	if process != nil {
+		return s.stopManagedProcess(process, done)
+	}
+	return s.stopExternalProcess(external)
+}
+
+func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) error {
+	if done == nil {
+		return errors.New("sing-box core process state is invalid")
 	}
 
 	select {
 	case <-done:
+		coreDebugf("stop request: pid=%d already exited", process.Process.Pid)
 		return nil
 	default:
 	}
 
+	alive, statusErr := coreProcessAlive(process.Process)
+	coreDebugf("stop request: pid=%d alive=%t checkErr=%v", process.Process.Pid, alive, statusErr)
+	if statusErr == nil && !alive {
+		<-done
+		return nil
+	}
+
+	// Give the core a chance to flush state and close listeners before forcing it down.
+	if err := requestCoreStop(process.Process); err != nil {
+		coreDebugf("graceful stop signal failed: pid=%d err=%v", process.Process.Pid, err)
+	} else {
+		coreDebugf("graceful stop signal sent: pid=%d", process.Process.Pid)
+	}
+	graceTimer := time.NewTimer(5 * time.Second)
+	select {
+	case <-done:
+		if !graceTimer.Stop() {
+			select {
+			case <-graceTimer.C:
+			default:
+			}
+		}
+		coreDebugf("core exited after graceful stop: pid=%d", process.Process.Pid)
+		return nil
+	case <-graceTimer.C:
+	}
+
+	coreDebugf("graceful stop timed out, forcing kill: pid=%d", process.Process.Pid)
 	if err := process.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		select {
 		case <-done:
@@ -579,14 +734,84 @@ func (s *CoreService) stopCoreProcess() error {
 	}
 	select {
 	case <-done:
+		coreDebugf("core exited after force kill: pid=%d", process.Process.Pid)
 		return nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
+		coreDebugf("core stop timed out: pid=%d", process.Process.Pid)
 		return errors.New("timed out waiting for sing-box core to stop")
+	}
+}
+
+func (s *CoreService) stopExternalProcess(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	alive, statusErr := coreProcessAlive(process)
+	coreDebugf("stop external request: pid=%d alive=%t checkErr=%v", process.Pid, alive, statusErr)
+	if statusErr == nil && !alive {
+		s.clearExternalProcess(process)
+		return nil
+	}
+	if err := requestCoreStop(process); err != nil {
+		coreDebugf("external graceful stop signal failed: pid=%d err=%v", process.Pid, err)
+	} else {
+		coreDebugf("external graceful stop signal sent: pid=%d", process.Pid)
+	}
+	if waitErr := waitForCoreProcessExit(process, 5*time.Second); waitErr == nil {
+		coreDebugf("external core exited after graceful stop: pid=%d", process.Pid)
+		s.clearExternalProcess(process)
+		return nil
+	}
+
+	coreDebugf("external graceful stop timed out, forcing kill: pid=%d", process.Pid)
+	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("stop external sing-box core: %w", err)
+	}
+	if err := waitForCoreProcessExit(process, 5*time.Second); err != nil {
+		coreDebugf("external core stop timed out: pid=%d", process.Pid)
+		return err
+	}
+	s.clearExternalProcess(process)
+	return nil
+}
+
+func waitForCoreProcessExit(process *os.Process, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		alive, err := coreProcessAlive(process)
+		if err != nil {
+			return err
+		}
+		if !alive {
+			return nil
+		}
+		select {
+		case <-deadline.C:
+			return errors.New("timed out waiting for external sing-box core to stop")
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *CoreService) clearExternalProcess(process *os.Process) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.externalProcess == process {
+		s.externalProcess = nil
+		s.externalCoreType = ""
 	}
 }
 
 func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan struct{}) {
 	err := command.Wait()
+	if err == nil {
+		coreDebugf("process exited: pid=%d path=%q", command.Process.Pid, command.Path)
+	} else {
+		coreDebugf("process exited with error: pid=%d path=%q err=%v", command.Process.Pid, command.Path, err)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(logFile, "\n[sing-box exited: %v]\n", err)
 	}
@@ -603,7 +828,8 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 
 func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.CoreType = normalizedCoreType(config.CoreType)
-	config.Running = s.process != nil
+	s.detectExternalProcessLocked(config.CoreType)
+	config.Running = false
 	config.PID = 0
 	config.LogPath = s.logFilePath(config.CoreType)
 	config.ConfigPath = s.configFilePath(config.CoreType)
@@ -611,8 +837,58 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
+	if s.process != nil {
+		alive, err := coreProcessAlive(s.process.Process)
+		if err != nil {
+			coreDebugf("runtime status check failed: pid=%d err=%v", s.process.Process.Pid, err)
+		}
+		config.Running = err == nil && alive
+	}
+	if !config.Running && s.externalProcess != nil {
+		alive, err := coreProcessAlive(s.externalProcess)
+		if err != nil {
+			coreDebugf("external runtime status check failed: pid=%d err=%v", s.externalProcess.Pid, err)
+		} else if alive {
+			config.Running = true
+			config.PID = s.externalProcess.Pid
+		} else {
+			s.externalProcess = nil
+			s.externalCoreType = ""
+		}
+	}
 	if config.Running {
 		config.PID = s.process.Process.Pid
+	}
+	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
+		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
+		s.stateLogged = true
+		s.lastRunning = config.Running
+		s.lastPID = config.PID
+	}
+}
+
+func (s *CoreService) detectExternalProcessLocked(coreType string) {
+	if s.process != nil {
+		return
+	}
+	if s.externalProcess != nil {
+		alive, err := coreProcessAlive(s.externalProcess)
+		if err == nil && alive {
+			return
+		}
+		coreDebugf("external core process no longer available: pid=%d err=%v", s.externalProcess.Pid, err)
+		s.externalProcess = nil
+		s.externalCoreType = ""
+	}
+	process, err := findExternalCoreProcess(coreType)
+	if err != nil {
+		coreDebugf("external core detection failed: type=%s err=%v", coreType, err)
+		return
+	}
+	if process != nil {
+		s.externalProcess = process
+		s.externalCoreType = coreType
+		coreDebugf("external core process detected: type=%s pid=%d", coreType, process.Pid)
 	}
 }
 
@@ -634,11 +910,12 @@ func (s *CoreService) startCoreOnStartup() {
 	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config.CoreType))
 	runArgs := config.RunArgs
 	s.mu.Unlock()
+	coreDebugf("startup check: loadErr=%v autoStartCore=%t coreInstalled=%t configAvailable=%t", err, config.AutoStartCore, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config.CoreType)))
 	if !shouldStart {
 		return
 	}
 	if _, err := s.startCore(runArgs, config.CoreType); err != nil {
-		fmt.Printf("sing-box-gui: start core on startup: %v\n", err)
+		coreDebugf("start core on startup failed: %v", err)
 	}
 }
 
@@ -1244,6 +1521,10 @@ func compareCoreVersions(left, right coreVersion) int {
 
 func (s *CoreService) configPath() string {
 	return filepath.Join(s.executableDir, "profiles.json")
+}
+
+func (s *CoreService) backendDebugLogPath() string {
+	return filepath.Join(s.executableDir, "debug.log")
 }
 
 func (s *CoreService) coreDirFor(coreType string) string {

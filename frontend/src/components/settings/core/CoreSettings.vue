@@ -227,6 +227,16 @@
             @change="saveBehavior"
           />
         </label>
+        <label class="setting-item">
+          <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
+          <input
+            v-model="config.backendDebugLog"
+            class="toggle"
+            type="checkbox"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior"
+          />
+        </label>
       </div>
     </section>
   </div>
@@ -277,6 +287,7 @@ const config = reactive<CoreConfig>({
   runAsAdmin: false,
   autoStart: false,
   autoStartCore: false,
+  backendDebugLog: false,
 })
 const coreType = ref<CoreType>('singbox')
 const defaultRunArgsPlaceholder = computed(() =>
@@ -395,7 +406,14 @@ const saveBehavior = async () => {
   if (isSavingBehavior.value) return
   isSavingBehavior.value = true
   try {
-    applyConfig(await CoreService.SaveBehavior(config.runAsAdmin, config.autoStart, config.autoStartCore))
+    applyConfig(
+      await CoreService.SaveBehavior(
+        config.runAsAdmin,
+        config.autoStart,
+        config.autoStartCore,
+        config.backendDebugLog,
+      ),
+    )
     showNotification({ content: 'coreBehaviorSaved', type: 'alert-success' })
   } catch (error) {
     await loadConfig()

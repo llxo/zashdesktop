@@ -607,6 +607,7 @@ const zh: LANG_MESSAGE = {
   coreRunAsAdmin: '以管理员身份运行',
   coreAutoStart: '自启动',
   coreAutoStartCore: '程序启动时开启核心',
+  backendDebugLog: '后端调试日志',
   coreBehaviorSaved: '行为设置已保存',
   actions: '操作',
   showAllPreset: '全部显示',
