@@ -108,12 +108,6 @@
               @change="selectDownloadSource"
             >
               <option
-                disabled
-                value=""
-              >
-                {{ $t('coreDownloadURL') }}
-              </option>
-              <option
                 v-for="source in sourceOptions"
                 :key="source.url"
                 :value="source.url"
@@ -305,7 +299,12 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
       url: 'https://github.com/SagerNet/sing-box/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
     },
   ],
-  mihomo: [],
+  mihomo: [
+    {
+      label: 'MetaCubeX/mihomo',
+      url: 'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-v{version}.zip',
+    },
+  ],
 }
 
 const props = defineProps<{
