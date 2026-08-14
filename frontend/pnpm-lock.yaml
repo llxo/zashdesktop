@@ -40,6 +40,9 @@ importers:
       '@vueuse/core':
         specifier: ^14.4.0
         version: 14.4.0(vue@3.5.40(typescript@6.0.3))
+      '@wailsio/runtime':
+        specifier: 3.0.0-beta.8
+        version: 3.0.0-beta.8
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -2673,6 +2676,10 @@ packages:
       }
     peerDependencies:
       vue: ^3.5.0
+
+  '@wailsio/runtime@3.0.0-beta.8':
+    resolution:
+      {integrity: sha512-c9PZJcOR9z1a6cxtBS2q5cygNajlxDE8Oxv/vvcTFYRbZSoOGBszq4uzlkPTOd0Bot1xkM81jnpaBgKWRpBh2g==}
 
   '@xterm/addon-fit@0.11.0':
     resolution:
@@ -7483,6 +7490,8 @@ snapshots:
   '@vueuse/shared@14.4.0(vue@3.5.40(typescript@6.0.3))':
     dependencies:
       vue: 3.5.40(typescript@6.0.3)
+
+  '@wailsio/runtime@3.0.0-beta.8': {}
 
   '@xterm/addon-fit@0.11.0': {}
 

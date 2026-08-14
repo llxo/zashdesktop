@@ -30,7 +30,7 @@ dev_mode:
       - "*.ts"
     git_ignore: true
   executes:
-    - cmd: wails3 generate bindings -ts -i -b -clean -d frontend/bindings
+    - cmd: wails3 generate bindings -ts -i -clean -d frontend/bindings
       type: blocking
     - cmd: pnpm --dir frontend exec vite --mode desktop --host 127.0.0.1 --port 9245 --strictPort
       type: background

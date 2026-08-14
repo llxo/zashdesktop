@@ -75,7 +75,7 @@ try {
     }
 
     Write-Host "Generating Wails bindings..."
-    Invoke-NativeCommand "wails3" @("generate", "bindings", "-ts", "-i", "-b", "-clean", "-d", "frontend/bindings")
+    Invoke-NativeCommand "wails3" @("generate", "bindings", "-ts", "-i", "-clean", "-d", "frontend/bindings")
     foreach ($bindingPath in @($coreServiceBindingPath, $modelsBindingPath)) {
         if (-not (Test-Path -LiteralPath $bindingPath)) {
             throw "Wails binding generation did not produce: $bindingPath"

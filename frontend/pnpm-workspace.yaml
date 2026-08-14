@@ -1,5 +1,8 @@
 minimumReleaseAge: 10080
 
+minimumReleaseAgeExclude:
+  - '@wailsio/runtime'
+
 allowBuilds:
   '@bufbuild/buf': true
   esbuild: true

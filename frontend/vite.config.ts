@@ -95,12 +95,5 @@ export default defineConfig(({ mode }) => {
       port: Number(process.env.WAILS_VITE_PORT) || 9245,
       strictPort: true,
     },
-    build: isDesktop
-      ? {
-          rollupOptions: {
-            external: ['/wails/runtime.js'],
-          },
-        }
-      : undefined,
   }
 })
