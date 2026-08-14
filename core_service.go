@@ -82,6 +82,7 @@ type CoreService struct {
 	mu               sync.Mutex
 	process          *exec.Cmd
 	processDone      chan struct{}
+	processCoreType  string
 	externalProcess  *os.Process
 	externalCoreType string
 	stateLogged      bool
@@ -471,16 +472,6 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.process == nil && s.externalProcess == nil {
-		current, currentErr := s.loadConfigLocked()
-		if currentErr != nil {
-			return CoreConfig{}, currentErr
-		}
-		s.detectExternalProcessLocked(current.CoreType)
-	}
-	if s.process != nil || s.externalProcess != nil {
-		return CoreConfig{}, errors.New("请先停止当前核心再切换核心类型")
-	}
 
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
@@ -547,9 +538,9 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.detectExternalProcessLocked(coreType)
+	s.detectAnyExternalProcessLocked()
 	if s.externalProcess != nil {
-		return CoreConfig{}, fmt.Errorf("%s core is already running (PID %d)", coreType, s.externalProcess.Pid)
+		return CoreConfig{}, fmt.Errorf("%s core is already running (PID %d)", s.externalCoreType, s.externalProcess.Pid)
 	}
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -558,7 +549,11 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 			return CoreConfig{}, fmt.Errorf("check sing-box core status: %w", aliveErr)
 		}
 		if alive {
-			return CoreConfig{}, errors.New("sing-box core is already running")
+			runningCoreType := s.processCoreType
+			if runningCoreType == "" {
+				runningCoreType = coreTypeSingbox
+			}
+			return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
 		}
 	}
 	if s.process != nil && s.processDone == nil {
@@ -620,6 +615,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	done := make(chan struct{})
 	s.process = command
 	s.processDone = done
+	s.processCoreType = coreType
 	go s.waitForCore(command, logFile, done)
 
 	s.applyRuntimeState(&config)
@@ -650,10 +646,30 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	s.mu.Lock()
+	s.detectAnyExternalProcessLocked()
+	if s.process != nil && s.processCoreType != coreType {
+		runningCoreType := s.processCoreType
+		if runningCoreType == "" {
+			runningCoreType = coreTypeSingbox
+		}
+		s.mu.Unlock()
+		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
+	}
+	if s.externalProcess != nil && s.externalCoreType != coreType {
+		runningCoreType := s.externalCoreType
+		s.mu.Unlock()
+		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
+	}
+	s.mu.Unlock()
 	if err := s.stopCoreProcess(); err != nil {
 		return CoreConfig{}, err
 	}
-	return s.startCore(rawArgs, rawCoreType)
+	return s.startCore(rawArgs, coreType)
 }
 
 func (s *CoreService) stopManagedCoreProcess() error {
@@ -821,6 +837,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 	if s.process == command {
 		s.process = nil
 		s.processDone = nil
+		s.processCoreType = ""
 	}
 	s.mu.Unlock()
 	close(done)
@@ -837,14 +854,14 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
-	if s.process != nil {
+	if s.process != nil && s.processCoreType == config.CoreType {
 		alive, err := coreProcessAlive(s.process.Process)
 		if err != nil {
 			coreDebugf("runtime status check failed: pid=%d err=%v", s.process.Process.Pid, err)
 		}
 		config.Running = err == nil && alive
 	}
-	if !config.Running && s.externalProcess != nil {
+	if !config.Running && s.externalProcess != nil && s.externalCoreType == config.CoreType {
 		alive, err := coreProcessAlive(s.externalProcess)
 		if err != nil {
 			coreDebugf("external runtime status check failed: pid=%d err=%v", s.externalProcess.Pid, err)
@@ -856,7 +873,7 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 			s.externalCoreType = ""
 		}
 	}
-	if config.Running {
+	if config.Running && s.process != nil && s.processCoreType == config.CoreType {
 		config.PID = s.process.Process.Pid
 	}
 	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
@@ -889,6 +906,16 @@ func (s *CoreService) detectExternalProcessLocked(coreType string) {
 		s.externalProcess = process
 		s.externalCoreType = coreType
 		coreDebugf("external core process detected: type=%s pid=%d", coreType, process.Pid)
+	}
+}
+
+func (s *CoreService) detectAnyExternalProcessLocked() {
+	if s.process != nil {
+		return
+	}
+	s.detectExternalProcessLocked(coreTypeSingbox)
+	if s.externalProcess == nil {
+		s.detectExternalProcessLocked(coreTypeMihomo)
 	}
 }
 
