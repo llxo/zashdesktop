@@ -52,3 +52,7 @@ export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePro
 export function StopCore(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1224211689);
 }
+
+export function ValidateURL(rawURL: string): $CancellablePromise<string> {
+    return $Call.ByID(1987657121, rawURL);
+}

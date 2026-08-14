@@ -99,6 +99,29 @@
       </div>
       <div class="settings-grid">
         <div class="setting-item flex-col !items-stretch py-3">
+          <div class="flex w-full flex-wrap gap-2">
+            <select
+              v-model="selectedSourceURL"
+              class="select select-sm min-w-44 flex-1"
+              :aria-label="$t('coreDownloadURL')"
+              :disabled="isSaving || isValidatingURL || isDownloading"
+              @change="selectDownloadSource"
+            >
+              <option
+                disabled
+                value=""
+              >
+                {{ $t('coreDownloadURL') }}
+              </option>
+              <option
+                v-for="source in sourceOptions"
+                :key="source.url"
+                :value="source.url"
+              >
+                {{ source.label }}
+              </option>
+            </select>
+          </div>
           <input
             v-model="urlInput"
             class="input input-sm w-full"
@@ -106,16 +129,17 @@
             :aria-label="$t('coreDownloadURLPlaceholder')"
             :placeholder="$t('coreDownloadURLPlaceholder')"
             @change="saveURL"
+            @keydown.enter.prevent="validateAndAddURL"
           />
 
           <div class="flex self-start flex-wrap gap-2">
             <button
               class="btn btn-primary btn-sm"
-              :disabled="isSaving || isDownloading || !urlInput.trim()"
+              :disabled="isSaving || isValidatingURL || isDownloading || !urlInput.trim()"
               @click="saveURL"
             >
               <span
-                v-if="isSaving"
+                v-if="isSaving || isValidatingURL"
                 class="loading loading-spinner h-4 w-4"
               ></span>
               <ArrowDownTrayIcon
@@ -256,9 +280,32 @@ import {
   PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'singbox' | 'mihomo'
+
+type DownloadSource = {
+  label: string
+  url: string
+}
+
+const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
+  singbox: [
+    {
+      label: 'llxo/sing-box-releases',
+      url: 'https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+    },
+    {
+      label: 'reF1nd/sing-box-releases',
+      url: 'https://github.com/reF1nd/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+    },
+    {
+      label: 'SagerNet/sing-box',
+      url: 'https://github.com/SagerNet/sing-box/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+    },
+  ],
+  mihomo: [],
+}
 
 const props = defineProps<{
   coreType: CoreType
@@ -297,12 +344,15 @@ const defaultRunArgsPlaceholder = computed(() =>
   coreType.value === 'mihomo' ? '-d .' : 'run -c config.json -D .',
 )
 const urlInput = ref('')
+const selectedSourceURL = ref('')
+const customDownloadSources = ref<DownloadSource[]>([])
 const runArgsInput = ref('')
 const configURLInput = ref('')
 const runArgsDirty = ref(false)
 const isSaving = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
+const isValidatingURL = ref(false)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const isRestarting = ref(false)
@@ -311,6 +361,47 @@ const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
+const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
+const sourceOptions = computed(() => [
+  ...builtInDownloadSources[coreType.value],
+  ...customDownloadSources.value,
+])
+
+const sourceLabel = (rawURL: string) => {
+  try {
+    const segments = new URL(rawURL).pathname.split('/').filter(Boolean)
+    return segments.length >= 2 ? `${segments[0]}/${segments[1]}` : rawURL
+  } catch {
+    return rawURL
+  }
+}
+
+const loadDownloadSources = () => {
+  customDownloadSources.value = []
+  try {
+    const stored = JSON.parse(localStorage.getItem(sourceStorageKey.value) || '[]')
+    if (!Array.isArray(stored)) return
+    const builtInURLs = new Set(builtInDownloadSources[coreType.value].map((source) => source.url))
+    customDownloadSources.value = stored
+      .filter((url): url is string => typeof url === 'string' && url.trim() !== '')
+      .map((url) => url.trim())
+      .filter((url, index, urls) => !builtInURLs.has(url) && urls.indexOf(url) === index)
+      .map((url) => ({ label: sourceLabel(url), url }))
+  } catch {
+    customDownloadSources.value = []
+  }
+}
+
+const persistDownloadSources = () => {
+  try {
+    localStorage.setItem(
+      sourceStorageKey.value,
+      JSON.stringify(customDownloadSources.value.map((source) => source.url)),
+    )
+  } catch {
+    // Local storage is optional in the desktop webview.
+  }
+}
 
 const applyConfig = (next: CoreConfig) => {
   const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
@@ -322,6 +413,32 @@ const applyConfig = (next: CoreConfig) => {
     runArgsDirty.value = false
   }
   configURLInput.value = next.configURL
+  selectedSourceURL.value = sourceOptions.value.some((source) => source.url === next.urlTemplate)
+    ? next.urlTemplate
+    : ''
+}
+
+const selectDownloadSource = () => {
+  if (selectedSourceURL.value) urlInput.value = selectedSourceURL.value
+}
+
+const validateAndAddURL = async () => {
+  if (isValidatingURL.value || !urlInput.value.trim()) return
+  isValidatingURL.value = true
+  try {
+    const normalizedURL = await CoreService.ValidateURL(urlInput.value.trim())
+    if (!sourceOptions.value.some((source) => source.url === normalizedURL)) {
+      customDownloadSources.value.push({ label: sourceLabel(normalizedURL), url: normalizedURL })
+      persistDownloadSources()
+    }
+    selectedSourceURL.value = normalizedURL
+    applyConfig(await CoreService.SaveURL(normalizedURL))
+    showNotification({ content: 'coreURLSaved', type: 'alert-success' })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  } finally {
+    isValidatingURL.value = false
+  }
 }
 
 const saveRunArgs = async () => {
@@ -467,6 +584,7 @@ const downloadCore = async () => {
 }
 
 onMounted(() => {
+  loadDownloadSources()
   void loadConfig()
   refreshTimer = setInterval(() => {
     if (!isStarting.value && !isStopping.value && !isRestarting.value && !isDownloading.value) {
@@ -474,6 +592,15 @@ onMounted(() => {
     }
   }, 1000)
 })
+
+watch(
+  () => props.coreType,
+  () => {
+    loadDownloadSources()
+    selectedSourceURL.value = ''
+    void loadConfig()
+  },
+)
 
 onUnmounted(() => {
   if (refreshTimer) {

@@ -90,6 +90,11 @@ export default defineConfig(({ mode }) => {
         net: fileURLToPath(new URL('./src/helper/netShim.ts', import.meta.url)),
       },
     },
+    server: {
+      host: '127.0.0.1',
+      port: Number(process.env.WAILS_VITE_PORT) || 9245,
+      strictPort: true,
+    },
     build: isDesktop
       ? {
           rollupOptions: {

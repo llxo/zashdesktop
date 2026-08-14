@@ -3,6 +3,7 @@ frontend/dist/
 frontend/.vite/
 frontend/.cache/
 build/*
+!build/config.yml
 !build/windows/
 build/windows/*
 !build/windows/icon.ico

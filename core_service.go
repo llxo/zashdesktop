@@ -239,6 +239,26 @@ func (s *CoreService) SaveURL(rawURL string) (CoreConfig, error) {
 	return config, nil
 }
 
+func (s *CoreService) ValidateURL(rawURL string) (string, error) {
+	config, err := parseCoreURL(rawURL)
+	if err != nil {
+		return "", err
+	}
+	owner, repository, err := githubRepository(config.URLTemplate)
+	if err != nil {
+		return "", err
+	}
+	version, err := findLatestRelease(owner, repository, config.Channel)
+	if err != nil {
+		return "", err
+	}
+	downloadURL := strings.ReplaceAll(config.URLTemplate, "{version}", version)
+	if _, err := findReleaseAssetDigest(owner, repository, version, downloadURL); err != nil {
+		return "", err
+	}
+	return config.URLTemplate, nil
+}
+
 func (s *CoreService) DownloadConfig(rawURL string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1456,9 +1476,9 @@ func findReleaseAssetDigest(owner, repository, version, downloadURL string) (str
 			}
 			return "", nil
 		}
-		return "", nil
+		return "", fmt.Errorf("core download asset not found: %s", assetName)
 	}
-	return "", nil
+	return "", errors.New("core release not found")
 }
 
 type coreVersion struct {

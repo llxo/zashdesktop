@@ -1,0 +1,38 @@
+version: '3'
+
+info:
+  companyName: "sing-box-gui"
+  productName: "sing-box-gui"
+  productIdentifier: "com.singbox.gui"
+  description: "A native sing-box dashboard using the Clash API"
+  copyright: ""
+  comments: ""
+  version: "0.0.1"
+
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - build
+      - .cache
+    file:
+      - .DS_Store
+      - .gitignore
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+      - "*.js"
+      - "*.ts"
+    git_ignore: true
+  executes:
+    - cmd: wails3 generate bindings -ts -i -b -clean -d frontend/bindings
+      type: blocking
+    - cmd: pnpm --dir frontend exec vite --mode desktop --host 127.0.0.1 --port 9245 --strictPort
+      type: background
+    - cmd: go run .
+      type: primary
