@@ -34,7 +34,9 @@ func configureCoreCommand(command *exec.Cmd) {
 
 func findExternalCoreProcess(coreType string) (*os.Process, error) {
 	name := coreExecutableNameFor(coreType)
-	output, err := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/FO", "CSV", "/NH").Output()
+	command := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/FO", "CSV", "/NH")
+	configureCoreCommand(command)
+	output, err := command.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list %s processes: %w", name, err)
 	}
