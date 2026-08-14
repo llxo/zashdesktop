@@ -128,6 +128,7 @@
             type="url"
             :aria-label="$t('coreDownloadURLPlaceholder')"
             :placeholder="$t('coreDownloadURLPlaceholder')"
+            @input="urlDirty = true"
             @change="saveURL"
             @keydown.enter.prevent="validateAndAddURL"
           />
@@ -360,6 +361,7 @@ const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
+const urlDirty = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
 const sourceOptions = computed(() => [
@@ -403,23 +405,37 @@ const persistDownloadSources = () => {
   }
 }
 
+const rememberDownloadSource = (rawURL: string) => {
+  const normalizedURL = rawURL.trim()
+  if (!normalizedURL || sourceOptions.value.some((source) => source.url === normalizedURL)) return
+  customDownloadSources.value.push({ label: sourceLabel(normalizedURL), url: normalizedURL })
+  persistDownloadSources()
+}
+
 const applyConfig = (next: CoreConfig) => {
   const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'singbox'
   Object.assign(config, next)
   if (nextCoreType !== props.coreType) emit('update:coreType', nextCoreType)
-  urlInput.value = next.urlTemplate
+  if (!urlDirty.value || nextCoreType !== props.coreType) {
+    urlInput.value = next.urlTemplate
+  }
   if (!runArgsDirty.value || nextCoreType !== props.coreType) {
     runArgsInput.value = next.runArgs
     runArgsDirty.value = false
   }
   configURLInput.value = next.configURL
-  selectedSourceURL.value = sourceOptions.value.some((source) => source.url === next.urlTemplate)
-    ? next.urlTemplate
-    : ''
+  if (!urlDirty.value || nextCoreType !== props.coreType) {
+    selectedSourceURL.value = sourceOptions.value.some((source) => source.url === next.urlTemplate)
+      ? next.urlTemplate
+      : ''
+  }
 }
 
 const selectDownloadSource = () => {
-  if (selectedSourceURL.value) urlInput.value = selectedSourceURL.value
+  if (selectedSourceURL.value) {
+    urlInput.value = selectedSourceURL.value
+    urlDirty.value = true
+  }
 }
 
 const validateAndAddURL = async () => {
@@ -427,12 +443,11 @@ const validateAndAddURL = async () => {
   isValidatingURL.value = true
   try {
     const normalizedURL = await CoreService.ValidateURL(urlInput.value.trim())
-    if (!sourceOptions.value.some((source) => source.url === normalizedURL)) {
-      customDownloadSources.value.push({ label: sourceLabel(normalizedURL), url: normalizedURL })
-      persistDownloadSources()
-    }
+    const next = await CoreService.SaveURL(normalizedURL)
+    rememberDownloadSource(normalizedURL)
     selectedSourceURL.value = normalizedURL
-    applyConfig(await CoreService.SaveURL(normalizedURL))
+    urlDirty.value = false
+    applyConfig(next)
     showNotification({ content: 'coreURLSaved', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -549,7 +564,10 @@ const saveURL = async () => {
   if (isSaving.value || !urlInput.value.trim()) return
   isSaving.value = true
   try {
-    applyConfig(await CoreService.SaveURL(urlInput.value))
+    const next = await CoreService.SaveURL(urlInput.value.trim())
+    rememberDownloadSource(next.urlTemplate)
+    urlDirty.value = false
+    applyConfig(next)
     showNotification({ content: 'coreURLSaved', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -587,7 +605,15 @@ onMounted(() => {
   loadDownloadSources()
   void loadConfig()
   refreshTimer = setInterval(() => {
-    if (!isStarting.value && !isStopping.value && !isRestarting.value && !isDownloading.value) {
+    if (
+      !urlDirty.value &&
+      !isSaving.value &&
+      !isChecking.value &&
+      !isStarting.value &&
+      !isStopping.value &&
+      !isRestarting.value &&
+      !isDownloading.value
+    ) {
       void loadConfig()
     }
   }, 1000)
@@ -597,6 +623,7 @@ watch(
   () => props.coreType,
   () => {
     loadDownloadSources()
+    urlDirty.value = false
     selectedSourceURL.value = ''
     void loadConfig()
   },
