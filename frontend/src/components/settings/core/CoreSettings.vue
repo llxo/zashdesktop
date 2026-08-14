@@ -90,32 +90,6 @@
             </button>
           </div>
         </div>
-        <div class="setting-item flex-col !items-stretch py-3">
-          <input
-            v-model="configURLInput"
-            class="input input-sm w-full"
-            type="url"
-            :aria-label="$t('coreConfigURLPlaceholder')"
-            :placeholder="$t('coreConfigURLPlaceholder')"
-          />
-          <div class="flex self-start flex-wrap gap-2">
-            <button
-              class="btn btn-primary btn-sm"
-              :disabled="isDownloadingConfig || !configURLInput.trim()"
-              @click="downloadConfig"
-            >
-              <span
-                v-if="isDownloadingConfig"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownTrayIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('downloadConfig') }}
-            </button>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -179,6 +153,40 @@
                 class="h-4 w-4"
               />
               {{ config.updateAvailable ? $t('updateCore') : $t('downloadCore') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('downloadConfig') }}
+      </div>
+      <div class="settings-grid">
+        <div class="setting-item flex-col !items-stretch py-3">
+          <input
+            v-model="configURLInput"
+            class="input input-sm w-full"
+            type="url"
+            :aria-label="$t('coreConfigURLPlaceholder')"
+            :placeholder="$t('coreConfigURLPlaceholder')"
+          />
+          <div class="flex self-start flex-wrap gap-2">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isDownloadingConfig || !configURLInput.trim()"
+              @click="downloadConfig"
+            >
+              <span
+                v-if="isDownloadingConfig"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowDownTrayIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('downloadConfig') }}
             </button>
           </div>
         </div>
