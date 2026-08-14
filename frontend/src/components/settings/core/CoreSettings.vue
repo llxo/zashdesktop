@@ -295,10 +295,12 @@ import { useI18n } from 'vue-i18n'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'singbox' | 'mihomo'
+type CoreChannel = 'stable' | 'test'
 
 type DownloadSource = {
   label: string
   url: string
+  channel?: CoreChannel
 }
 
 const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
@@ -318,8 +320,14 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
   ],
   mihomo: [
     {
-      label: 'MetaCubeX/mihomo',
+      label: 'MetaCubeX/mihomo 稳定版',
       url: 'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-v{version}.zip',
+      channel: 'stable',
+    },
+    {
+      label: 'MetaCubeX/mihomo 测试版',
+      url: 'https://github.com/MetaCubeX/mihomo/releases/download/{version}/mihomo-windows-amd64-{version}.zip',
+      channel: 'test',
     },
   ],
 }
@@ -384,7 +392,7 @@ const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
 const urlDirty = ref(false)
-const currentChannel = computed(() => (config.channel === 'test' ? 'test' : 'stable'))
+const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
 const sourceOptions = computed(() => [
@@ -465,7 +473,17 @@ const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
   try {
-    applyConfig(await CoreService.SaveChannel(rawChannel))
+    let next = await CoreService.SaveChannel(rawChannel)
+    const selectedBuiltInSource = builtInDownloadSources[coreType.value].some(
+      (source) => source.url === next.urlTemplate,
+    )
+    const channelSource = builtInDownloadSources[coreType.value].find(
+      (source) => source.channel === rawChannel,
+    )
+    if (coreType.value === 'mihomo' && channelSource && (selectedBuiltInSource || !next.urlTemplate)) {
+      next = await CoreService.SaveURL(channelSource.url)
+    }
+    applyConfig(next)
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
