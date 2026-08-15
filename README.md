@@ -22,6 +22,10 @@
 
 相比使用 zashboard 浏览器快捷方式，zashdesktop 可以显著减少常驻的浏览器内存占用。
 
+## 前端基线
+
+桌面版前端基于 [zashboard](https://github.com/Zephyruso/zashboard) `3.18.0`，基线 commit 为 [`58eb346b2846d72edc376647d9935bd65556669e`](https://github.com/Zephyruso/zashboard/commit/58eb346b2846d72edc376647d9935bd65556669e)。
+
 ## 使用
 
 ### 构建环境

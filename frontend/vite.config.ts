@@ -6,8 +6,6 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { version } from './package.json'
 
-const appVersion = process.env.APP_VERSION?.trim() || version
-
 const getGitCommitId = (): string => {
   try {
     const commitMessage = execSync('git log -1 --pretty=%B', { encoding: 'utf8' }).trim()
@@ -33,7 +31,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     define: {
-      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_VERSION__: JSON.stringify(version),
       __COMMIT_ID__: JSON.stringify(getGitCommitId()),
       __FONT__: JSON.stringify(isDesktop ? 'none' : font),
     },
