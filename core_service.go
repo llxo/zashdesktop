@@ -85,23 +85,24 @@ type persistedCoreProfiles struct {
 }
 
 type CoreService struct {
-	executableDir    string
-	applicationPath  string
-	operationMu      sync.Mutex
-	mu               sync.Mutex
-	configGeneration uint64
-	startupCancel    context.CancelFunc
-	startupDone      chan struct{}
-	shuttingDown     bool
-	process          *exec.Cmd
-	processDone      chan struct{}
-	processCoreType  string
-	externalProcess  *os.Process
-	externalCoreType string
-	stateLogged      bool
-	lastRunning      bool
-	lastPID          int
-	trayAPIURL       string
+	executableDir      string
+	applicationPath    string
+	operationMu        sync.Mutex
+	mu                 sync.Mutex
+	configGeneration   uint64
+	startupCancel      context.CancelFunc
+	startupDone        chan struct{}
+	shuttingDown       bool
+	process            *exec.Cmd
+	processDone        chan struct{}
+	processCoreType    string
+	externalProcess    *os.Process
+	externalCoreType   string
+	stateLogged        bool
+	lastRunning        bool
+	lastPID            int
+	trayAPIURL         string
+	keepCoreOnShutdown bool
 }
 
 type githubRelease struct {
@@ -211,6 +212,7 @@ func (s *CoreService) ServiceShutdown() error {
 	s.shuttingDown = true
 	cancelStartup := s.startupCancel
 	startupDone := s.startupDone
+	keepCore := s.keepCoreOnShutdown
 	s.mu.Unlock()
 	if cancelStartup != nil {
 		cancelStartup()
@@ -224,6 +226,11 @@ func (s *CoreService) ServiceShutdown() error {
 		s.startupDone = nil
 	}
 	s.mu.Unlock()
+	if keepCore {
+		coreDebugf("service shutdown: keeping managed core running")
+		_ = configureCoreDebugLog("", false)
+		return nil
+	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	err := s.stopManagedCoreProcess()
@@ -236,6 +243,12 @@ func (s *CoreService) ServiceShutdown() error {
 
 func (s *CoreService) ServiceName() string {
 	return "CoreService"
+}
+
+func (s *CoreService) keepCoreRunningOnShutdown() {
+	s.mu.Lock()
+	s.keepCoreOnShutdown = true
+	s.mu.Unlock()
 }
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {

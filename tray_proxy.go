@@ -111,7 +111,10 @@ func (a *App) setTrayMenu(groups []trayProxy) {
 	}
 
 	menu.AddSeparator()
-	menu.Add("退出").OnClick(func(*application.Context) {
+	menu.Add("退出 zashdesktop").OnClick(func(*application.Context) {
+		a.quitWithoutStoppingCore()
+	})
+	menu.Add("退出 zashdesktop 和核心").OnClick(func(*application.Context) {
 		a.quit()
 	})
 	a.tray.SetMenu(menu)
