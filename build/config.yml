@@ -34,5 +34,5 @@ dev_mode:
       type: blocking
     - cmd: pnpm --dir frontend exec vite --mode desktop --host 127.0.0.1 --port 9245 --strictPort
       type: background
-    - cmd: go run .
+    - cmd: go run . -dev
       type: primary

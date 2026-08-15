@@ -37,7 +37,7 @@ func main() {
 			DisableQuitOnLastWindowClosed: !launch.NoTray,
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "zashdesktop-single-instance",
+			UniqueID: singleInstanceID(launch),
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				controller.showWindow()
 			},
@@ -158,6 +158,14 @@ type LaunchConfig struct {
 	APIType     string
 	StartHidden bool
 	NoTray      bool
+	DevMode     bool
+}
+
+func singleInstanceID(config LaunchConfig) string {
+	if config.DevMode {
+		return "zashdesktop-dev-single-instance"
+	}
+	return "zashdesktop-single-instance"
 }
 
 func parseLaunchConfig(args []string) LaunchConfig {
@@ -170,6 +178,7 @@ func parseLaunchConfig(args []string) LaunchConfig {
 	flags.StringVar(&config.APIType, "api-type", "clash", "API type: clash or sing-box")
 	flags.BoolVar(&config.StartHidden, "start-hidden", false, "Start in the system tray")
 	flags.BoolVar(&config.NoTray, "no-tray", false, "Disable the system tray icon")
+	flags.BoolVar(&config.DevMode, "dev", false, "Use the development instance")
 	_ = flags.Parse(args)
 
 	return config
