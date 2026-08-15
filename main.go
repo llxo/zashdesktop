@@ -20,6 +20,7 @@ func main() {
 	launch := parseLaunchConfig(os.Args[1:])
 	windowState, windowStatePath := loadWindowState()
 	controller := &App{
+		coreService:     &CoreService{},
 		launch:          launch,
 		windowState:     windowState,
 		windowStatePath: windowStatePath,
@@ -43,7 +44,7 @@ func main() {
 			},
 		},
 		Services: []application.Service{
-			application.NewService(&CoreService{}),
+			application.NewService(controller.coreService),
 		},
 	})
 	controller.app = app

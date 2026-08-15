@@ -33,8 +33,8 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore, backendDebugLog, rawCoreType);
+export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartCore: boolean, backendDebugLog: boolean, rawTrayAPIURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartCore, backendDebugLog, rawTrayAPIURL, rawCoreType);
 }
 
 export function SaveChannel(rawChannel: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {

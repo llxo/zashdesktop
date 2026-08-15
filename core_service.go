@@ -76,6 +76,7 @@ type CoreConfig struct {
 	AutoStart         bool   `json:"autoStart"`
 	AutoStartCore     bool   `json:"autoStartCore"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
+	TrayAPIURL        string `json:"trayAPIURL"`
 }
 
 type persistedCoreProfiles struct {
@@ -100,6 +101,7 @@ type CoreService struct {
 	stateLogged      bool
 	lastRunning      bool
 	lastPID          int
+	trayAPIURL       string
 }
 
 type githubRelease struct {
@@ -136,7 +138,7 @@ func coreDebugf(format string, args ...any) {
 	coreDebugLogState.Lock()
 	defer coreDebugLogState.Unlock()
 	if coreDebugLogState.enabled && coreDebugLogState.logger != nil {
-	coreDebugLogState.logger.Printf("zashdesktop: core: "+format, args...)
+		coreDebugLogState.logger.Printf("zashdesktop: core: "+format, args...)
 	}
 }
 
@@ -186,6 +188,9 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 	s.mu.Unlock()
 	startupConfig, configErr := s.loadConfigLocked()
 	if configErr == nil {
+		s.mu.Lock()
+		s.trayAPIURL = startupConfig.TrayAPIURL
+		s.mu.Unlock()
 		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
 			log.Printf("zashdesktop: configure backend debug log: %v", debugErr)
 		}
@@ -291,6 +296,7 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	config.AutoStart = existing.AutoStart
 	config.AutoStartCore = existing.AutoStartCore
 	config.BackendDebugLog = existing.BackendDebugLog
+	config.TrayAPIURL = existing.TrayAPIURL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
@@ -666,8 +672,12 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	trayAPIURL, err := normalizeTrayAPIURL(rawTrayAPIURL)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -689,6 +699,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backend
 	config.AutoStart = autoStart
 	config.AutoStartCore = autoStartCore
 	config.BackendDebugLog = backendDebugLog
+	config.TrayAPIURL = trayAPIURL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
@@ -697,6 +708,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backend
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	s.trayAPIURL = trayAPIURL
 	if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
 		return CoreConfig{}, err
 	}
@@ -1179,6 +1191,9 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 		config = CoreConfig{}
 	}
 	config.CoreType = coreType
+	if strings.TrimSpace(config.TrayAPIURL) == "" {
+		config.TrayAPIURL = defaultTrayAPIURL
+	}
 	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType)
 	config.Installed = fileExists(config.CorePath)
@@ -1532,7 +1547,7 @@ func findReleaseAssetDigest(owner, repository, version, downloadURL string) (str
 			return "", err
 		}
 		request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "zashdesktop")
+		request.Header.Set("User-Agent", "zashdesktop")
 		response, err := client.Do(request)
 		if err != nil {
 			return "", err

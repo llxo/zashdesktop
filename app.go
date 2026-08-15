@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -10,16 +11,20 @@ import (
 )
 
 type App struct {
-	app             *application.App
-	window          *application.WebviewWindow
-	tray            *application.SystemTray
-	launch          LaunchConfig
-	windowState     windowState
-	windowStatePath string
-	saveTimer       *time.Timer
-	saveMu          sync.Mutex
-	quitting        bool
-	mu              sync.Mutex
+	app                  *application.App
+	coreService          *CoreService
+	window               *application.WebviewWindow
+	tray                 *application.SystemTray
+	launch               LaunchConfig
+	windowState          windowState
+	windowStatePath      string
+	saveTimer            *time.Timer
+	saveMu               sync.Mutex
+	trayProxyCancel      context.CancelFunc
+	trayProxyFingerprint string
+	trayProxyRefreshMu   sync.Mutex
+	quitting             bool
+	mu                   sync.Mutex
 }
 
 func (a *App) showWindow() {
@@ -114,26 +119,22 @@ func (a *App) releaseWindow(*application.WindowEvent) {
 
 func (a *App) setupTray() {
 	tray := a.app.SystemTray.New()
-	menu := a.app.Menu.New()
-
-	menu.Add("打开 zashdesktop").OnClick(func(*application.Context) {
-		a.showWindow()
-	})
-	menu.AddSeparator()
-	menu.Add("退出").OnClick(func(*application.Context) {
-		a.quit()
-	})
 
 	a.tray = tray
 	tray.SetIcon(appIcon)
 	tray.SetTooltip("zashdesktop")
-	tray.SetMenu(menu)
+	a.setTrayMenu(nil)
 	tray.OnClick(a.showWindow)
+	a.startTrayProxyRefresh()
 }
 
 func (a *App) quit() {
 	a.mu.Lock()
 	a.quitting = true
+	cancelTrayProxy := a.trayProxyCancel
 	a.mu.Unlock()
+	if cancelTrayProxy != nil {
+		cancelTrayProxy()
+	}
 	a.app.Quit()
 }

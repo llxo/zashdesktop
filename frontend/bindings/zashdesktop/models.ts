@@ -24,4 +24,5 @@ export interface CoreConfig {
     "autoStart": boolean;
     "autoStartCore": boolean;
     "backendDebugLog": boolean;
+    "trayAPIURL": string;
 }

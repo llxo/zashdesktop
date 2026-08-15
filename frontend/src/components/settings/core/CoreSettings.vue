@@ -272,6 +272,17 @@
             @change="saveBehavior"
           />
         </label>
+        <label class="setting-item flex-col !items-stretch py-3">
+          <span class="setting-item-label">{{ $t('trayAPIURL') }}</span>
+          <input
+            v-model="config.trayAPIURL"
+            class="input input-sm w-full"
+            type="url"
+            :placeholder="$t('trayAPIURLPlaceholder')"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior"
+          />
+        </label>
       </div>
     </section>
   </div>
@@ -360,6 +371,7 @@ const config = reactive<CoreConfig>({
   autoStart: false,
   autoStartCore: false,
   backendDebugLog: false,
+  trayAPIURL: 'http://127.0.0.1:9090',
 })
 const coreType = computed(() => props.coreType)
 const { t } = useI18n()
@@ -622,6 +634,7 @@ const saveBehavior = async () => {
         config.autoStart,
         config.autoStartCore,
         config.backendDebugLog,
+        config.trayAPIURL,
         coreType.value,
       ),
     )

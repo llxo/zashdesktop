@@ -608,6 +608,8 @@ const zh: LANG_MESSAGE = {
   coreAutoStart: '自启动',
   coreAutoStartCore: '程序启动时开启核心',
   backendDebugLog: '后端调试日志',
+  trayAPIURL: '托盘使用 API',
+  trayAPIURLPlaceholder: 'http://127.0.0.1:9090',
   coreBehaviorSaved: '行为设置已保存',
   actions: '操作',
   showAllPreset: '全部显示',
