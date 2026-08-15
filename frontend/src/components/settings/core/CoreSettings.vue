@@ -22,7 +22,7 @@
             :aria-label="$t('coreRunArgs')"
             :placeholder="defaultRunArgsPlaceholder"
             :disabled="config.running || isStarting || isStopping || isRestarting"
-            @input="runArgsDirty = true"
+            @input="touchDraft('runArgs')"
           />
 
           <div class="flex self-start flex-wrap gap-2">
@@ -137,7 +137,7 @@
             type="url"
             :aria-label="$t('coreDownloadURLPlaceholder')"
             :placeholder="$t('coreDownloadURLPlaceholder')"
-            @input="urlDirty = true"
+            @input="touchDraft('url')"
             @change="saveURL"
             @keydown.enter.prevent="validateAndAddURL"
           />
@@ -205,6 +205,7 @@
             type="url"
             :aria-label="$t('coreConfigURLPlaceholder')"
             :placeholder="$t('coreConfigURLPlaceholder')"
+            @input="touchDraft('configURL')"
           />
           <div class="flex self-start flex-wrap gap-2">
             <button
@@ -235,7 +236,7 @@
         <label class="setting-item">
           <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
           <input
-            v-model="config.runAsAdmin"
+            v-model="behaviorDraft.runAsAdmin"
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
@@ -245,7 +246,7 @@
         <label class="setting-item">
           <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
           <input
-            v-model="config.autoStart"
+            v-model="behaviorDraft.autoStart"
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
@@ -255,7 +256,7 @@
         <label class="setting-item">
           <span class="setting-item-label">{{ $t('coreAutoStartCore') }}</span>
           <input
-            v-model="config.autoStartCore"
+            v-model="behaviorDraft.autoStartCore"
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
@@ -265,7 +266,7 @@
         <label class="setting-item">
           <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
           <input
-            v-model="config.backendDebugLog"
+            v-model="behaviorDraft.backendDebugLog"
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
@@ -275,11 +276,12 @@
         <label class="setting-item flex-col !items-stretch py-3">
           <span class="setting-item-label">{{ $t('trayAPIURL') }}</span>
           <input
-            v-model="config.trayAPIURL"
+            v-model="behaviorDraft.trayAPIURL"
             class="input input-sm w-full"
             type="url"
             :placeholder="$t('trayAPIURLPlaceholder')"
             :disabled="isSavingBehavior"
+            @input="touchDraft('behavior')"
             @change="saveBehavior"
           />
         </label>
@@ -307,6 +309,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'sing-box' | 'mihomo'
 type CoreChannel = 'stable' | 'test'
+type DraftKey = 'url' | 'runArgs' | 'configURL' | 'behavior'
 
 type DownloadSource = {
   label: string
@@ -373,6 +376,14 @@ const config = reactive<CoreConfig>({
   backendDebugLog: false,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
+// Polling replaces config every second. Editable controls must bind to drafts.
+const behaviorDraft = reactive({
+  runAsAdmin: false,
+  autoStart: false,
+  autoStartCore: false,
+  backendDebugLog: false,
+  trayAPIURL: 'http://127.0.0.1:9090',
+})
 const coreType = computed(() => props.coreType)
 const { t } = useI18n()
 const channelOptions = computed<SegmentOption[]>(() => [
@@ -387,7 +398,29 @@ const selectedSourceURL = ref('')
 const customDownloadSources = ref<DownloadSource[]>([])
 const runArgsInput = ref('')
 const configURLInput = ref('')
-const runArgsDirty = ref(false)
+// A response may only clean the exact draft revision that it submitted.
+const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
+  url: { dirty: false, revision: 0 },
+  runArgs: { dirty: false, revision: 0 },
+  configURL: { dirty: false, revision: 0 },
+  behavior: { dirty: false, revision: 0 },
+})
+const touchDraft = (key: DraftKey) => {
+  draftState[key].dirty = true
+  draftState[key].revision += 1
+}
+const beginDraftSave = (key: DraftKey) => {
+  draftState[key].dirty = true
+  return draftState[key].revision
+}
+const commitDraftSave = (key: DraftKey, revision: number) => {
+  if (draftState[key].revision !== revision) return false
+  draftState[key].dirty = false
+  return true
+}
+const resetDraft = (key: DraftKey) => {
+  draftState[key].dirty = false
+}
 const isSaving = ref(false)
 const isSavingChannel = ref(false)
 const isChecking = ref(false)
@@ -400,10 +433,35 @@ const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
-const urlDirty = ref(false)
+const isConfigMutationPending = computed(
+  () =>
+    isSaving.value ||
+    isSavingChannel.value ||
+    isChecking.value ||
+    isDownloading.value ||
+    isValidatingURL.value ||
+    isStarting.value ||
+    isStopping.value ||
+    isRestarting.value ||
+    isSavingRunArgs.value ||
+    isDownloadingConfig.value ||
+    isSavingBehavior.value,
+)
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshRequest = 0
+type ConfigRequest = { id: number; coreType: CoreType }
+const beginConfigRequest = (): ConfigRequest => {
+  isRefreshing.value = false
+  return { id: ++refreshRequest, coreType: coreType.value }
+}
+const isCurrentConfigRequest = (request: ConfigRequest) =>
+  request.id === refreshRequest && request.coreType === coreType.value
+const applyCurrentConfig = (request: ConfigRequest, next: CoreConfig, forceDrafts = false) => {
+  if (!isCurrentConfigRequest(request)) return false
+  applyConfig(next, forceDrafts)
+  return true
+}
 const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
 const sourceOptions = computed(() => [
   ...builtInDownloadSources[coreType.value],
@@ -460,39 +518,55 @@ const rememberDownloadSource = (rawURL: string) => {
   persistDownloadSources()
 }
 
-const applyConfig = (next: CoreConfig) => {
+const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
+  const coreChanged = nextCoreType !== props.coreType
+  const syncAllDrafts = forceDrafts || coreChanged
   Object.assign(config, next)
-  if (nextCoreType !== props.coreType) emit('update:coreType', nextCoreType)
-  if (!urlDirty.value || nextCoreType !== props.coreType) {
+  if (coreChanged) emit('update:coreType', nextCoreType)
+  if (syncAllDrafts || !draftState.url.dirty) {
     urlInput.value = next.urlTemplate
-  }
-  if (!runArgsDirty.value || nextCoreType !== props.coreType) {
-    runArgsInput.value = next.runArgs
-    runArgsDirty.value = false
-  }
-  configURLInput.value = next.configURL
-  if (!urlDirty.value || nextCoreType !== props.coreType) {
+    resetDraft('url')
     selectedSourceURL.value = sourceOptions.value.some(
       (source) => sourceURL(source) === next.urlTemplate,
     )
       ? next.urlTemplate
       : ''
   }
+  if (syncAllDrafts || !draftState.runArgs.dirty) {
+    runArgsInput.value = next.runArgs
+    resetDraft('runArgs')
+  }
+  if (syncAllDrafts || !draftState.configURL.dirty) {
+    configURLInput.value = next.configURL
+    resetDraft('configURL')
+  }
+  if (syncAllDrafts || !draftState.behavior.dirty) {
+    Object.assign(behaviorDraft, {
+      runAsAdmin: next.runAsAdmin,
+      autoStart: next.autoStart,
+      autoStartCore: next.autoStartCore,
+      backendDebugLog: next.backendDebugLog,
+      trayAPIURL: next.trayAPIURL,
+    })
+    resetDraft('behavior')
+  }
 }
 
 const selectDownloadSource = () => {
   if (selectedSourceURL.value) {
     urlInput.value = selectedSourceURL.value
-    urlDirty.value = true
+    touchDraft('url')
   }
 }
 
 const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
+  const request = beginConfigRequest()
   try {
     let next = await CoreService.SaveChannel(rawChannel, coreType.value)
+    if (!isCurrentConfigRequest(request)) return
     const selectedBuiltInSource = builtInDownloadSources[coreType.value].some(
       (source) =>
         source.url === next.urlTemplate ||
@@ -504,9 +578,11 @@ const saveChannel = async (rawChannel: string) => {
     if (coreType.value === 'mihomo' && channelSource && (selectedBuiltInSource || !next.urlTemplate)) {
       next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel), coreType.value)
     }
-    applyConfig(next)
+    applyCurrentConfig(request, next)
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSavingChannel.value = false
   }
@@ -515,16 +591,22 @@ const saveChannel = async (rawChannel: string) => {
 const validateAndAddURL = async () => {
   if (isValidatingURL.value || !urlInput.value.trim()) return
   isValidatingURL.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('url')
   try {
     const normalizedURL = await CoreService.ValidateURL(urlInput.value.trim())
+    if (!isCurrentConfigRequest(request)) return
     const next = await CoreService.SaveURL(normalizedURL, coreType.value)
+    if (!isCurrentConfigRequest(request)) return
     rememberDownloadSource(normalizedURL)
     selectedSourceURL.value = normalizedURL
-    urlDirty.value = false
-    applyConfig(next)
+    commitDraftSave('url', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreURLSaved', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isValidatingURL.value = false
   }
@@ -533,13 +615,18 @@ const validateAndAddURL = async () => {
 const saveRunArgs = async () => {
   if (isSavingRunArgs.value || config.running) return
   isSavingRunArgs.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('runArgs')
   try {
     const next = await CoreService.SaveRunArgs(runArgsInput.value, coreType.value)
-    runArgsDirty.value = false
-    applyConfig(next)
+    if (!isCurrentConfigRequest(request)) return
+    commitDraftSave('runArgs', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreRunArgsSaved', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSavingRunArgs.value = false
   }
@@ -548,13 +635,18 @@ const saveRunArgs = async () => {
 const startCore = async () => {
   if (isStarting.value || config.running) return
   isStarting.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('runArgs')
   try {
     const next = await CoreService.StartCore(runArgsInput.value, coreType.value)
-    runArgsDirty.value = false
-    applyConfig(next)
+    if (!isCurrentConfigRequest(request)) return
+    commitDraftSave('runArgs', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isStarting.value = false
   }
@@ -563,11 +655,16 @@ const startCore = async () => {
 const stopCore = async () => {
   if (isStopping.value || !config.running) return
   isStopping.value = true
+  const request = beginConfigRequest()
   try {
-    applyConfig(await CoreService.StopCore())
-    showNotification({ content: 'coreStoppedSuccess', type: 'alert-success' })
+    const next = await CoreService.StopCore()
+    if (applyCurrentConfig(request, next)) {
+      showNotification({ content: 'coreStoppedSuccess', type: 'alert-success' })
+    }
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isStopping.value = false
   }
@@ -576,13 +673,18 @@ const stopCore = async () => {
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('runArgs')
   try {
     const next = await CoreService.RestartCore(runArgsInput.value, coreType.value)
-    runArgsDirty.value = false
-    applyConfig(next)
+    if (!isCurrentConfigRequest(request)) return
+    commitDraftSave('runArgs', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isRestarting.value = false
   }
@@ -591,32 +693,37 @@ const restartCore = async () => {
 const downloadConfig = async () => {
   if (isDownloadingConfig.value || !configURLInput.value.trim()) return
   isDownloadingConfig.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('configURL')
   try {
-    applyConfig(await CoreService.DownloadConfig(configURLInput.value, coreType.value))
+    const next = await CoreService.DownloadConfig(configURLInput.value, coreType.value)
+    if (!isCurrentConfigRequest(request)) return
+    commitDraftSave('configURL', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isDownloadingConfig.value = false
   }
 }
 
-const loadConfig = async (useActiveCore = false) => {
-  const request = ++refreshRequest
-  const requestedCoreType = coreType.value
+const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
+  const request = beginConfigRequest()
   isRefreshing.value = true
   try {
     const next = useActiveCore
       ? await CoreService.GetConfig()
-      : await CoreService.GetConfigForType(requestedCoreType)
-    if (request !== refreshRequest) return
-    applyConfig(next)
+      : await CoreService.GetConfigForType(request.coreType)
+    applyCurrentConfig(request, next, forceDrafts)
   } catch (error) {
-    if (request === refreshRequest) {
+    if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
-    if (request === refreshRequest) {
+    if (isCurrentConfigRequest(request)) {
       isRefreshing.value = false
     }
   }
@@ -624,24 +731,26 @@ const loadConfig = async (useActiveCore = false) => {
 
 const saveBehavior = async () => {
   if (isSavingBehavior.value) return
-  // Do not let an in-flight refresh restore the values from before this save.
-  refreshRequest += 1
   isSavingBehavior.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('behavior')
   try {
-    applyConfig(
-      await CoreService.SaveBehavior(
-        config.runAsAdmin,
-        config.autoStart,
-        config.autoStartCore,
-        config.backendDebugLog,
-        config.trayAPIURL,
-        coreType.value,
-      ),
+    const next = await CoreService.SaveBehavior(
+      behaviorDraft.runAsAdmin,
+      behaviorDraft.autoStart,
+      behaviorDraft.autoStartCore,
+      behaviorDraft.backendDebugLog,
+      behaviorDraft.trayAPIURL,
+      coreType.value,
     )
+    if (!isCurrentConfigRequest(request)) return
+    commitDraftSave('behavior', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreBehaviorSaved', type: 'alert-success' })
   } catch (error) {
-    await loadConfig()
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSavingBehavior.value = false
   }
@@ -650,14 +759,19 @@ const saveBehavior = async () => {
 const saveURL = async () => {
   if (isSaving.value || !urlInput.value.trim()) return
   isSaving.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('url')
   try {
     const next = await CoreService.SaveURL(urlInput.value.trim(), coreType.value)
+    if (!isCurrentConfigRequest(request)) return
     rememberDownloadSource(next.urlTemplate)
-    urlDirty.value = false
-    applyConfig(next)
+    commitDraftSave('url', draftRevision)
+    applyCurrentConfig(request, next)
     showNotification({ content: 'coreURLSaved', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSaving.value = false
   }
@@ -666,10 +780,16 @@ const saveURL = async () => {
 const checkUpdate = async () => {
   if (isChecking.value || !urlInput.value.trim()) return
   isChecking.value = true
+  const request = beginConfigRequest()
   try {
-    applyConfig(await CoreService.CheckUpdate(version.value || '', coreType.value))
+    applyCurrentConfig(
+      request,
+      await CoreService.CheckUpdate(version.value || '', coreType.value),
+    )
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isChecking.value = false
   }
@@ -678,11 +798,16 @@ const checkUpdate = async () => {
 const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
+  const request = beginConfigRequest()
   try {
-    applyConfig(await CoreService.DownloadCore(version.value || '', coreType.value))
-    showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
+    const next = await CoreService.DownloadCore(version.value || '', coreType.value)
+    if (applyCurrentConfig(request, next)) {
+      showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
+    }
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isDownloading.value = false
   }
@@ -690,18 +815,9 @@ const downloadCore = async () => {
 
 onMounted(() => {
   loadDownloadSources()
-  void loadConfig(true)
+  void loadConfig(true, true)
   refreshTimer = setInterval(() => {
-    if (
-      !urlDirty.value &&
-      !isSaving.value &&
-      !isChecking.value &&
-      !isStarting.value &&
-      !isStopping.value &&
-      !isRestarting.value &&
-      !isDownloading.value &&
-      !isSavingBehavior.value
-    ) {
+    if (!isRefreshing.value && !isConfigMutationPending.value) {
       void loadConfig()
     }
   }, 1000)
@@ -710,15 +826,21 @@ onMounted(() => {
 watch(
   () => props.coreType,
   () => {
+    refreshRequest += 1
+    isRefreshing.value = false
     loadDownloadSources()
-    urlDirty.value = false
+    resetDraft('url')
+    resetDraft('runArgs')
+    resetDraft('configURL')
+    resetDraft('behavior')
     selectedSourceURL.value = ''
-    void loadConfig()
+    void loadConfig(false, true)
   },
 )
 
 onUnmounted(() => {
   refreshRequest += 1
+  isRefreshing.value = false
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = undefined
