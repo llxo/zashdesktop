@@ -7,7 +7,7 @@ info:
   description: "A native sing-box dashboard using the Clash API"
   copyright: ""
   comments: ""
-  version: "0.0.1"
+  version: "1.0.0"
 
 dev_mode:
   root_path: .

@@ -31,4 +31,5 @@ coverage/
 .DS_Store
 Thumbs.db
 .codex/
+.agents/
 AGENTS.md

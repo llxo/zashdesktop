@@ -1,3 +1,7 @@
+param(
+    [string]$Version
+)
+
 $ErrorActionPreference = "Stop"
 
 $projectRoot = $PSScriptRoot
@@ -14,6 +18,17 @@ $sysoPath = Join-Path $projectRoot "wails_windows_amd64.syso"
 $iconPath = Join-Path $projectRoot "build\windows\icon.ico"
 $manifestPath = Join-Path $projectRoot "build\windows\wails.exe.manifest"
 $infoPath = Join-Path $projectRoot "build\windows\info.json"
+$versionedInfoPath = $null
+$versionedManifestPath = $null
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = "0.0.0"
+}
+$Version = $Version.Trim().TrimStart('v')
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Version must be a stable semantic version such as 1.0.0, got: $Version"
+}
+$windowsVersion = "$Version.0"
 
 foreach ($requiredPath in @($iconPath, $manifestPath, $infoPath, $frontendDir, (Join-Path $frontendDir "package.json"))) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -51,12 +66,29 @@ Assert-Command "wails3"
 Assert-Command "node"
 
 $previousGoCachePath = $env:GOCACHE
+$previousAppVersion = $env:APP_VERSION
 $buildCompleted = $false
+$resourceTempDir = $null
 
 Push-Location $projectRoot
 try {
     $env:GOCACHE = $goCachePath
+    $env:APP_VERSION = $Version
     New-Item -ItemType Directory -Path $goCachePath -Force | Out-Null
+
+    $resourceTempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("zashdesktop-build-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $resourceTempDir -Force | Out-Null
+
+    $versionedInfoPath = Join-Path $resourceTempDir "info.json"
+    $info = Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
+    $info.fixed.file_version = $version
+    $info.info.'0000'.ProductVersion = $version
+    $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $versionedInfoPath -Encoding utf8
+
+    $versionedManifestPath = Join-Path $resourceTempDir "wails.exe.manifest"
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw
+    $manifest = $manifest -replace '(<assemblyIdentity type="win32" name="com\.singbox\.gui" version=")[^"]+(" processorArchitecture="\*"/>)', "`$1$windowsVersion`$2"
+    Set-Content -LiteralPath $versionedManifestPath -Value $manifest -Encoding utf8
 
     if (-not (Test-Path -LiteralPath $binDir)) {
         New-Item -ItemType Directory -Path $binDir -Force | Out-Null
@@ -98,7 +130,7 @@ try {
     }
 
     Write-Host "Generating Windows resources..."
-    Invoke-NativeCommand "wails3" @("generate", "syso", "-arch", "amd64", "-icon", $iconPath, "-manifest", $manifestPath, "-info", $infoPath, "-out", $sysoPath)
+    Invoke-NativeCommand "wails3" @("generate", "syso", "-arch", "amd64", "-icon", $iconPath, "-manifest", $versionedManifestPath, "-info", $versionedInfoPath, "-out", $sysoPath)
     if (-not (Test-Path -LiteralPath $sysoPath)) {
         throw "Windows resource generation did not produce: $sysoPath"
     }
@@ -113,13 +145,21 @@ try {
     if (-not $buildCompleted) {
         Remove-Item -LiteralPath $exePath -Force -ErrorAction SilentlyContinue
     }
+    if ($null -ne $resourceTempDir) {
+        Remove-Item -LiteralPath $resourceTempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item -LiteralPath $sysoPath -Force -ErrorAction SilentlyContinue
     if ($null -eq $previousGoCachePath) {
         Remove-Item Env:GOCACHE -ErrorAction SilentlyContinue
     } else {
         $env:GOCACHE = $previousGoCachePath
     }
+    if ($null -eq $previousAppVersion) {
+        Remove-Item Env:APP_VERSION -ErrorAction SilentlyContinue
+    } else {
+        $env:APP_VERSION = $previousAppVersion
+    }
     Pop-Location
 }
 
-Write-Host "Built $exePath"
+Write-Host "Built $exePath (version $Version)"

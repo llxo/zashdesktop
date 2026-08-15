@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+          "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Windows application
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Release tag must use the v1.2.3 format, got: $env:RELEASE_TAG"
+          }
+          .\build.ps1 -Version $version
+
+      - name: Prepare release assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
+          Copy-Item -LiteralPath build\bin\zashdesktop.exe -Destination $assetName
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetName).Hash.ToLowerInvariant()
+          "$hash  $assetName" | Set-Content -LiteralPath "$assetName.sha256" -Encoding ascii
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
+          gh release create $env:RELEASE_TAG $assetName "$assetName.sha256" --title "zashdesktop $env:RELEASE_TAG" --generate-notes
