@@ -295,7 +295,7 @@
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
-            @change="saveBehavior"
+            @change="saveBehavior()"
           />
         </label>
         <label class="setting-item">
@@ -305,17 +305,27 @@
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
-            @change="saveBehavior"
+            @change="saveBehavior()"
           />
         </label>
         <label class="setting-item">
-          <span class="setting-item-label">{{ $t('coreAutoStartCore') }}</span>
+          <span class="setting-item-label">{{ $t('autoStartSingBox') }}</span>
           <input
-            v-model="behaviorDraft.autoStartCore"
+            v-model="behaviorDraft.autoStartSingBox"
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
-            @change="saveBehavior"
+            @change="saveBehavior('sing-box')"
+          />
+        </label>
+        <label class="setting-item">
+          <span class="setting-item-label">{{ $t('autoStartMihomo') }}</span>
+          <input
+            v-model="behaviorDraft.autoStartMihomo"
+            class="toggle"
+            type="checkbox"
+            :disabled="isSavingBehavior"
+            @change="saveBehavior('mihomo')"
           />
         </label>
         <label class="setting-item">
@@ -325,7 +335,7 @@
             class="toggle"
             type="checkbox"
             :disabled="isSavingBehavior"
-            @change="saveBehavior"
+            @change="saveBehavior()"
           />
         </label>
         <label class="setting-item flex-col !items-stretch py-3">
@@ -337,7 +347,7 @@
             :placeholder="$t('trayAPIURLPlaceholder')"
             :disabled="isSavingBehavior"
             @input="touchDraft('behavior')"
-            @change="saveBehavior"
+            @change="saveBehavior()"
           />
         </label>
       </div>
@@ -444,7 +454,8 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   configAvailable: false,
   runAsAdmin: false,
   autoStart: false,
-  autoStartCore: false,
+  autoStartSingBox: false,
+  autoStartMihomo: false,
   backendDebugLog: false,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
@@ -453,7 +464,8 @@ const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 const behaviorDraft = reactive({
   runAsAdmin: false,
   autoStart: false,
-  autoStartCore: false,
+  autoStartSingBox: false,
+  autoStartMihomo: false,
   backendDebugLog: false,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
@@ -644,7 +656,8 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
     Object.assign(behaviorDraft, {
       runAsAdmin: next.runAsAdmin,
       autoStart: next.autoStart,
-      autoStartCore: next.autoStartCore,
+      autoStartSingBox: next.autoStartSingBox,
+      autoStartMihomo: next.autoStartMihomo,
       backendDebugLog: next.backendDebugLog,
       trayAPIURL: next.trayAPIURL,
     })
@@ -896,8 +909,13 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
   }
 }
 
-const saveBehavior = async () => {
+const saveBehavior = async (changedCoreType?: CoreType) => {
   if (isSavingBehavior.value) return
+  if (changedCoreType === 'sing-box' && behaviorDraft.autoStartSingBox) {
+    behaviorDraft.autoStartMihomo = false
+  } else if (changedCoreType === 'mihomo' && behaviorDraft.autoStartMihomo) {
+    behaviorDraft.autoStartSingBox = false
+  }
   isSavingBehavior.value = true
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('behavior')
@@ -905,7 +923,8 @@ const saveBehavior = async () => {
     const next = await CoreService.SaveBehavior(
       behaviorDraft.runAsAdmin,
       behaviorDraft.autoStart,
-      behaviorDraft.autoStartCore,
+      behaviorDraft.autoStartSingBox,
+      behaviorDraft.autoStartMihomo,
       behaviorDraft.backendDebugLog,
       behaviorDraft.trayAPIURL,
       coreType.value,

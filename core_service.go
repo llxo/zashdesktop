@@ -77,13 +77,23 @@ type CoreConfig struct {
 	ConfigAvailable   bool   `json:"configAvailable"`
 	RunAsAdmin        bool   `json:"runAsAdmin"`
 	AutoStart         bool   `json:"autoStart"`
-	AutoStartCore     bool   `json:"autoStartCore"`
+	AutoStartSingBox  bool   `json:"autoStartSingBox"`
+	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
 	TrayAPIURL        string `json:"trayAPIURL"`
 }
 
+type sharedBehaviorConfig struct {
+	RunAsAdmin       bool `json:"runAsAdmin"`
+	AutoStart        bool `json:"autoStart"`
+	AutoStartSingBox bool `json:"autoStartSingBox"`
+	AutoStartMihomo  bool `json:"autoStartMihomo"`
+	BackendDebugLog  bool `json:"backendDebugLog"`
+}
+
 type persistedCoreProfiles struct {
 	ActiveCore string                `json:"activeCore"`
+	Behavior   sharedBehaviorConfig  `json:"behavior"`
 	Profiles   map[string]CoreConfig `json:"profiles"`
 }
 
@@ -308,9 +318,10 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	config.RunArgs = existing.RunArgs
 	config.CoreType = existing.CoreType
 	config.ConfigURL = existing.ConfigURL
+	config.AutoStartSingBox = existing.AutoStartSingBox
+	config.AutoStartMihomo = existing.AutoStartMihomo
 	config.RunAsAdmin = existing.RunAsAdmin
 	config.AutoStart = existing.AutoStart
-	config.AutoStartCore = existing.AutoStartCore
 	config.BackendDebugLog = existing.BackendDebugLog
 	config.TrayAPIURL = existing.TrayAPIURL
 	s.mu.Lock()
@@ -752,7 +763,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -775,17 +786,28 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartCore, backend
 		}
 	}
 
-	config.RunAsAdmin = runAsAdmin
-	config.AutoStart = autoStart
-	config.AutoStartCore = autoStartCore
-	config.BackendDebugLog = backendDebugLog
+	behavior := sharedBehaviorConfig{
+		RunAsAdmin:       runAsAdmin,
+		AutoStart:        autoStart,
+		AutoStartSingBox: autoStartSingBox,
+		AutoStartMihomo:  autoStartMihomo,
+		BackendDebugLog:  backendDebugLog,
+	}
+	if behavior.AutoStartSingBox && behavior.AutoStartMihomo {
+		if coreType == coreTypeMihomo {
+			behavior.AutoStartSingBox = false
+		} else {
+			behavior.AutoStartMihomo = false
+		}
+	}
+	applySharedBehavior(&config, behavior)
 	config.TrayAPIURL = trayAPIURL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
-	if err := s.saveConfigLocked(config); err != nil {
+	if err := s.saveBehaviorLocked(config, behavior); err != nil {
 		return CoreConfig{}, err
 	}
 	s.trayAPIURL = trayAPIURL
@@ -1216,13 +1238,31 @@ func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	config, err := s.loadConfigLocked()
-	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config))
+	profiles, err := s.loadProfilesLocked()
+	if err != nil {
+		coreDebugf("startup check: loadErr=%v", err)
+		return
+	}
+	coreType := ""
+	if profiles.Behavior.AutoStartSingBox {
+		coreType = coreTypeSingBox
+	} else if profiles.Behavior.AutoStartMihomo {
+		coreType = coreTypeMihomo
+	}
+	if coreType == "" {
+		coreDebugf("startup check: no core configured for automatic startup")
+		return
+	}
+	config, err := s.loadProfileFromStoreLocked(profiles, coreType)
+	shouldStart := err == nil && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config))
 	runArgs := config.RunArgs
-	coreDebugf("startup check: loadErr=%v autoStartCore=%t coreInstalled=%t configAvailable=%t", err, config.AutoStartCore, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config)))
+	coreDebugf("startup check: loadErr=%v autoStartCoreType=%s coreInstalled=%t configAvailable=%t", err, coreType, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config)))
 	if !shouldStart || ctx.Err() != nil {
 		return
 	}
+	s.mu.Lock()
+	s.trayAPIURL = config.TrayAPIURL
+	s.mu.Unlock()
 	if _, err := s.startCore(runArgs, config.CoreType); err != nil {
 		coreDebugf("start core on startup failed: %v", err)
 	}
@@ -1279,6 +1319,7 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	if strings.TrimSpace(config.TrayAPIURL) == "" {
 		config.TrayAPIURL = defaultTrayAPIURL
 	}
+	applySharedBehavior(&config, profiles.Behavior)
 	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType)
 	config.Installed = fileExists(config.CorePath)
@@ -1309,7 +1350,24 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 		profiles.ActiveCore = coreTypeSingBox
 	}
 	profiles.ActiveCore = normalizedCoreType(profiles.ActiveCore)
+	normalizeSharedBehavior(&profiles.Behavior, profiles.ActiveCore)
 	return profiles, nil
+}
+
+func normalizeSharedBehavior(behavior *sharedBehaviorConfig, preferredCore string) {
+	if !behavior.AutoStartSingBox || !behavior.AutoStartMihomo {
+		return
+	}
+	behavior.AutoStartSingBox = normalizedCoreType(preferredCore) == coreTypeSingBox
+	behavior.AutoStartMihomo = normalizedCoreType(preferredCore) == coreTypeMihomo
+}
+
+func applySharedBehavior(config *CoreConfig, behavior sharedBehaviorConfig) {
+	config.RunAsAdmin = behavior.RunAsAdmin
+	config.AutoStart = behavior.AutoStart
+	config.AutoStartSingBox = behavior.AutoStartSingBox
+	config.AutoStartMihomo = behavior.AutoStartMihomo
+	config.BackendDebugLog = behavior.BackendDebugLog
 }
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {
@@ -1335,7 +1393,27 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 		profiles.ActiveCore = config.CoreType
 	}
 	profiles.Profiles[config.CoreType] = config
-	data, err := json.MarshalIndent(profiles, "", "  ")
+	return s.writeProfilesLocked(profiles)
+}
+
+func (s *CoreService) saveBehaviorLocked(config CoreConfig, behavior sharedBehaviorConfig) error {
+	profiles, err := s.loadProfilesLocked()
+	if err != nil {
+		return err
+	}
+	config.CoreType = normalizedCoreType(config.CoreType)
+	config.CorePath = s.corePathFor(config.CoreType)
+	config.Running = false
+	config.PID = 0
+	config.LogPath = ""
+	config.ConfigPath = ""
+	profiles.Behavior = behavior
+	profiles.Profiles[config.CoreType] = config
+	return s.writeProfilesLocked(profiles)
+}
+
+func (s *CoreService) writeProfilesLocked(profiles persistedCoreProfiles) error {
+	data, err := marshalPersistedCoreProfiles(profiles)
 	if err != nil {
 		return err
 	}
@@ -1345,6 +1423,29 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 	}
 	s.configGeneration++
 	return nil
+}
+
+func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error) {
+	data, err := json.Marshal(profiles)
+	if err != nil {
+		return nil, err
+	}
+	var document struct {
+		ActiveCore string                                `json:"activeCore"`
+		Behavior   sharedBehaviorConfig                  `json:"behavior"`
+		Profiles   map[string]map[string]json.RawMessage `json:"profiles"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	for _, profile := range document.Profiles {
+		delete(profile, "runAsAdmin")
+		delete(profile, "autoStart")
+		delete(profile, "autoStartSingBox")
+		delete(profile, "autoStartMihomo")
+		delete(profile, "backendDebugLog")
+	}
+	return json.MarshalIndent(document, "", "  ")
 }
 
 func (s *CoreService) archiveTools() coreArchiveTools {

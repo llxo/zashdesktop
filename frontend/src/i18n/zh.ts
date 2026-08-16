@@ -1,6 +1,4 @@
-import type { LANG_MESSAGE } from './en'
-
-const zh: LANG_MESSAGE = {
+const zh = {
   // Navigation
   setup: '配置',
   overview: '概览',
@@ -617,8 +615,9 @@ const zh: LANG_MESSAGE = {
   coreDownloadSuccess: '核心下载并替换成功',
   coreBehavior: '行为',
   coreRunAsAdmin: '以管理员身份运行',
-  coreAutoStart: '自启动',
-  coreAutoStartCore: '程序启动时开启核心',
+  coreAutoStart: '自启动(需要管理员)',
+  autoStartSingBox: '程序启动时开启 sing-box',
+  autoStartMihomo: '程序启动时开启 mihomo',
   backendDebugLog: '后端调试日志',
   trayAPIURL: '托盘使用 API',
   trayAPIURLPlaceholder: 'http://127.0.0.1:9090',

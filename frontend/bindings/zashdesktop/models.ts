@@ -23,7 +23,8 @@ export interface CoreConfig {
     "configAvailable": boolean;
     "runAsAdmin": boolean;
     "autoStart": boolean;
-    "autoStartCore": boolean;
+    "autoStartSingBox": boolean;
+    "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
     "trayAPIURL": string;
 }
