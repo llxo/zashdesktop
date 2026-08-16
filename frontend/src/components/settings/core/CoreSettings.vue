@@ -109,7 +109,7 @@
       </div>
       <div class="settings-grid">
         <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
-          <div class="flex min-w-0 items-center gap-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
             <span class="setting-item-label">{{ $t('coreSettings') }}</span>
             <span
               class="badge badge-sm"
@@ -118,11 +118,29 @@
               {{ installedVersionLabel }}
             </span>
             <span
-              v-if="config.updateAvailable && config.latestVersion"
-              class="badge badge-warning badge-sm"
+              v-if="config.latestVersion"
+              class="badge badge-sm"
+              :class="config.updateAvailable ? 'badge-warning' : 'badge-ghost'"
             >
               {{ config.latestVersion }}
             </span>
+            <button
+              class="btn btn-circle btn-ghost btn-xs"
+              type="button"
+              :aria-label="$t('checkUpdate')"
+              :title="$t('checkUpdate')"
+              :disabled="isChecking || isDownloading || isSaving || !urlInput.trim()"
+              @click="checkUpdate()"
+            >
+              <span
+                v-if="isChecking"
+                class="loading loading-spinner h-3.5 w-3.5"
+              ></span>
+              <ArrowPathIcon
+                v-else
+                class="h-3.5 w-3.5"
+              />
+            </button>
           </div>
           <button
             class="btn btn-sm max-sm:self-stretch"
@@ -205,7 +223,7 @@
             <option
               v-for="source in sourceOptions"
               :key="source.url"
-              :value="source.url"
+              :value="sourceURL(source)"
             >
               {{ source.label }}
             </option>
@@ -305,7 +323,6 @@
 <script setup lang="ts">
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
-import { version } from '@/assembly/version'
 import DialogWrapper from '@/components/common/DialogWrapper.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
@@ -319,7 +336,7 @@ import {
   StopIcon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'sing-box' | 'mihomo'
 type CoreChannel = 'stable' | 'test'
@@ -336,14 +353,29 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
     {
       label: 'llxo/sing-box-releases',
       url: 'https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      channelURLs: {
+        stable:
+          'https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+        test: 'https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      },
     },
     {
       label: 'reF1nd/sing-box-releases',
       url: 'https://github.com/reF1nd/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      channelURLs: {
+        stable:
+          'https://github.com/reF1nd/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+        test: 'https://github.com/reF1nd/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      },
     },
     {
       label: 'SagerNet/sing-box',
       url: 'https://github.com/SagerNet/sing-box/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      channelURLs: {
+        stable:
+          'https://github.com/SagerNet/sing-box/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+        test: 'https://github.com/SagerNet/sing-box/releases/download/v{version}/sing-box-{version}-windows-amd64.zip',
+      },
     },
   ],
   mihomo: [
@@ -365,8 +397,8 @@ const emit = defineEmits<{
   (event: 'update:coreType', value: CoreType): void
 }>()
 
-const config = reactive<CoreConfig>({
-  coreType: 'sing-box',
+const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
+  coreType,
   urlTemplate: '',
   configuredVersion: '',
   version: '',
@@ -390,6 +422,7 @@ const config = reactive<CoreConfig>({
   backendDebugLog: false,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
+const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 // Polling replaces config every second. Editable controls must bind to drafts.
 const behaviorDraft = reactive({
   runAsAdmin: false,
@@ -468,19 +501,22 @@ const installedVersionLabel = computed(() => {
   return config.installedVersion || config.version || t('coreInstalled')
 })
 const isCoreMaintenanceBusy = computed(
-  () => isSaving.value || isValidatingURL.value || isChecking.value || isDownloading.value,
+  () => isSaving.value || isValidatingURL.value || isDownloading.value,
 )
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshRequest = 0
-type ConfigRequest = { id: number; coreType: CoreType }
-const beginConfigRequest = (): ConfigRequest => {
+let checkSequence = 0
+type ConfigRequest = { id: number; coreType: CoreType; allowCoreTypeChange: boolean }
+const beginConfigRequest = (allowCoreTypeChange = false): ConfigRequest => {
   isRefreshing.value = false
-  return { id: ++refreshRequest, coreType: coreType.value }
+  return { id: ++refreshRequest, coreType: coreType.value, allowCoreTypeChange }
 }
 const isCurrentConfigRequest = (request: ConfigRequest) =>
   request.id === refreshRequest && request.coreType === coreType.value
 const applyCurrentConfig = (request: ConfigRequest, next: CoreConfig, forceDrafts = false) => {
   if (!isCurrentConfigRequest(request)) return false
+  const responseCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
+  if (!request.allowCoreTypeChange && responseCoreType !== request.coreType) return false
   applyConfig(next, forceDrafts)
   return true
 }
@@ -605,7 +641,9 @@ const saveChannel = async (rawChannel: string) => {
     ) {
       next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel), coreType.value)
     }
-    applyCurrentConfig(request, next)
+    if (applyCurrentConfig(request, next)) {
+      await checkUpdate()
+    }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -630,6 +668,7 @@ const validateAndAddURL = async () => {
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
     showNotification({ content: 'coreURLSaved', type: 'alert-success' })
+    await checkUpdate()
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -738,17 +777,18 @@ const downloadConfig = async () => {
 }
 
 const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
-  const request = beginConfigRequest()
+  const request = beginConfigRequest(useActiveCore)
   isRefreshing.value = true
   try {
     const next = useActiveCore
       ? await CoreService.GetConfig()
       : await CoreService.GetConfigForType(request.coreType)
-    applyCurrentConfig(request, next, forceDrafts)
+    return applyCurrentConfig(request, next, forceDrafts)
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
+    return false
   } finally {
     if (isCurrentConfigRequest(request)) {
       isRefreshing.value = false
@@ -791,7 +831,7 @@ const saveBehavior = async () => {
   }
 }
 
-const saveURL = async (notify = true) => {
+const saveURL = async (notify = true, refreshRemote = true) => {
   if (isSaving.value || !urlInput.value.trim()) return false
   isSaving.value = true
   const request = beginConfigRequest()
@@ -805,6 +845,9 @@ const saveURL = async (notify = true) => {
     if (notify) {
       showNotification({ content: 'coreURLSaved', type: 'alert-success' })
     }
+    if (refreshRemote) {
+      await checkUpdate()
+    }
     return true
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -816,20 +859,23 @@ const saveURL = async (notify = true) => {
   }
 }
 
-const checkUpdate = async () => {
+const checkUpdate = async (notifyError = true) => {
   if (isChecking.value || !urlInput.value.trim()) return null
+  const sequence = ++checkSequence
   isChecking.value = true
   const request = beginConfigRequest()
   try {
-    const next = await CoreService.CheckUpdate(version.value || '', coreType.value)
+    const next = await CoreService.CheckUpdate('', request.coreType)
     return applyCurrentConfig(request, next) ? next : null
   } catch (error) {
-    if (isCurrentConfigRequest(request)) {
+    if (notifyError && isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
     return null
   } finally {
-    isChecking.value = false
+    if (sequence === checkSequence) {
+      isChecking.value = false
+    }
   }
 }
 
@@ -838,7 +884,7 @@ const downloadCore = async () => {
   isDownloading.value = true
   const request = beginConfigRequest()
   try {
-    const next = await CoreService.DownloadCore(version.value || '', coreType.value)
+    const next = await CoreService.DownloadCore('', request.coreType)
     if (applyCurrentConfig(request, next)) {
       showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
     }
@@ -856,23 +902,18 @@ const maintainCore = async () => {
     advancedOpen.value = true
     return
   }
-  if (draftState.url.dirty && !(await saveURL(false))) return
-  if (!config.installed) {
-    await downloadCore()
-    return
-  }
-  const checked = await checkUpdate()
-  if (!checked) return
-  if (!checked.updateAvailable) {
-    showNotification({ content: 'coreUpToDate', type: 'alert-success' })
-    return
-  }
+  if (draftState.url.dirty && !(await saveURL(false, false))) return
   await downloadCore()
 }
 
 onMounted(() => {
   loadDownloadSources()
-  void loadConfig(true, true)
+  void (async () => {
+    if (await loadConfig(true, true)) {
+      await nextTick()
+      await checkUpdate(false)
+    }
+  })()
   refreshTimer = setInterval(() => {
     if (!isRefreshing.value && !isConfigMutationPending.value) {
       void loadConfig()
@@ -884,7 +925,10 @@ watch(
   () => props.coreType,
   () => {
     refreshRequest += 1
+    checkSequence += 1
+    isChecking.value = false
     isRefreshing.value = false
+    Object.assign(config, emptyCoreConfig(props.coreType))
     loadDownloadSources()
     resetDraft('url')
     resetDraft('runArgs')
@@ -892,7 +936,11 @@ watch(
     resetDraft('behavior')
     selectedSourceURL.value = ''
     advancedOpen.value = false
-    void loadConfig(false, true)
+    void (async () => {
+      if (await loadConfig(false, true)) {
+        await checkUpdate(false)
+      }
+    })()
   },
 )
 
