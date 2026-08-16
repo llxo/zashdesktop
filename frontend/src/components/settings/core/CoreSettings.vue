@@ -22,8 +22,12 @@
             type="text"
             :aria-label="$t('coreRunArgs')"
             :placeholder="defaultRunArgsPlaceholder"
-            :disabled="config.running || isStarting || isStopping || isRestarting"
+            :disabled="
+              config.running || isStarting || isStopping || isRestarting || isSavingRunArgs
+            "
             @input="touchDraft('runArgs')"
+            @change="saveRunArgs"
+            @keydown.enter.prevent="saveRunArgs"
           />
 
           <div class="flex flex-wrap gap-2 self-start">
@@ -73,21 +77,6 @@
                 class="h-4 w-4"
               />
               {{ $t('coreRestart') }}
-            </button>
-            <button
-              class="btn btn-ghost btn-sm"
-              :disabled="isSavingRunArgs || config.running"
-              @click="saveRunArgs"
-            >
-              <span
-                v-if="isSavingRunArgs"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <BookmarkSquareIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('save') }}
             </button>
           </div>
         </div>
@@ -159,22 +148,47 @@
             {{ config.installed ? $t('updateCore') : $t('installCore') }}
           </button>
         </div>
+      </div>
+    </section>
 
-        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="setting-item-label">{{ $t('coreConfig') }}</span>
-            <span
-              class="badge badge-sm"
-              :class="config.configAvailable ? 'badge-success' : 'badge-ghost'"
-            >
-              {{ config.configAvailable ? $t('coreConfigAvailable') : $t('coreConfigMissing') }}
-            </span>
-          </div>
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('coreConfig') }}
+      </div>
+      <div class="settings-grid">
+        <div class="setting-item grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2 py-3">
+          <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
+          <input
+            v-model="configURLInput"
+            class="input input-sm w-full min-w-0"
+            type="url"
+            :aria-label="$t('coreConfigURL')"
+            :placeholder="$t('coreConfigURLPlaceholder')"
+            :disabled="isDownloadingConfig || isImportingConfig"
+            @input="touchDraft('configURL')"
+          />
+        </div>
+
+        <div
+          class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
+        >
+          <span class="setting-item-label">{{ $t('coreConfigSaveTo') }}</span>
+          <input
+            v-model="configFileNameInput"
+            class="input input-sm w-full min-w-0 font-mono"
+            type="text"
+            :aria-label="$t('coreConfigSaveTo')"
+            :placeholder="defaultConfigFileName"
+            :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
+            @input="touchDraft('configFileName')"
+            @change="saveConfigFileName()"
+            @keydown.enter.prevent="saveConfigFileName()"
+          />
           <button
-            class="btn btn-sm max-sm:self-stretch"
-            :class="{ 'btn-primary': !config.configAvailable }"
-            :disabled="isDownloadingConfig"
-            @click="maintainConfig"
+            class="btn btn-sm"
+            type="button"
+            :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
+            @click="downloadConfig"
           >
             <span
               v-if="isDownloadingConfig"
@@ -184,8 +198,31 @@
               v-else
               class="h-4 w-4"
             />
-            {{ config.configAvailable ? $t('updateCoreConfig') : $t('downloadConfig') }}
+            {{ $t('downloadConfig') }}
           </button>
+          <button
+            class="btn btn-sm"
+            type="button"
+            :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
+            @click="openConfigFilePicker"
+          >
+            <span
+              v-if="isImportingConfig"
+              class="loading loading-spinner h-4 w-4"
+            ></span>
+            <ArrowUpTrayIcon
+              v-else
+              class="h-4 w-4"
+            />
+            {{ $t('coreImportConfig') }}
+          </button>
+          <input
+            ref="configFileInput"
+            class="hidden"
+            type="file"
+            :accept="configFileAccept"
+            @change="importConfig"
+          />
         </div>
       </div>
     </section>
@@ -241,18 +278,6 @@
             @input="touchDraft('url')"
             @change="saveURL()"
             @keydown.enter.prevent="validateAndAddURL"
-          />
-        </label>
-
-        <label class="setting-item flex-col !items-stretch py-3">
-          <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
-          <input
-            v-model="configURLInput"
-            class="input input-sm w-full"
-            type="url"
-            :placeholder="$t('coreConfigURLPlaceholder')"
-            :disabled="isDownloadingConfig"
-            @input="touchDraft('configURL')"
           />
         </label>
       </div>
@@ -330,7 +355,7 @@ import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
-  BookmarkSquareIcon,
+  ArrowUpTrayIcon,
   Cog6ToothIcon,
   PlayIcon,
   StopIcon,
@@ -340,7 +365,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 
 type CoreType = 'sing-box' | 'mihomo'
 type CoreChannel = 'stable' | 'test'
-type DraftKey = 'url' | 'runArgs' | 'configURL' | 'behavior'
+type DraftKey = 'url' | 'runArgs' | 'configURL' | 'configFileName' | 'behavior'
 
 type DownloadSource = {
   label: string
@@ -411,6 +436,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   updateAvailable: false,
   runArgs: '',
   configURL: '',
+  configFileName: coreType === 'mihomo' ? 'config.yaml' : 'config.json',
   running: false,
   pid: 0,
   logPath: '',
@@ -440,17 +466,24 @@ const channelOptions = computed<SegmentOption[]>(() => [
 const defaultRunArgsPlaceholder = computed(() =>
   coreType.value === 'mihomo' ? '-d . -f config.yaml' : 'run -c config.json -D .',
 )
+const defaultConfigFileName = computed(() =>
+  coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
+)
+const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml' : '.json'))
 const urlInput = ref('')
 const selectedSourceURL = ref('')
 const customDownloadSources = ref<DownloadSource[]>([])
 const runArgsInput = ref('')
 const configURLInput = ref('')
+const configFileNameInput = ref('')
+const configFileInput = ref<HTMLInputElement | null>(null)
 const advancedOpen = ref(false)
 // A response may only clean the exact draft revision that it submitted.
 const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
   url: { dirty: false, revision: 0 },
   runArgs: { dirty: false, revision: 0 },
   configURL: { dirty: false, revision: 0 },
+  configFileName: { dirty: false, revision: 0 },
   behavior: { dirty: false, revision: 0 },
 })
 const touchDraft = (key: DraftKey) => {
@@ -479,6 +512,8 @@ const isStopping = ref(false)
 const isRestarting = ref(false)
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
+const isSavingConfigFileName = ref(false)
+const isImportingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
 const isConfigMutationPending = computed(
@@ -493,6 +528,8 @@ const isConfigMutationPending = computed(
     isRestarting.value ||
     isSavingRunArgs.value ||
     isDownloadingConfig.value ||
+    isSavingConfigFileName.value ||
+    isImportingConfig.value ||
     isSavingBehavior.value,
 )
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
@@ -598,6 +635,10 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   if (syncAllDrafts || !draftState.configURL.dirty) {
     configURLInput.value = next.configURL
     resetDraft('configURL')
+  }
+  if (syncAllDrafts || !draftState.configFileName.dirty) {
+    configFileNameInput.value = next.configFileName || defaultConfigFileName.value
+    resetDraft('configFileName')
   }
   if (syncAllDrafts || !draftState.behavior.dirty) {
     Object.assign(behaviorDraft, {
@@ -757,7 +798,13 @@ const restartCore = async () => {
 }
 
 const downloadConfig = async () => {
-  if (isDownloadingConfig.value || !configURLInput.value.trim()) return
+  if (
+    isDownloadingConfig.value ||
+    isImportingConfig.value ||
+    !configURLInput.value.trim() ||
+    (draftState.configFileName.dirty && !(await saveConfigFileName()))
+  )
+    return
   isDownloadingConfig.value = true
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('configURL')
@@ -773,6 +820,59 @@ const downloadConfig = async () => {
     }
   } finally {
     isDownloadingConfig.value = false
+  }
+}
+
+let configFileNameSavePromise: Promise<boolean> | null = null
+const saveConfigFileName = () => {
+  if (configFileNameSavePromise) return configFileNameSavePromise
+  if (!configFileNameInput.value.trim()) return Promise.resolve(false)
+  isSavingConfigFileName.value = true
+  const request = beginConfigRequest()
+  const draftRevision = beginDraftSave('configFileName')
+  configFileNameSavePromise = (async () => {
+    try {
+      const next = await CoreService.SaveConfigFileName(configFileNameInput.value, request.coreType)
+      if (!isCurrentConfigRequest(request)) return false
+      commitDraftSave('configFileName', draftRevision)
+      applyCurrentConfig(request, next)
+      return true
+    } catch (error) {
+      if (isCurrentConfigRequest(request)) {
+        showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+      }
+      return false
+    } finally {
+      isSavingConfigFileName.value = false
+      configFileNameSavePromise = null
+    }
+  })()
+  return configFileNameSavePromise
+}
+
+const openConfigFilePicker = () => {
+  configFileInput.value?.click()
+}
+
+const importConfig = async (event: Event) => {
+  const input = event.currentTarget as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  let request: ConfigRequest | null = null
+  try {
+    if (draftState.configFileName.dirty && !(await saveConfigFileName())) return
+    isImportingConfig.value = true
+    request = beginConfigRequest()
+    const next = await CoreService.ImportConfig(await file.text(), file.name, request.coreType)
+    if (!applyCurrentConfig(request, next)) return
+    showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
+  } catch (error) {
+    if (!request || isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
+  } finally {
+    isImportingConfig.value = false
+    input.value = ''
   }
 }
 
@@ -794,14 +894,6 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
       isRefreshing.value = false
     }
   }
-}
-
-const maintainConfig = async () => {
-  if (!configURLInput.value.trim()) {
-    advancedOpen.value = true
-    return
-  }
-  await downloadConfig()
 }
 
 const saveBehavior = async () => {
@@ -933,6 +1025,7 @@ watch(
     resetDraft('url')
     resetDraft('runArgs')
     resetDraft('configURL')
+    resetDraft('configFileName')
     resetDraft('behavior')
     selectedSourceURL.value = ''
     advancedOpen.value = false

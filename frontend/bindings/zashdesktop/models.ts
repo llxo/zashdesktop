@@ -15,6 +15,7 @@ export interface CoreConfig {
     "updateAvailable": boolean;
     "runArgs": string;
     "configURL": string;
+    "configFileName": string;
     "running": boolean;
     "pid": number;
     "logPath": string;

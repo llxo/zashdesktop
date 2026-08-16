@@ -24,17 +24,19 @@ import (
 )
 
 const (
-	coreExecutableBaseName = "sing-box"
-	mihomoExecutableName   = "mihomo"
-	coreTypeSingBox        = "sing-box"
-	coreTypeMihomo         = "mihomo"
-	coreChannelStable      = "stable"
-	coreChannelTest        = "test"
-	maxCoreDownload        = 200 << 20
-	maxCoreBinary          = 100 << 20
-	maxCoreConfig          = 20 << 20
-	defaultCoreRunArgs     = "run -c config.json -D ."
-	defaultMihomoRunArgs   = "-d . -f config.yaml"
+	coreExecutableBaseName  = "sing-box"
+	mihomoExecutableName    = "mihomo"
+	coreTypeSingBox         = "sing-box"
+	coreTypeMihomo          = "mihomo"
+	coreChannelStable       = "stable"
+	coreChannelTest         = "test"
+	maxCoreDownload         = 200 << 20
+	maxCoreBinary           = 100 << 20
+	maxCoreConfig           = 20 << 20
+	defaultCoreConfigFile   = "config.json"
+	defaultMihomoConfigFile = "config.yaml"
+	defaultCoreRunArgs      = "run -c config.json -D ."
+	defaultMihomoRunArgs    = "-d . -f config.yaml"
 )
 
 var (
@@ -67,6 +69,7 @@ type CoreConfig struct {
 	UpdateAvailable   bool   `json:"updateAvailable"`
 	RunArgs           string `json:"runArgs"`
 	ConfigURL         string `json:"configURL"`
+	ConfigFileName    string `json:"configFileName"`
 	Running           bool   `json:"running"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
@@ -387,25 +390,25 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 	client := newCoreHTTPClient(5 * time.Minute)
 	response, err := client.Get(rawURL)
 	if err != nil {
-		return CoreConfig{}, fmt.Errorf("download sing-box config: %w", err)
+		return CoreConfig{}, fmt.Errorf("download %s config: %w", coreType, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return CoreConfig{}, fmt.Errorf("download sing-box config: server returned %s", response.Status)
+		return CoreConfig{}, fmt.Errorf("download %s config: server returned %s", coreType, response.Status)
 	}
 	if response.ContentLength > maxCoreConfig {
-		return CoreConfig{}, errors.New("sing-box config is too large")
+		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxCoreConfig+1))
 	if err != nil {
-		return CoreConfig{}, fmt.Errorf("read sing-box config: %w", err)
+		return CoreConfig{}, fmt.Errorf("read %s config: %w", coreType, err)
 	}
 	if len(data) == 0 {
-		return CoreConfig{}, errors.New("sing-box config is empty")
+		return CoreConfig{}, fmt.Errorf("%s config is empty", coreType)
 	}
 	if len(data) > maxCoreConfig {
-		return CoreConfig{}, errors.New("sing-box config is too large")
+		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
 	}
 
 	s.mu.Lock()
@@ -416,11 +419,49 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	if err := writeFileAtomically(s.configFilePath(config.CoreType), data, 0o600); err != nil {
-		return CoreConfig{}, fmt.Errorf("write sing-box config: %w", err)
+	if err := writeFileAtomically(s.configFilePath(config), data, 0o600); err != nil {
+		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
 	}
 
 	config.ConfigURL = rawURL
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType string) (CoreConfig, error) {
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	if _, err := normalizeConfigFileName(sourceFileName, coreType); err != nil {
+		return CoreConfig{}, err
+	}
+	data := []byte(rawContent)
+	if len(data) == 0 {
+		return CoreConfig{}, fmt.Errorf("%s config is empty", coreType)
+	}
+	if len(data) > maxCoreConfig {
+		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
+	}
+
+	config, generation, err := s.loadConfigSnapshot(coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while importing; please retry")
+	}
+	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
+		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
+	}
+	if err := writeFileAtomically(s.configFilePath(config), data, 0o600); err != nil {
+		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
+	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -657,6 +698,32 @@ func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, erro
 	return config, nil
 }
 
+func (s *CoreService) SaveConfigFileName(rawFileName, rawCoreType string) (CoreConfig, error) {
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	fileName, err := normalizeConfigFileName(rawFileName, coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config, generation, err := s.loadConfigSnapshot(coreType)
+	if err != nil {
+		return CoreConfig{}, err
+	}
+	config.ConfigFileName = fileName
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configGeneration != generation {
+		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	}
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
 func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
@@ -787,7 +854,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if len(args) == 0 {
 		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
 	}
-	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType), len(args), fileExists(s.configFilePath(config.CoreType)))
+	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType), len(args), fileExists(s.configFilePath(config)))
 
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
@@ -1063,7 +1130,7 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.Running = false
 	config.PID = 0
 	config.LogPath = s.logFilePath(config.CoreType)
-	config.ConfigPath = s.configFilePath(config.CoreType)
+	config.ConfigPath = s.configFilePath(*config)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
@@ -1150,9 +1217,9 @@ func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 		return
 	}
 	config, err := s.loadConfigLocked()
-	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config.CoreType))
+	shouldStart := err == nil && config.AutoStartCore && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config))
 	runArgs := config.RunArgs
-	coreDebugf("startup check: loadErr=%v autoStartCore=%t coreInstalled=%t configAvailable=%t", err, config.AutoStartCore, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config.CoreType)))
+	coreDebugf("startup check: loadErr=%v autoStartCore=%t coreInstalled=%t configAvailable=%t", err, config.AutoStartCore, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config)))
 	if !shouldStart || ctx.Err() != nil {
 		return
 	}
@@ -1204,6 +1271,11 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 		config = CoreConfig{}
 	}
 	config.CoreType = coreType
+	configFileName, configFileNameErr := normalizeConfigFileName(config.ConfigFileName, coreType)
+	if configFileNameErr != nil {
+		configFileName = defaultConfigFileName(coreType)
+	}
+	config.ConfigFileName = configFileName
 	if strings.TrimSpace(config.TrayAPIURL) == "" {
 		config.TrayAPIURL = defaultTrayAPIURL
 	}
@@ -1323,6 +1395,37 @@ func normalizedCoreType(raw string) string {
 		return coreTypeSingBox
 	}
 	return coreType
+}
+
+func defaultConfigFileName(coreType string) string {
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		return defaultMihomoConfigFile
+	}
+	return defaultCoreConfigFile
+}
+
+func normalizeConfigFileName(rawFileName, coreType string) (string, error) {
+	fileName := strings.TrimSpace(rawFileName)
+	if fileName == "" {
+		return "", errors.New("请输入配置文件名")
+	}
+	if fileName != filepath.Base(fileName) || strings.ContainsAny(fileName, `<>:"/\|?*`) {
+		return "", errors.New("配置文件名不能包含路径或特殊字符")
+	}
+	for _, character := range fileName {
+		if character < 0x20 {
+			return "", errors.New("配置文件名不能包含控制字符")
+		}
+	}
+	extension := strings.ToLower(filepath.Ext(fileName))
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		if extension != ".yaml" {
+			return "", errors.New("mihomo 配置文件名必须以 .yaml 结尾")
+		}
+	} else if extension != ".json" {
+		return "", errors.New("sing-box 配置文件名必须以 .json 结尾")
+	}
+	return fileName, nil
 }
 
 func defaultRunArgs(coreType string) string {
@@ -1702,12 +1805,12 @@ func (s *CoreService) logFilePath(coreType string) string {
 	return filepath.Join(s.coreDirFor(coreType), "core.log")
 }
 
-func (s *CoreService) configFilePath(coreType string) string {
-	fileName := "config.json"
-	if normalizedCoreType(coreType) == coreTypeMihomo {
-		fileName = "config.yaml"
+func (s *CoreService) configFilePath(config CoreConfig) string {
+	fileName, err := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
+	if err != nil {
+		fileName = defaultConfigFileName(config.CoreType)
 	}
-	return filepath.Join(s.coreDirFor(coreType), fileName)
+	return filepath.Join(s.coreDirFor(config.CoreType), fileName)
 }
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
