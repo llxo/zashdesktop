@@ -5,7 +5,8 @@
         {{ $t('coreRun') }}
       </div>
       <div class="settings-grid">
-        <div class="setting-item justify-end">
+        <div class="setting-item">
+          <span class="setting-item-label">{{ $t('coreRunStatus') }}</span>
           <span
             class="badge badge-sm"
             :class="config.running ? 'badge-success' : 'badge-ghost'"
@@ -25,7 +26,7 @@
             @input="touchDraft('runArgs')"
           />
 
-          <div class="flex self-start flex-wrap gap-2">
+          <div class="flex flex-wrap gap-2 self-start">
             <button
               v-if="!config.running"
               class="btn btn-primary btn-sm"
@@ -94,139 +95,150 @@
     </section>
 
     <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('coreDownload') }}
+      <div class="text-base-content/85 mt-1 mb-2.5 flex items-center justify-between px-1">
+        <span class="text-base font-semibold tracking-tight">{{ $t('coreMaintenance') }}</span>
+        <button
+          class="btn btn-circle btn-sm"
+          type="button"
+          :aria-label="$t('coreAdvanced')"
+          :title="$t('coreAdvanced')"
+          @click="advancedOpen = true"
+        >
+          <Cog6ToothIcon class="h-4 w-4" />
+        </button>
       </div>
       <div class="settings-grid">
-        <div class="setting-item flex-col !items-stretch py-3">
-          <div class="flex items-center justify-between gap-3">
-            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
-            <div
-              :class="{
-                'pointer-events-none opacity-60':
-                  isSavingChannel || isSaving || isChecking || isDownloading,
-              }"
+        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="setting-item-label">{{ $t('coreSettings') }}</span>
+            <span
+              class="badge badge-sm"
+              :class="config.installed ? 'badge-success' : 'badge-ghost'"
             >
-              <SegmentedControl
-                :model-value="currentChannel"
-                :options="channelOptions"
-                @update:model-value="saveChannel"
-              />
-            </div>
-          </div>
-          <div class="flex w-full flex-wrap gap-2">
-            <select
-              v-model="selectedSourceURL"
-              class="select select-sm min-w-44 flex-1"
-              :aria-label="$t('coreDownloadURL')"
-              :disabled="isSaving || isValidatingURL || isDownloading"
-              @change="selectDownloadSource"
+              {{ installedVersionLabel }}
+            </span>
+            <span
+              v-if="config.updateAvailable && config.latestVersion"
+              class="badge badge-warning badge-sm"
             >
-              <option
-                v-for="source in sourceOptions"
-                :key="source.url"
-                :value="source.url"
-              >
-                {{ source.label }}
-              </option>
-            </select>
+              {{ config.latestVersion }}
+            </span>
           </div>
+          <button
+            class="btn btn-sm max-sm:self-stretch"
+            :class="{ 'btn-primary': !config.installed }"
+            :disabled="isCoreMaintenanceBusy"
+            @click="maintainCore"
+          >
+            <span
+              v-if="isCoreMaintenanceBusy"
+              class="loading loading-spinner h-4 w-4"
+            ></span>
+            <ArrowDownCircleIcon
+              v-else
+              class="h-4 w-4"
+            />
+            {{ config.installed ? $t('updateCore') : $t('installCore') }}
+          </button>
+        </div>
+
+        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="setting-item-label">{{ $t('coreConfig') }}</span>
+            <span
+              class="badge badge-sm"
+              :class="config.configAvailable ? 'badge-success' : 'badge-ghost'"
+            >
+              {{ config.configAvailable ? $t('coreConfigAvailable') : $t('coreConfigMissing') }}
+            </span>
+          </div>
+          <button
+            class="btn btn-sm max-sm:self-stretch"
+            :class="{ 'btn-primary': !config.configAvailable }"
+            :disabled="isDownloadingConfig"
+            @click="maintainConfig"
+          >
+            <span
+              v-if="isDownloadingConfig"
+              class="loading loading-spinner h-4 w-4"
+            ></span>
+            <ArrowDownTrayIcon
+              v-else
+              class="h-4 w-4"
+            />
+            {{ config.configAvailable ? $t('updateCoreConfig') : $t('downloadConfig') }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <DialogWrapper
+      v-model="advancedOpen"
+      :title="$t('coreAdvanced')"
+    >
+      <div class="settings-grid">
+        <div class="setting-item">
+          <span class="setting-item-label">{{ $t('coreChannel') }}</span>
+          <div
+            :class="{
+              'pointer-events-none opacity-60':
+                isSavingChannel || isSaving || isChecking || isDownloading,
+            }"
+          >
+            <SegmentedControl
+              :model-value="currentChannel"
+              :options="channelOptions"
+              @update:model-value="saveChannel"
+            />
+          </div>
+        </div>
+
+        <label class="setting-item max-sm:flex-col max-sm:items-stretch! max-sm:py-3">
+          <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
+          <select
+            v-model="selectedSourceURL"
+            class="select select-sm min-w-44 max-sm:w-full"
+            :aria-label="$t('coreDownloadSource')"
+            :disabled="isSaving || isValidatingURL || isDownloading"
+            @change="selectDownloadSource"
+          >
+            <option
+              v-for="source in sourceOptions"
+              :key="source.url"
+              :value="source.url"
+            >
+              {{ source.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="setting-item flex-col !items-stretch py-3">
+          <span class="setting-item-label">{{ $t('coreDownloadURL') }}</span>
           <input
             v-model="urlInput"
             class="input input-sm w-full"
             type="url"
-            :aria-label="$t('coreDownloadURLPlaceholder')"
             :placeholder="$t('coreDownloadURLPlaceholder')"
+            :disabled="isSaving || isValidatingURL || isDownloading"
             @input="touchDraft('url')"
-            @change="saveURL"
+            @change="saveURL()"
             @keydown.enter.prevent="validateAndAddURL"
           />
+        </label>
 
-          <div class="flex self-start flex-wrap gap-2">
-            <button
-              class="btn btn-primary btn-sm"
-              :disabled="isSaving || isValidatingURL || isDownloading || !urlInput.trim()"
-              @click="saveURL"
-            >
-              <span
-                v-if="isSaving || isValidatingURL"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownTrayIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('save') }}
-            </button>
-            <button
-              class="btn btn-sm"
-              :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
-              @click="checkUpdate"
-            >
-              <span
-                v-if="isChecking"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowPathIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('checkUpdate') }}
-            </button>
-            <button
-              class="btn btn-sm"
-              :disabled="isSaving || isChecking || isDownloading || !urlInput.trim()"
-              @click="downloadCore"
-            >
-              <span
-                v-if="isDownloading"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownCircleIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ config.updateAvailable ? $t('updateCore') : $t('downloadCore') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('downloadConfig') }}
-      </div>
-      <div class="settings-grid">
-        <div class="setting-item flex-col !items-stretch py-3">
+        <label class="setting-item flex-col !items-stretch py-3">
+          <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
           <input
             v-model="configURLInput"
             class="input input-sm w-full"
             type="url"
-            :aria-label="$t('coreConfigURLPlaceholder')"
             :placeholder="$t('coreConfigURLPlaceholder')"
+            :disabled="isDownloadingConfig"
             @input="touchDraft('configURL')"
           />
-          <div class="flex self-start flex-wrap gap-2">
-            <button
-              class="btn btn-primary btn-sm"
-              :disabled="isDownloadingConfig || !configURLInput.trim()"
-              @click="downloadConfig"
-            >
-              <span
-                v-if="isDownloadingConfig"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownTrayIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('downloadConfig') }}
-            </button>
-          </div>
-        </div>
+        </label>
       </div>
-    </section>
+    </DialogWrapper>
 
     <section>
       <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
@@ -294,6 +306,7 @@
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
 import { version } from '@/assembly/version'
+import DialogWrapper from '@/components/common/DialogWrapper.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import {
@@ -301,6 +314,7 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   BookmarkSquareIcon,
+  Cog6ToothIcon,
   PlayIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline'
@@ -398,6 +412,7 @@ const selectedSourceURL = ref('')
 const customDownloadSources = ref<DownloadSource[]>([])
 const runArgsInput = ref('')
 const configURLInput = ref('')
+const advancedOpen = ref(false)
 // A response may only clean the exact draft revision that it submitted.
 const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
   url: { dirty: false, revision: 0 },
@@ -448,6 +463,13 @@ const isConfigMutationPending = computed(
     isSavingBehavior.value,
 )
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
+const installedVersionLabel = computed(() => {
+  if (!config.installed) return t('coreNotInstalled')
+  return config.installedVersion || config.version || t('coreInstalled')
+})
+const isCoreMaintenanceBusy = computed(
+  () => isSaving.value || isValidatingURL.value || isChecking.value || isDownloading.value,
+)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshRequest = 0
 type ConfigRequest = { id: number; coreType: CoreType }
@@ -553,10 +575,11 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   }
 }
 
-const selectDownloadSource = () => {
+const selectDownloadSource = async () => {
   if (selectedSourceURL.value) {
     urlInput.value = selectedSourceURL.value
     touchDraft('url')
+    await saveURL(false)
   }
 }
 
@@ -575,7 +598,11 @@ const saveChannel = async (rawChannel: string) => {
     const channelSource = builtInDownloadSources[coreType.value].find(
       (source) => sourceURL(source, rawChannel) !== '',
     )
-    if (coreType.value === 'mihomo' && channelSource && (selectedBuiltInSource || !next.urlTemplate)) {
+    if (
+      coreType.value === 'mihomo' &&
+      channelSource &&
+      (selectedBuiltInSource || !next.urlTemplate)
+    ) {
       next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel), coreType.value)
     }
     applyCurrentConfig(request, next)
@@ -729,6 +756,14 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
   }
 }
 
+const maintainConfig = async () => {
+  if (!configURLInput.value.trim()) {
+    advancedOpen.value = true
+    return
+  }
+  await downloadConfig()
+}
+
 const saveBehavior = async () => {
   if (isSavingBehavior.value) return
   isSavingBehavior.value = true
@@ -756,8 +791,8 @@ const saveBehavior = async () => {
   }
 }
 
-const saveURL = async () => {
-  if (isSaving.value || !urlInput.value.trim()) return
+const saveURL = async (notify = true) => {
+  if (isSaving.value || !urlInput.value.trim()) return false
   isSaving.value = true
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('url')
@@ -767,29 +802,32 @@ const saveURL = async () => {
     rememberDownloadSource(next.urlTemplate)
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
-    showNotification({ content: 'coreURLSaved', type: 'alert-success' })
+    if (notify) {
+      showNotification({ content: 'coreURLSaved', type: 'alert-success' })
+    }
+    return true
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
+    return false
   } finally {
     isSaving.value = false
   }
 }
 
 const checkUpdate = async () => {
-  if (isChecking.value || !urlInput.value.trim()) return
+  if (isChecking.value || !urlInput.value.trim()) return null
   isChecking.value = true
   const request = beginConfigRequest()
   try {
-    applyCurrentConfig(
-      request,
-      await CoreService.CheckUpdate(version.value || '', coreType.value),
-    )
+    const next = await CoreService.CheckUpdate(version.value || '', coreType.value)
+    return applyCurrentConfig(request, next) ? next : null
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
+    return null
   } finally {
     isChecking.value = false
   }
@@ -813,6 +851,25 @@ const downloadCore = async () => {
   }
 }
 
+const maintainCore = async () => {
+  if (!urlInput.value.trim()) {
+    advancedOpen.value = true
+    return
+  }
+  if (draftState.url.dirty && !(await saveURL(false))) return
+  if (!config.installed) {
+    await downloadCore()
+    return
+  }
+  const checked = await checkUpdate()
+  if (!checked) return
+  if (!checked.updateAvailable) {
+    showNotification({ content: 'coreUpToDate', type: 'alert-success' })
+    return
+  }
+  await downloadCore()
+}
+
 onMounted(() => {
   loadDownloadSources()
   void loadConfig(true, true)
@@ -834,6 +891,7 @@ watch(
     resetDraft('configURL')
     resetDraft('behavior')
     selectedSourceURL.value = ''
+    advancedOpen.value = false
     void loadConfig(false, true)
   },
 )
