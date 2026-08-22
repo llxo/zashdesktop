@@ -108,6 +108,7 @@ import {
   isUpdateableRuleSet as checkUpdateableRuleSet,
   toggleRuleDisabledWithSideEffects,
 } from '@/composables/rules'
+import { notifyRequestError } from '@/helper/requestError'
 import { useTooltip } from '@/helper/tooltip'
 import { proxyGroupList } from '@/assembly/proxies'
 import { fetchRules, rulesFilter, updateRuleProviderAPI } from '@/assembly/rules'
@@ -168,9 +169,14 @@ const updateRuleProviderClickHandler = async () => {
   if (isUpdating.value) return
 
   isUpdating.value = true
-  await updateRuleProviderAPI(props.rule.payload)
-  await fetchRules()
-  isUpdating.value = false
+  try {
+    await updateRuleProviderAPI(props.rule.payload)
+    await fetchRules()
+  } catch (e) {
+    notifyRequestError(e)
+  } finally {
+    isUpdating.value = false
+  }
 }
 
 const toggleRuleDisabledHandler = async () => {
@@ -179,6 +185,8 @@ const toggleRuleDisabledHandler = async () => {
   try {
     isTogglingDisabled.value = true
     await toggleRuleDisabledWithSideEffects(props.rule)
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     isTogglingDisabled.value = false
   }

@@ -6,67 +6,41 @@
     <div class="flex flex-col gap-3">
       <label class="flex flex-col gap-1 text-sm">
         <span>{{ $t('terminalThemeLight') }}</span>
-        <select
+        <SelectInput
           class="select select-sm select-bordered"
           v-model="terminalConfig.lightThemeName"
-        >
-          <option
-            v-for="entry in lightThemes"
-            :key="entry.name"
-            :value="entry.name"
-          >
-            {{ entry.name }}
-          </option>
-        </select>
+          :options="lightThemes.map(({ name }) => ({ value: name, label: name }))"
+        />
       </label>
 
       <label class="flex flex-col gap-1 text-sm">
         <span>{{ $t('terminalThemeDark') }}</span>
-        <select
+        <SelectInput
           class="select select-sm select-bordered"
           v-model="terminalConfig.darkThemeName"
-        >
-          <option
-            v-for="entry in darkThemes"
-            :key="entry.name"
-            :value="entry.name"
-          >
-            {{ entry.name }}
-          </option>
-        </select>
+          :options="darkThemes.map(({ name }) => ({ value: name, label: name }))"
+        />
       </label>
 
       <label class="flex flex-col gap-1 text-sm">
         <span>{{ $t('fontFamily') }}</span>
-        <select
+        <SelectInput
           class="select select-sm select-bordered"
           v-model="terminalConfig.fontFamily"
-        >
-          <option value="">{{ $t('defaultFont') }}</option>
-          <option
-            v-for="family in FONT_FAMILIES"
-            :key="family"
-            :value="family"
-          >
-            {{ family }}
-          </option>
-        </select>
+          :options="[
+            { value: '', label: $t('defaultFont') },
+            ...FONT_FAMILIES.map((value) => ({ value, label: value })),
+          ]"
+        />
       </label>
 
       <label class="flex flex-col gap-1 text-sm">
         <span>{{ $t('fontSize') }}</span>
-        <select
+        <SelectInput
           class="select select-sm select-bordered"
-          v-model.number="terminalConfig.fontSize"
-        >
-          <option
-            v-for="size in FONT_SIZES"
-            :key="size"
-            :value="size"
-          >
-            {{ size }}
-          </option>
-        </select>
+          v-model="terminalConfig.fontSize"
+          :options="FONT_SIZES.map((value) => ({ value, label: String(value) }))"
+        />
       </label>
     </div>
   </DialogWrapper>
@@ -74,6 +48,7 @@
 
 <script setup lang="ts">
 import DialogWrapper from '@/components/common/DialogWrapper.vue'
+import SelectInput from '@/components/common/SelectInput.vue'
 import { FONT_FAMILIES, FONT_SIZES, terminalConfig } from '@/composables/terminalConfig'
 import { themesForScheme } from '@/composables/terminalThemes'
 

@@ -2,20 +2,20 @@
   <div
     ref="previewRef"
     class="flex flex-wrap"
-    :class="[showDots ? 'gap-1 pt-3' : 'gap-2 pt-4 pb-1']"
+    :class="[showDots ? 'gap-1 pt-3' : 'gap-2 pt-3.5 pb-0.5']"
   >
     <template v-if="showDots">
       <div
         v-for="node in nodesLatency"
         :key="node.name"
-        class="flex h-4 w-4 items-center justify-center rounded-full transition hover:scale-110"
+        class="flex size-3 items-center justify-center rounded-sm transition hover:scale-110"
         :class="getBgColor(node.latency)"
         ref="dotsRef"
         @mouseenter="(e) => makeTippy(e, node)"
         @click.stop="$emit('nodeclick', node.name)"
       >
         <div
-          class="h-2 w-2 rounded-full bg-white"
+          class="size-[5px] rounded-[2px] bg-white"
           v-if="now === node.name"
         ></div>
       </div>
@@ -72,7 +72,7 @@ const previewRef = ref<HTMLElement | null>(null)
 const { width } = useElementSize(previewRef)
 
 const widthEnough = computed(() => {
-  return width.value > 20 * props.nodes.length
+  return width.value > 16 * props.nodes.length
 })
 
 const makeTippy = (e: Event, node: { name: string; latency: number }) => {

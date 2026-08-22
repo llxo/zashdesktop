@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import CtrlsBar from '../common/CtrlsBar.vue'
 import DialogWrapper from '../common/DialogWrapper.vue'
 import SegmentedControl from '../common/SegmentedControl.vue'
+import SelectInput from '../common/SelectInput.vue'
 import TextInput from '../common/TextInput.vue'
 
 export default defineComponent({
@@ -122,19 +123,17 @@ export default defineComponent({
               <div class="settings-grid">
                 <div class="setting-item">
                   <div class="setting-item-label">{t('ruleStyle')}</div>
-                  <select
+                  <SelectInput
                     class="select select-sm min-w-24"
-                    v-model={ruleDisplayStyle.value}
-                  >
-                    {Object.values(LIST_DISPLAY_STYLE).map((opt) => (
-                      <option
-                        key={opt}
-                        value={opt}
-                      >
-                        {t(opt)}
-                      </option>
-                    ))}
-                  </select>
+                    modelValue={ruleDisplayStyle.value}
+                    onUpdate:modelValue={(value) =>
+                      (ruleDisplayStyle.value = value as LIST_DISPLAY_STYLE)
+                    }
+                    options={Object.values(LIST_DISPLAY_STYLE).map((value) => ({
+                      value,
+                      label: t(value),
+                    }))}
+                  />
                 </div>
                 <div class="setting-item">
                   <div class="setting-item-label">{t('displaySelectedNode')}</div>

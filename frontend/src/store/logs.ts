@@ -1,5 +1,5 @@
 import { stripAnsi } from '@/helper/ansi'
-import { useStorage } from '@vueuse/core'
+import { useStorage } from '@/helper/storage'
 import { ref } from 'vue'
 
 // 完整的 logs ref 与流控状态(暂停 / 级别)由组装层维护并组装,store 仅直接引用,不再参与组装。

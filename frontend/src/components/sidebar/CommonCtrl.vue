@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-2 p-2 text-sm">
     <SidebarStatistics />
-    <BackendSwitch :disable-edit-backend="true" />
+    <BackendSwitch />
     <div class="flex gap-2">
       <SidebarButtons />
       <BackendVersion />

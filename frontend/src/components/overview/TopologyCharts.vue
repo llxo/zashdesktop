@@ -8,8 +8,8 @@
         :class="
           isFullScreen
             ? [
-                'bg-base-100 custom-background fixed inset-0 z-[9999] flex h-screen w-screen flex-col bg-cover bg-center p-4',
-                `blur-intensity-${blurIntensity} custom-background-${dashboardTransparent}`,
+                'bg-base-100 fixed inset-0 z-[9999] flex h-screen w-screen flex-col bg-cover bg-center p-4',
+                backgroundImage && 'custom-background',
               ]
             : undefined
         "
@@ -69,8 +69,8 @@
         <div
           class="bg-base-200/30 relative w-full overflow-hidden rounded-xl"
           :class="isFullScreen ? 'mt-2 min-h-0 flex-1' : 'mt-4 h-96'"
+          data-page-swipe-ignore
           @mousemove.stop
-          @touchmove.stop
         >
           <div
             class="relative"
@@ -102,11 +102,7 @@ import { backgroundImage } from '@/helper/indexeddb'
 import { getIPLabelFromMap } from '@/helper/sourceip'
 import { isMiddleScreen } from '@/helper/utils'
 import { activeConnections, filteredActiveConnections } from '@/store/connections'
-import {
-  blurIntensity,
-  dashboardTransparent,
-  topologyApplyConnectionFilter,
-} from '@/store/settings'
+import { topologyApplyConnectionFilter } from '@/store/settings'
 import {
   ArrowsPointingInIcon,
   ArrowsPointingOutIcon,
@@ -136,7 +132,7 @@ const chartSurfaceStyle = computed<CSSProperties>(() => {
   if (!isFullScreen.value) return {}
 
   const style: CSSProperties = {
-    backdropFilter: `blur(${blurIntensity.value}px)`,
+    backdropFilter: 'var(--app-glass, none)',
     height: '100%',
     width: '100%',
   }
@@ -181,15 +177,15 @@ const options = computed<EChartOption>(() => ({
   backgroundColor: 'transparent',
   textStyle: {
     fontFamily: fontFamily.value || 'inherit',
-    color: colors.baseContent,
+    color: colors.text,
   },
   tooltip: {
     trigger: 'item',
     triggerOn: 'mousemove',
-    backgroundColor: colors.base70,
-    borderColor: colors.baseContent30,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     textStyle: {
-      color: colors.baseContent,
+      color: colors.text,
     },
     formatter: (params: unknown) => {
       const { dataType, data } = params as {
@@ -245,7 +241,7 @@ const options = computed<EChartOption>(() => ({
         borderWidth: 0,
       },
       label: {
-        color: colors.baseContent,
+        color: colors.text,
         fontSize: isMiddleScreen.value ? 10 : 12,
         formatter: (params: { name: string }) => {
           const maxLength = isFullScreen.value ? 45 : isMiddleScreen.value ? 20 : 30

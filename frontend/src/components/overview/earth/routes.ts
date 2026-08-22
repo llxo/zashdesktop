@@ -1,7 +1,9 @@
 import { connectionAccessor } from '@/assembly/connections'
 import type { Connection } from '@/types'
 import * as ipaddr from 'ipaddr.js'
-import type { EarthHostTraffic, EarthLocation, EarthRoute } from './types'
+import type { EarthHostTraffic, EarthLocation, EarthLocationHint, EarthRoute } from './types'
+
+type LocatedCoordinates = { latitude: number; longitude: number }
 
 interface RouteCandidate {
   destinationIP: string
@@ -76,11 +78,52 @@ const mergeTopHosts = (...groups: EarthHostTraffic[][]) =>
     .sort((left, right) => right.downloaded - left.downloaded)
     .slice(0, 5)
 
+const hasValidCoordinates = (
+  location: Pick<EarthLocationHint, 'latitude' | 'longitude'> | EarthLocation | null,
+): location is (EarthLocationHint | EarthLocation) & LocatedCoordinates =>
+  location !== null &&
+  location.latitude !== null &&
+  location.longitude !== null &&
+  Number.isFinite(location.latitude) &&
+  Number.isFinite(location.longitude) &&
+  location.latitude >= -90 &&
+  location.latitude <= 90 &&
+  location.longitude >= -180 &&
+  location.longitude <= 180
+
+const resolveOrigin = (
+  ip: string,
+  local: EarthLocation | null | undefined,
+  preferred?: EarthLocationHint | null,
+): EarthLocation | null => {
+  let latitude: number
+  let longitude: number
+
+  if (preferred && hasValidCoordinates(preferred)) {
+    latitude = preferred.latitude
+    longitude = preferred.longitude
+  } else if (local && hasValidCoordinates(local)) {
+    latitude = local.latitude
+    longitude = local.longitude
+  } else {
+    return null
+  }
+
+  return {
+    ip,
+    latitude,
+    longitude,
+    city: preferred?.city.trim() || local?.city || '',
+    country: local?.country || preferred?.country.trim() || '',
+  }
+}
+
 export const buildEarthRoutes = async (
   connections: readonly Connection[],
   originIP: string,
   locale: string,
   lookup: (ips: string[], locale: string) => Promise<Record<string, EarthLocation | null>>,
+  preferredOrigin?: EarthLocationHint | null,
 ) => {
   const normalizedOrigin = normalizeIP(originIP)
 
@@ -92,7 +135,7 @@ export const buildEarthRoutes = async (
   for (const candidate of candidates) ips.add(candidate.destinationIP)
 
   const locations = await lookup([...ips], locale)
-  const origin = locations[normalizedOrigin]
+  const origin = resolveOrigin(normalizedOrigin, locations[normalizedOrigin], preferredOrigin)
 
   if (!origin) return { routes: [] as EarthRoute[], origin: null }
 

@@ -2,6 +2,7 @@
   <div
     class="flex min-h-0 flex-1 flex-col"
     v-show="active"
+    data-page-swipe-ignore
   >
     <div
       ref="terminalEl"

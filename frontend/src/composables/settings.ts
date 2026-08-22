@@ -1,28 +1,41 @@
-import { getAllSettingKeys, SETTINGS_CATEGORIES } from '@/config/settingsItems'
+import { DEFAULT_SETTINGS_MENU_ORDER, getAllSettingKeys } from '@/config/settingsItems'
 import { SETTINGS_MENU_KEY } from '@/constant'
 import { hiddenSettingsItems, settingsMenuOrder } from '@/store/settings'
 import type { MaybeRef } from 'vue'
 import { computed, ref, unref } from 'vue'
 
-/**
- * 设置项「就地编辑」模式。
- * 开启后，所有设置项（含已隐藏的）都会显示，并在每项前面展示红/绿的 +/- 控制按钮，
- * 用于直接在页面上切换该项的显示/隐藏。
- */
-export const settingsEditMode = ref(false)
+/** 当前实际渲染且可操作的设置项。搜索据此排除平台、能力和依赖条件不满足的项目。 */
+const renderedSettingCounts = ref<Record<string, number>>({})
 
-/**
- * Returns true when the setting item with the given key is visible.
- * In edit mode every item is rendered so its visibility can be toggled in place.
- * Use inside computed() for reactivity. For templates, use useIsSettingVisible(key) instead.
- */
-export function isSettingVisible(key: string): boolean {
-  return settingsEditMode.value || !hiddenSettingsItems.value[key]
+export function registerRenderedSetting(key: string): () => void {
+  renderedSettingCounts.value = {
+    ...renderedSettingCounts.value,
+    [key]: (renderedSettingCounts.value[key] ?? 0) + 1,
+  }
+
+  return () => {
+    const next = { ...renderedSettingCounts.value }
+    const count = (next[key] ?? 1) - 1
+    if (count > 0) next[key] = count
+    else delete next[key]
+    renderedSettingCounts.value = next
+  }
+}
+
+export function isSettingRendered(key: string): boolean {
+  return !!renderedSettingCounts.value[key]
 }
 
 /**
- * Returns the raw hidden state of a setting key, ignoring edit mode.
- * Use to dim items that are hidden while editing.
+ * Returns true when the setting item with the given key is visible.
+ * Use inside computed() for reactivity. For templates, use useIsSettingVisible(key) instead.
+ */
+export function isSettingVisible(key: string): boolean {
+  return !hiddenSettingsItems.value[key]
+}
+
+/**
+ * Returns the raw hidden state of a setting key.
  */
 export function isSettingHidden(key: string): boolean {
   return !!hiddenSettingsItems.value[key]
@@ -41,7 +54,7 @@ export function toggleSettingHidden(key: string): void {
  * Use in templates for reactive visibility checks.
  */
 export function useIsSettingVisible(key: MaybeRef<string>) {
-  return computed(() => settingsEditMode.value || !hiddenSettingsItems.value[unref(key)])
+  return computed(() => !hiddenSettingsItems.value[unref(key)])
 }
 
 /**
@@ -49,15 +62,13 @@ export function useIsSettingVisible(key: MaybeRef<string>) {
  * Use for "has any visible item" in a settings section.
  */
 export function useHasAnyVisibleSetting(keys: MaybeRef<string[]>) {
-  return computed(
-    () => settingsEditMode.value || unref(keys).some((k) => !hiddenSettingsItems.value[k]),
-  )
+  return computed(() => unref(keys).some((k) => !hiddenSettingsItems.value[k]))
 }
 
 /** 应用「全部显示」预设 */
 export function applyShowAllPreset(): void {
   hiddenSettingsItems.value = {}
-  settingsMenuOrder.value = [...SETTINGS_CATEGORIES].map((category) => category.key)
+  settingsMenuOrder.value = [...DEFAULT_SETTINGS_MENU_ORDER]
 }
 
 /** 应用「精简显示」预设 */
@@ -96,12 +107,15 @@ export function applyMinimalPreset(): void {
     newHiddenItems[key] = true
   }
   hiddenSettingsItems.value = newHiddenItems
-  settingsMenuOrder.value = [...SETTINGS_CATEGORIES].map((category) => category.key)
+  settingsMenuOrder.value = [...DEFAULT_SETTINGS_MENU_ORDER]
 }
 
-/** 调整大类在设置菜单中的顺序（在编辑模式下就地上移/下移）。 */
+/** 调整大类在设置菜单中的顺序。 */
 export function moveSettingsCategory(key: SETTINGS_MENU_KEY, direction: -1 | 1): void {
-  const order = [...settingsMenuOrder.value]
+  const order = [
+    ...settingsMenuOrder.value,
+    ...DEFAULT_SETTINGS_MENU_ORDER.filter((item) => !settingsMenuOrder.value.includes(item)),
+  ]
   const from = order.indexOf(key)
   if (from === -1) return
   const to = from + direction

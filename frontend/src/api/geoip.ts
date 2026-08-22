@@ -18,14 +18,27 @@ export interface IPInfo {
   city: string
   asn: string
   organization: string
+  latitude: number | null
+  longitude: number | null
+}
+
+const coordinate = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+
+const ensureResponseOK = (response: Response, service: string) => {
+  if (!response.ok) {
+    throw new Error(`${service} lookup failed: ${response.status}`)
+  }
 }
 
 // china
 export const getIPFromIpipnetAPI = async () => {
   // Cache-busting query parameters make ipip.net's uncached response omit its CORS header.
   const response = await fetch('https://myip.ipip.net/json', { cache: 'no-store' })
+  ensureResponseOK(response, IP_INFO_API.IPIP)
 
   return (await response.json()) as {
+    ret: string
     data: {
       ip: string
       location: string[]
@@ -38,24 +51,18 @@ export const getIPFromIpsbAPI = async (ip = '') => {
   const response = await fetch('https://api.ip.sb/geoip' + (ip ? `/${ip}` : ''), {
     cache: 'no-store',
   })
+  ensureResponseOK(response, IP_INFO_API.IPSB)
 
   return (await response.json()) as {
-    organization: string
-    longitude: number
-    city: string
-    region: string
-    timezone: string
-    isp: string
-    offset: number
-    asn: number
-    asn_organization: string
-    country: string
     ip: string
-    latitude: number
-    postal_code: string
-    continent_code: string
-    country_code: string
-    region_code: string
+    organization?: string
+    asn_organization?: string
+    asn?: number
+    country?: string
+    region?: string
+    city?: string
+    latitude?: number
+    longitude?: number
   }
 }
 
@@ -63,66 +70,83 @@ const getIPFromIPWhoisAPI = async (ip = '') => {
   const response = await fetch('https://ipwho.is' + (ip ? `/${ip}` : ''), {
     cache: 'no-store',
   })
+  ensureResponseOK(response, IP_INFO_API.IPWHOIS)
 
-  return (await response.json()) as {
-    ip: string
-    success: boolean
-    type: string
-    continent: string
-    continent_code: string
-    country: string
-    country_code: string
-    region: string
-    region_code: string
-    city: string
-    latitude: number
-    longitude: number
-    is_eu: boolean
-    postal: string
-    calling_code: string
-    capital: string
-    borders: string
-    flag: {
-      img: string
-      emoji: string
-      emoji_unicode: string
-    }
-    connection: {
-      asn: number
-      org: string
-      isp: string
-      domain: string
-    }
-    timezone: {
-      id: string
-      abbr: string
-      is_dst: boolean
-      offset: number
-      utc: string
-      current_time: string
-    }
-  }
+  return (await response.json()) as
+    | {
+        ip: string
+        success: true
+        country?: string
+        region?: string
+        city?: string
+        latitude?: number
+        longitude?: number
+        connection?: {
+          asn?: number
+          org?: string
+        }
+      }
+    | {
+        ip?: string
+        success: false
+        message: string
+      }
 }
 
 const getIPFromIPapiisAPI = async (ip = '') => {
   const response = await fetch('https://api.ipapi.is' + (ip ? `/?q=${ip}` : ''), {
     cache: 'no-store',
   })
+  ensureResponseOK(response, IP_INFO_API.IPAPI)
 
-  // Anonymous requests use ipapi.is's minimal, flat response schema.
-  return (await response.json()) as {
-    ip: string
-    company_name: string | null
-    asn_num: number | null
-    asn_org: string | null
-    cc: string | null
-  }
+  // Requests without an API key always use ipapi.is's minimal flat schema.
+  return (await response.json()) as
+    | {
+        ip: string
+        company_name: string | null
+        asn_num: number | null
+        asn_org: string | null
+        cc: string | null
+        lat: number | null
+        lon: number | null
+      }
+    | {
+        error: string
+      }
 }
 
-export const getIPInfo = async (ip = ''): Promise<IPInfo> => {
-  switch (IPInfoAPI.value) {
+export const getIPInfo = async (ip = '', api: IP_INFO_API = IPInfoAPI.value): Promise<IPInfo> => {
+  switch (api) {
+    case IP_INFO_API.IPIP:
+      if (ip) {
+        throw new Error('IPIP.net only supports public IP detection')
+      }
+
+      const ipip = await getIPFromIpipnetAPI()
+
+      if (ipip.ret !== 'ok' || !ipaddr.isValid(ipip.data?.ip)) {
+        throw new Error('IPIP.net lookup failed')
+      }
+
+      const [country = '', region = '', city = '', ...organizationParts] = ipip.data.location ?? []
+
+      return {
+        ip: ipip.data.ip,
+        country,
+        region,
+        city,
+        asn: '',
+        organization: organizationParts.filter(Boolean).join(' '),
+        latitude: null,
+        longitude: null,
+      }
     case IP_INFO_API.IPAPI:
       const ipapi = await getIPFromIPapiisAPI(ip)
+
+      // ipapi.is reports invalid queries with HTTP 200 and an error field.
+      if ('error' in ipapi) {
+        throw new Error(`ipapi.is lookup failed: ${ipapi.error}`)
+      }
 
       return {
         ip: ipapi.ip,
@@ -131,17 +155,25 @@ export const getIPInfo = async (ip = ''): Promise<IPInfo> => {
         city: '',
         asn: ipapi.asn_num?.toString() ?? '',
         organization: ipapi.asn_org ?? ipapi.company_name ?? '',
+        latitude: coordinate(ipapi.lat),
+        longitude: coordinate(ipapi.lon),
       }
     case IP_INFO_API.IPWHOIS:
       const ipwhois = await getIPFromIPWhoisAPI(ip)
 
+      if (!ipwhois.success) {
+        throw new Error(`IPWhois lookup failed: ${ipwhois.message}`)
+      }
+
       return {
         ip: ipwhois.ip,
-        region: ipwhois.region,
-        country: ipwhois.country,
-        city: ipwhois.city,
-        asn: ipwhois.connection.asn?.toString(),
-        organization: ipwhois.connection.org,
+        region: ipwhois.region ?? '',
+        country: ipwhois.country ?? '',
+        city: ipwhois.city ?? '',
+        asn: ipwhois.connection?.asn?.toString() ?? '',
+        organization: ipwhois.connection?.org ?? '',
+        latitude: coordinate(ipwhois.latitude),
+        longitude: coordinate(ipwhois.longitude),
       }
     case IP_INFO_API.IPSB:
     default:
@@ -149,13 +181,25 @@ export const getIPInfo = async (ip = ''): Promise<IPInfo> => {
 
       return {
         ip: ipsb.ip,
-        country: ipsb.country,
-        region: ipsb.region,
-        city: ipsb.city,
-        asn: ipsb.asn?.toString(),
-        organization: ipsb.organization,
+        country: ipsb.country ?? '',
+        region: ipsb.region ?? '',
+        city: ipsb.city ?? '',
+        asn: ipsb.asn?.toString() ?? '',
+        organization: ipsb.organization ?? ipsb.asn_organization ?? '',
+        latitude: coordinate(ipsb.latitude),
+        longitude: coordinate(ipsb.longitude),
       }
   }
+}
+
+export const getPublicIPInfo = async (api: IP_INFO_API): Promise<IPInfo> => {
+  const info = await getIPInfo('', api)
+
+  if (!ipaddr.isValid(info.ip)) {
+    throw new Error(`${api} returned an invalid public IP`)
+  }
+
+  return info
 }
 
 /**
@@ -317,6 +361,8 @@ const getGeoIPInfo = async (ip: string): Promise<IPInfo> => {
     city: '',
     asn: asn?.autonomous_system_number?.toString() ?? '',
     organization: asn?.autonomous_system_organization ?? '',
+    latitude: null,
+    longitude: null,
   }
 }
 
@@ -327,6 +373,8 @@ const EMPTY_GEOIP_INFO: IPInfo = {
   city: '',
   asn: '',
   organization: '',
+  latitude: null,
+  longitude: null,
 }
 // Cap the resolved-info cache; a session may touch many distinct IPs, and each
 // entry is tiny, so this only guards against unbounded growth.

@@ -250,11 +250,7 @@ export const ALL_THEME = [
   ...(window.ksu ? ['light-monet', 'dark-monet'] : []),
   'halloween',
   'forest',
-  'lofi',
-  'wireframe',
-  'black',
   'dracula',
-  'business',
   'night',
   'dim',
   'nord',
@@ -303,6 +299,7 @@ export const DEFAULT_THEME = {
 export type THEME = Record<string, string>
 
 export enum IP_INFO_API {
+  IPIP = 'ipip.net',
   IPSB = 'ip.sb',
   IPWHOIS = 'ipwho.is',
   IPAPI = 'ipapi.is',

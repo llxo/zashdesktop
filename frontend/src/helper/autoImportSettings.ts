@@ -1,9 +1,9 @@
 import { getStorageAPI } from '@/assembly/storage'
 import { showConfirmDialog } from '@/helper/confirmDialog'
 import { showNotification } from '@/helper/notification'
+import { useStorage } from '@/helper/storage'
 import { applyDashboardSettingsToStorage } from '@/helper/utils'
 import { i18n } from '@/i18n'
-import { useStorage } from '@vueuse/core'
 import { isEmpty } from 'lodash'
 const IMPORT_SETTINGS_URL_KEY = 'config/import-settings-url'
 

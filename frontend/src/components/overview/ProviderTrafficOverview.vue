@@ -4,7 +4,7 @@
     v-if="hasProvidersWithTraffic"
   >
     <div
-      class="grid max-h-128 gap-3 overflow-y-auto"
+      class="grid gap-3 md:max-h-128 md:overflow-y-auto"
       :style="
         hasMultipleProvidersWithTraffic
           ? `grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));`

@@ -1,5 +1,6 @@
+import { themeColorScheme, type ThemeColorScheme } from '@/helper/theme'
 import { isMiddleScreen } from '@/helper/utils'
-import { emoji, font, theme } from '@/store/settings'
+import { emoji, font } from '@/store/settings'
 import { useElementSize } from '@vueuse/core'
 import { BarChart, LineChart, SankeyChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -25,80 +26,56 @@ export type EChartOption = echarts.EChartsCoreOption
 type ChartElementRef = Ref<HTMLElement | null | undefined>
 
 export interface ChartTheme {
-  primary30: string
-  primary60: string
-  info30: string
-  info60: string
-  baseContent10: string
-  baseContent30: string
-  baseContent60: string
-  baseContent: string
-  base70: string
+  seriesPrimary: string
+  seriesPrimaryMuted: string
+  seriesSecondary: string
+  seriesSecondaryMuted: string
+  grid: string
+  border: string
+  textMuted: string
+  text: string
+  surface: string
 }
 
-const createThemeProbe = () => {
-  const probe = document.createElement('span')
-  probe.className =
-    'border-b-primary/30 border-t-primary/60 border-l-info/30 border-r-info/60 text-base-content/10 bg-base-100/70 outline-base-content/30 decoration-base-content/60 caret-base-content'
-
-  Object.assign(probe.style, {
-    position: 'absolute',
-    width: '0',
-    height: '0',
-    overflow: 'hidden',
-    pointerEvents: 'none',
-    visibility: 'hidden',
-  })
-
-  return probe
+const CHART_COLOR_SCHEMES: Record<ThemeColorScheme, ChartTheme> = {
+  light: {
+    seriesPrimary: 'rgba(29, 29, 31, 0.6)',
+    seriesPrimaryMuted: 'rgba(29, 29, 31, 0.3)',
+    seriesSecondary: 'rgba(81, 104, 139, 0.75)',
+    seriesSecondaryMuted: 'rgba(71, 85, 105, 0.28)',
+    grid: 'rgba(29, 29, 31, 0.1)',
+    border: 'rgba(29, 29, 31, 0.3)',
+    textMuted: 'rgba(29, 29, 31, 0.6)',
+    text: '#1d1d1f',
+    surface: 'rgba(255, 255, 255, 0.7)',
+  },
+  dark: {
+    seriesPrimary: 'rgba(245, 245, 247, 0.6)',
+    seriesPrimaryMuted: 'rgba(245, 245, 247, 0.3)',
+    seriesSecondary: 'rgba(148, 163, 184, 0.78)',
+    seriesSecondaryMuted: 'rgba(148, 163, 184, 0.32)',
+    grid: 'rgba(245, 245, 247, 0.1)',
+    border: 'rgba(245, 245, 247, 0.3)',
+    textMuted: 'rgba(245, 245, 247, 0.6)',
+    text: '#f5f5f7',
+    surface: 'rgba(29, 29, 31, 0.7)',
+  },
 }
 
 export const useChartTheme = (chartRef: ChartElementRef) => {
-  const colors = reactive<ChartTheme>({
-    primary30: '',
-    primary60: '',
-    info30: '',
-    info60: '',
-    baseContent10: '',
-    baseContent30: '',
-    baseContent60: '',
-    baseContent: '',
-    base70: '',
-  })
+  const colors = reactive<ChartTheme>({ ...CHART_COLOR_SCHEMES[themeColorScheme.value] })
   const fontFamily = ref('')
-  let probe: HTMLSpanElement | null = null
 
-  const update = () => {
-    if (!probe) return
-
-    const style = getComputedStyle(probe)
-    colors.primary30 = style.borderBottomColor
-    colors.primary60 = style.borderTopColor
-    colors.info30 = style.borderLeftColor
-    colors.info60 = style.borderRightColor
-    colors.baseContent10 = style.color
-    colors.baseContent30 = style.outlineColor
-    colors.baseContent60 = style.textDecorationColor
-    colors.baseContent = style.caretColor
-    colors.base70 = style.backgroundColor
-    fontFamily.value = style.fontFamily
+  const updateFont = () => {
+    if (!chartRef.value) return
+    fontFamily.value = getComputedStyle(chartRef.value).fontFamily
   }
 
-  onMounted(() => {
-    const host = chartRef.value?.closest('#app-content') ?? chartRef.value?.parentElement
-    if (!host) return
-
-    probe = createThemeProbe()
-    host.appendChild(probe)
-    update()
+  onMounted(updateFont)
+  watch(themeColorScheme, (scheme) => Object.assign(colors, CHART_COLOR_SCHEMES[scheme]), {
+    flush: 'post',
   })
-
-  watch([theme, font, emoji], () => nextTick(update))
-
-  onUnmounted(() => {
-    probe?.remove()
-    probe = null
-  })
+  watch([font, emoji], () => nextTick(updateFont))
 
   return { colors, fontFamily }
 }

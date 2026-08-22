@@ -1,10 +1,11 @@
+import { getReverseDNSHostname } from '@/helper/reverseDns'
 import { sourceIPLabelList } from '@/store/settings'
 import { activeBackend } from '@/store/setup'
 import * as ipaddr from 'ipaddr.js'
 import { watch } from 'vue'
 
 const CACHE_SIZE = 256
-const ipLabelCache = new Map<string, string>()
+const ipLabelCache = new Map<string, string | null>()
 const sourceIPMap = new Map<string, string>()
 const sourceIPRegexList: { regex: RegExp; label: string }[] = []
 type CIDREntry = { cidr: [ipaddr.IPv4 | ipaddr.IPv6, number]; label: string }
@@ -40,7 +41,7 @@ const preprocessSourceIPList = () => {
   }
 }
 
-const cacheResult = (ip: string, label: string) => {
+const cacheResult = (ip: string, label: string | null) => {
   ipLabelCache.set(ip, label)
 
   if (ipLabelCache.size > CACHE_SIZE) {
@@ -59,9 +60,7 @@ watch(() => [sourceIPLabelList.value, activeBackend.value], preprocessSourceIPLi
   deep: true,
 })
 
-export const getIPLabelFromMap = (ip: string) => {
-  if (!ip) return ip === '' ? 'Inner' : ''
-
+const getManualIPLabel = (ip: string): string | null => {
   if (ipLabelCache.has(ip)) {
     return ipLabelCache.get(ip)!
   }
@@ -95,5 +94,14 @@ export const getIPLabelFromMap = (ip: string) => {
     }
   }
 
-  return cacheResult(ip, ip)
+  return cacheResult(ip, null)
+}
+
+export const getIPLabelFromMap = (ip: string) => {
+  if (!ip) return ip === '' ? 'Inner' : ''
+
+  const manualLabel = getManualIPLabel(ip)
+  if (manualLabel !== null) return manualLabel
+
+  return getReverseDNSHostname(ip) ?? ip
 }

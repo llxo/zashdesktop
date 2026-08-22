@@ -15,36 +15,24 @@
           </div>
           <div class="setting-item">
             <div class="setting-item-label">{{ $t('outbound') }}</div>
-            <select
+            <SelectInput
               class="select select-sm min-w-24"
               v-model="nqOutbound"
               :disabled="nqRunning"
-            >
-              <option value="">{{ $t('default') }}</option>
-              <option
-                v-for="tag in outboundTags"
-                :key="tag"
-                :value="tag"
-              >
-                {{ tag }}
-              </option>
-            </select>
+              :options="[
+                { value: '', label: $t('default') },
+                ...outboundTags.map((value) => ({ value, label: value })),
+              ]"
+            />
           </div>
           <div class="setting-item">
             <div class="setting-item-label">{{ $t('maxRuntime') }}</div>
-            <select
+            <SelectInput
               class="select select-sm min-w-24"
-              v-model.number="nqMaxRuntime"
+              v-model="nqMaxRuntime"
               :disabled="nqRunning"
-            >
-              <option
-                v-for="sec in [20, 30, 60]"
-                :key="sec"
-                :value="sec"
-              >
-                {{ sec }} s
-              </option>
-            </select>
+              :options="[20, 30, 60].map((value) => ({ value, label: `${value} s` }))"
+            />
           </div>
           <div class="setting-item">
             <div class="setting-item-label">{{ $t('serial') }}</div>
@@ -202,20 +190,15 @@
           </div>
           <div class="setting-item">
             <div class="setting-item-label">{{ $t('outbound') }}</div>
-            <select
+            <SelectInput
               class="select select-sm min-w-24"
               v-model="stunOutbound"
               :disabled="stunRunning"
-            >
-              <option value="">{{ $t('default') }}</option>
-              <option
-                v-for="tag in outboundTags"
-                :key="tag"
-                :value="tag"
-              >
-                {{ tag }}
-              </option>
-            </select>
+              :options="[
+                { value: '', label: $t('default') },
+                ...outboundTags.map((value) => ({ value, label: value })),
+              ]"
+            />
           </div>
           <div class="setting-item">
             <button
@@ -300,6 +283,7 @@
 
 <script setup lang="ts">
 import { getSingboxClient } from '@/assembly/tools'
+import SelectInput from '@/components/common/SelectInput.vue'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart.vue'
 import { chartTooltipRow } from '@/components/charts/chartTooltip'
 import { getChartPointValue, type ChartTooltipParam } from '@/components/charts/chartTypes'

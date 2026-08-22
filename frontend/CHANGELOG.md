@@ -2,6 +2,72 @@
 
 # Changelog
 
+## [3.21.0](https://github.com/Zephyruso/zashboard/compare/v3.20.0...v3.21.0) (2026-08-19)
+
+
+### Features
+
+* improve IP lookup API selection ([4ab1879](https://github.com/Zephyruso/zashboard/commit/4ab187937f9200ed09fad9d59b325623c008e922)), closes [#757](https://github.com/Zephyruso/zashboard/issues/757)
+
+
+### Bug Fixes
+
+* add confirmation dialogs for core upgrade and config reload actions ([8cb98d6](https://github.com/Zephyruso/zashboard/commit/8cb98d666767813099d4aeb5849eb5c1bc9df4b4))
+* adjust grid styling for responsive layout in ProviderTrafficOverview component ([5362606](https://github.com/Zephyruso/zashboard/commit/536260633b4dd06f5e3d8d5fd9c72112c3dc5b26))
+* adjust z-index values for backend panel components ([43e2afd](https://github.com/Zephyruso/zashboard/commit/43e2afd91db909fc506526cfad93d10a219fc9e7))
+* bring backend actions back into the sidebar backend menu ([e8a5dd5](https://github.com/Zephyruso/zashboard/commit/e8a5dd5ed404132dc72652d39dfb22d0f9ffa003)), closes [#765](https://github.com/Zephyruso/zashboard/issues/765)
+* replace legacy theme names with new mappings in settings ([c6510fe](https://github.com/Zephyruso/zashboard/commit/c6510fe96200980299a91713f460aab494cd7c52))
+* update backend status color and remove confirmation for config reload ([fe8784b](https://github.com/Zephyruso/zashboard/commit/fe8784bc220002a31c8a762f1fe1ec649ec35c6b))
+
+## [3.20.0](https://github.com/Zephyruso/zashboard/compare/v3.19.0...v3.20.0) (2026-08-18)
+
+
+### Features
+
+* add resolveClientHostname setting and implement reverse DNS lookup functionality ([5abb091](https://github.com/Zephyruso/zashboard/commit/5abb09106319fd577d393db07d132fd3c161b107))
+* add Taildrop functionality for file sending and receiving ([cd194c3](https://github.com/Zephyruso/zashboard/commit/cd194c3058adf0db11f417bf9b7ce75eaa60444b))
+* enhance backend reachability and connection diagnostics ([43e471f](https://github.com/Zephyruso/zashboard/commit/43e471f751d2b826025c475123d9b1961bf677ea))
+* enhance BackendSwitch component with compact mode and status indicator ([19c86ef](https://github.com/Zephyruso/zashboard/commit/19c86ef04b13bf42acdecbdd8670076ba990028c))
+* enhance BackendSwitchToast with improved status display and retry functionality ([d87a204](https://github.com/Zephyruso/zashboard/commit/d87a20475f915e289a9bcdcf70b2daa6e3729825))
+* enhance protocol handling in query parameters and update UI components for consistency ([0d045d3](https://github.com/Zephyruso/zashboard/commit/0d045d30c9ed9744b0528d1158ffee7f9628cf29))
+* implement app toast notifications with animations and styles ([0287fb2](https://github.com/Zephyruso/zashboard/commit/0287fb232bf3e8f047e232679877e5fce81b98b2))
+* implement backend session management and connectivity notifications ([ba8bbf2](https://github.com/Zephyruso/zashboard/commit/ba8bbf2df148fefd81b3498c67762ecbfbdee681))
+* Refactor backend management and settings UI ([dd4b6c0](https://github.com/Zephyruso/zashboard/commit/dd4b6c03f26e9893c50f2e98bae22c51c90b0aa4))
+* replace native select elements with custom SelectInput component across various settings and components ([dc743ce](https://github.com/Zephyruso/zashboard/commit/dc743ce24cfbdfdf61bf7fad9ce9c7c40230950a))
+* replace tab navigation with SegmentedControl for improved user experience ([9eaa523](https://github.com/Zephyruso/zashboard/commit/9eaa523d78dd14ed3926ca5c7f4dca56480ed770))
+* replace useStorage imports from vueuse with custom implementation for better default handling ([3544c14](https://github.com/Zephyruso/zashboard/commit/3544c14759e4881d1582e2dbc52c28001fa14947))
+* update color scheme and improve chart themes for better visibility ([e23fd12](https://github.com/Zephyruso/zashboard/commit/e23fd124b5e05af134db0a9213d2901a9018ec5f))
+* update ProxyPreview component styles for improved visual consistency ([22da30d](https://github.com/Zephyruso/zashboard/commit/22da30db355e1ac4712de778b5c54fe56b480cc3))
+
+
+### Bug Fixes
+
+* enhance latency testing by adding group name support and improving history tracking ([57e3460](https://github.com/Zephyruso/zashboard/commit/57e3460f59c3aa6584a46938aba1ef731cc69b02))
+* filter out non-latency testable proxies in allProxiesLatencyTest ([2111ee1](https://github.com/Zephyruso/zashboard/commit/2111ee13f3875eef591de0168361e3c9580b1691))
+* process reader for sing-box API ([3eb8dac](https://github.com/Zephyruso/zashboard/commit/3eb8dac7ef603342844b98e7cf784a0f0ca838d2))
+* update ProxiesContent and ProxyProvider components to handle optional name prop and improve event handling ([677fd5c](https://github.com/Zephyruso/zashboard/commit/677fd5c692be5c91d213b0662abfc8f45834c176))
+
+## [3.19.0](https://github.com/Zephyruso/zashboard/compare/v3.18.0...v3.19.0) (2026-08-14)
+
+
+### Features
+
+* add city labels to earth globe ([df067b3](https://github.com/Zephyruso/zashboard/commit/df067b3fd3d8aa38b462e02cdcf00890dbc46264)), closes [#743](https://github.com/Zephyruso/zashboard/issues/743)
+* add connection filter functionality and enhance topology controls ([58eb346](https://github.com/Zephyruso/zashboard/commit/58eb346b2846d72edc376647d9935bd65556669e))
+* add data-page-swipe-ignore attribute to various components and remove redundant touch event handlers ([fca53bc](https://github.com/Zephyruso/zashboard/commit/fca53bce168bf658b25fd16ebf3fe4f84089cb9f))
+* enhance logs and rules display with table view support ([dac63ed](https://github.com/Zephyruso/zashboard/commit/dac63ed748fba89433e071894b7ef447602bb8d0))
+* improve Earth GeoIP database handling ([271452c](https://github.com/Zephyruso/zashboard/commit/271452caf40640bb6be834c87a80d4d58ba5bd57))
+* integrate theme color scheme into ANSI text parsing and rendering ([ea6ac94](https://github.com/Zephyruso/zashboard/commit/ea6ac9475b99e807f700f785e694bf25b1d12c4f))
+
+
+### Bug Fixes
+
+* ensure correct query parameter handling for background image URL ([2181891](https://github.com/Zephyruso/zashboard/commit/2181891bfc0d4863b9e2917d2f331cc6eceb2f0f))
+* **proxies:** exclude reject outbounds from latency tests ([703bd01](https://github.com/Zephyruso/zashboard/commit/703bd01c092c6c714badc97f8cda832cf9543a21)), closes [#742](https://github.com/Zephyruso/zashboard/issues/742)
+* restore silent log level for sing-box ([f82ae78](https://github.com/Zephyruso/zashboard/commit/f82ae782a499fa5dcde6448d0fc31ae7f6f75790))
+* support silent log level by core ([5e26cc2](https://github.com/Zephyruso/zashboard/commit/5e26cc28ea8f0fbd2b4084aea22978233844c22e)), closes [#744](https://github.com/Zephyruso/zashboard/issues/744)
+* update GeoIP API requests ([fd4a41a](https://github.com/Zephyruso/zashboard/commit/fd4a41a4d65e3aeb739af0f0cead8104c45e1872)), closes [#746](https://github.com/Zephyruso/zashboard/issues/746) [#747](https://github.com/Zephyruso/zashboard/issues/747)
+
 ## [3.18.0](https://github.com/Zephyruso/zashboard/compare/v3.17.0...v3.18.0) (2026-08-08)
 
 

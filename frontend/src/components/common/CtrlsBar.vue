@@ -1,6 +1,6 @@
 <template>
   <div
-    class="bg-base-100 need-blur fixed top-0 right-0 left-0 z-30 shadow-xs backdrop-blur-xl"
+    class="bg-base-100 fixed top-0 right-0 left-0 z-30 shadow-xs backdrop-blur-xl"
     :class="[isMiddleScreen ? 'fixed' : 'sticky', { 'md:bg-base-100/50': !solid }]"
     ref="ctrlsBarRef"
   >

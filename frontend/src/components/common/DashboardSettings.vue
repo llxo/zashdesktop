@@ -218,6 +218,7 @@ import {
 } from '@/helper/autoImportSettings'
 import { LOCAL_IMAGE } from '@/helper/indexeddb'
 import { showNotification } from '@/helper/notification'
+import { notifyRequestError } from '@/helper/requestError'
 import { useTooltip } from '@/helper/tooltip'
 import {
   applyDashboardSettingsToStorage,
@@ -316,6 +317,8 @@ const handlerClickUploadSettings = async () => {
         type: 'alert-warning',
       })
     }
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     isStorageSubmitting.value = false
   }
@@ -331,6 +334,8 @@ const handlerClickSyncSettings = async () => {
       force: true,
       notify: true,
     })
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     isStorageSubmitting.value = false
   }
@@ -348,11 +353,14 @@ const handlerClickDeleteUploadedSettings = async () => {
       content: 'deleteUploadedSettingsSuccess',
       type: 'alert-success',
     })
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     isStorageSubmitting.value = false
   }
 }
 
+// 用户刚打开「自动同步」开关,等同于一次手动同步,失败要说明原因。
 watch(autoSyncSettings, async (value, oldValue) => {
   if (!value || oldValue || isStorageSubmitting.value) return
 
@@ -360,6 +368,8 @@ watch(autoSyncSettings, async (value, oldValue) => {
   try {
     dashboardSettingsDialogShow.value = false
     await syncSettingsFromCore()
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     isStorageSubmitting.value = false
   }

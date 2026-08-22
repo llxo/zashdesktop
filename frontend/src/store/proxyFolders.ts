@@ -1,7 +1,7 @@
 import { proxyGroupList, proxyMap } from '@/assembly/proxies'
 import { FOLDER_MODE, FOLDER_MODE_AUTO_THRESHOLD } from '@/constant'
+import { useStorage } from '@/helper/storage'
 import { proxyFolderMode } from '@/store/settings'
-import { useStorage } from '@vueuse/core'
 import { v4 as uuid } from 'uuid'
 import { computed, watch } from 'vue'
 

@@ -4,14 +4,19 @@ export const DBIP_CITY_URL = 'https://cdn.jsdelivr.net/npm/dbip-city-lite/dbip-c
 export const DBIP_COMPRESSED_BYTES = 61_700_000
 export const DBIP_STORED_BYTES = 130_200_000
 
-export type EarthOriginSource = 'global' | 'china'
-
 export type EarthEndpointRole = 'origin' | 'destination'
 
 export interface EarthLocation {
   ip: string
   latitude: number
   longitude: number
+  city: string
+  country: string
+}
+
+export interface EarthLocationHint {
+  latitude: number | null
+  longitude: number | null
   city: string
   country: string
 }

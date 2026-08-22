@@ -14,96 +14,26 @@
     >
       <h1 class="mb-1 text-lg">{{ $t('setup') }}</h1>
 
-      <div class="flex flex-col gap-1">
-        <label class="text-sm">{{ $t('backendType') }}</label>
-        <div class="join w-full">
-          <button
-            class="btn btn-sm join-item flex-1"
-            :class="form.type === 'clash' ? 'btn-primary' : 'border-base-border border'"
-            @click="form.type = 'clash'"
-          >
-            {{ $t('clashApi') }}
-          </button>
-          <button
-            class="btn btn-sm join-item flex-1"
-            :class="form.type === 'singbox' ? 'btn-primary' : 'border-base-border border'"
-            @click="form.type = 'singbox'"
-          >
-            {{ $t('singboxApi') }}
-          </button>
-        </div>
-      </div>
+      <BackendForm v-model="form" />
 
-      <div class="flex gap-2">
-        <div class="flex w-24 flex-none flex-col gap-1">
-          <label class="text-sm">{{ $t('protocol') }}</label>
-          <select
-            class="select select-sm w-full"
-            v-model="form.protocol"
-          >
-            <option value="http">HTTP</option>
-            <option value="https">HTTPS</option>
-          </select>
-        </div>
-        <div class="flex min-w-0 flex-1 flex-col gap-1">
-          <label class="text-sm">{{ $t('host') }}</label>
-          <TextInput
-            class="w-full"
-            name="username"
-            autocomplete="username"
-            v-model="form.host"
-          />
-        </div>
-        <div class="flex w-20 flex-none flex-col gap-1">
-          <label class="text-sm">{{ $t('port') }}</label>
-          <TextInput
-            class="w-full"
-            v-model="form.port"
-          />
-        </div>
-      </div>
-
-      <div class="flex gap-2">
-        <div
-          v-if="form.type === 'clash'"
-          class="flex min-w-0 flex-1 flex-col gap-1"
-        >
-          <label class="flex items-center gap-1 text-sm">
-            <span class="truncate">{{ $t('secondaryPath') }} ({{ $t('optional') }})</span>
-            <span
-              class="tooltip flex-none"
-              :data-tip="$t('secondaryPathTip')"
-            >
-              <QuestionMarkCircleIcon class="h-4 w-4" />
-            </span>
-          </label>
-          <TextInput
-            class="w-full"
-            v-model="form.secondaryPath"
-          />
-        </div>
-        <div class="flex min-w-0 flex-1 flex-col gap-1">
-          <label class="truncate text-sm">{{ $t('label') }}</label>
-          <TextInput
-            class="w-full"
-            v-model="form.label"
-          />
-        </div>
-      </div>
-      <div class="flex flex-col gap-1">
-        <label class="text-sm">{{ $t('password') }}</label>
-        <input
-          type="password"
-          class="input input-sm w-full"
-          v-model="form.password"
-        />
-      </div>
+      <ReachabilityIndicator
+        class="min-h-5"
+        :status="reachability.status.value"
+        :latency="reachability.latency.value"
+        :message="reachability.message.value"
+        @retry="reachability.retry"
+      />
 
       <button
         class="btn btn-primary btn-sm w-full"
+        :disabled="!canSubmit"
         @click="handleSubmit(form)"
       >
-        {{ $t('submit') }}
+        <span
+          v-if="isSubmitting"
+          class="loading loading-spinner loading-xs"
+        ></span>
+        {{ isSubmitting ? $t('backendConnecting') : $t('submit') }}
       </button>
 
       <button
@@ -114,46 +44,15 @@
         {{ $t('coreSettings') }}
       </button>
 
-      <template v-if="backendList.length">
-        <div class="text-base-content/50 mt-2 text-xs">{{ $t('backend') }}</div>
-        <Draggable
-          class="-mr-2 flex max-h-48 flex-1 flex-col gap-1 overflow-y-auto pr-2"
-          v-model="backendList"
-          group="list"
-          handle=".drag-handle"
-          :animation="150"
-          :item-key="'uuid'"
-        >
-          <template #item="{ element }">
-            <div
-              :key="element.uuid"
-              class="group hover:bg-base-200 flex items-center gap-1 rounded-lg pr-1 transition-colors"
-            >
-              <ChevronUpDownIcon
-                class="drag-handle text-base-content/30 ml-1 h-4 w-4 flex-none cursor-grab"
-              />
-              <button
-                class="min-w-0 flex-1 truncate py-1.5 text-left text-sm"
-                @click="selectBackend(element.uuid)"
-              >
-                {{ getLabelFromBackend(element) }}
-              </button>
-              <button
-                class="btn btn-circle btn-ghost btn-xs text-base-content/40 hover:text-base-content opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                @click="editBackend(element)"
-              >
-                <PencilIcon class="h-4 w-4" />
-              </button>
-              <button
-                class="btn btn-circle btn-ghost btn-xs text-base-content/40 hover:text-error opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                @click="removeBackend(element.uuid)"
-              >
-                <TrashIcon class="h-4 w-4" />
-              </button>
-            </div>
-          </template>
-        </Draggable>
-      </template>
+      <!-- 已经存过后端却落到这里(当前后端被删、或存档里的 uuid 失效),
+           给一条回到管理面板的路,而不是逼他把地址重填一遍。 -->
+      <button
+        v-if="backendList.length"
+        class="btn btn-ghost btn-sm w-full"
+        @click="openBackendManager()"
+      >
+        {{ $t('manageBackends') }}
+      </button>
 
       <div class="mt-4 sm:hidden">
         <LanguageSelect />
@@ -162,41 +61,28 @@
         <DashboardSettings />
       </div>
     </div>
-
-    <EditBackendModal
-      v-model="showEditModal"
-      :default-backend-uuid="editingBackendUuid"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { isBackendAvailable, isSingboxChannelAvailable } from '@/assembly/backend'
+import { probeBackend } from '@/assembly/backend'
 import DashboardSettings from '@/components/common/DashboardSettings.vue'
-import TextInput from '@/components/common/TextInput.vue'
-import EditBackendModal from '@/components/settings/backend/EditBackendModal.vue'
+import ReachabilityIndicator from '@/components/common/ReachabilityIndicator.vue'
+import BackendForm from '@/components/settings/backend/BackendForm.vue'
 import LanguageSelect from '@/components/settings/general/LanguageSelect.vue'
 import { ROUTE_NAME } from '@/constant'
 import { syncSettingsFromCore } from '@/helper/autoImportSettings'
+import { useBackendReachability } from '@/composables/backendReachability'
+import { describeProbeFailure } from '@/helper/connectivity'
 import { showNotification } from '@/helper/notification'
-import { getBackendFromUrl, getLabelFromBackend } from '@/helper/utils'
+import { getBackendFromUrl, getBackendProbeUrl } from '@/helper/utils'
 import router from '@/router'
-import { activeUuid, addBackend, backendList, removeBackend } from '@/store/setup'
+import { addBackend, backendList, openBackendManager } from '@/store/setup'
 import type { Backend, BackendType } from '@/types'
-import {
-  ChevronUpDownIcon,
-  CpuChipIcon,
-  PencilIcon,
-  QuestionMarkCircleIcon,
-  TrashIcon,
-} from '@heroicons/vue/24/outline'
-import { reactive, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import Draggable from 'vuedraggable'
+import { CpuChipIcon } from '@heroicons/vue/24/outline'
+import { computed, ref, watch } from 'vue'
 
-const { t } = useI18n()
-
-const form = reactive({
+const form = ref<Omit<Backend, 'uuid'>>({
   type: 'clash' as BackendType,
   protocol: 'http',
   host: '127.0.0.1',
@@ -206,8 +92,12 @@ const form = reactive({
   label: '',
 })
 
-const showEditModal = ref(false)
-const editingBackendUuid = ref('')
+// 填表期间就持续探测:通不通、为什么不通,在按提交之前就该看得见。
+const reachability = useBackendReachability(form)
+
+const isSubmitting = ref(false)
+const canSubmit = computed(() => reachability.status.value === 'online' && !isSubmitting.value)
+
 const isManualSetupRoute = () => router.currentRoute.value.query.setupMode === 'manual'
 const isEditBackendRoute = () => typeof router.currentRoute.value.query.editBackend === 'string'
 
@@ -215,23 +105,12 @@ watch(
   () => router.currentRoute.value.query.editBackend,
   (backendUuid) => {
     if (backendUuid && typeof backendUuid === 'string') {
-      editingBackendUuid.value = backendUuid
-      showEditModal.value = true
+      openBackendManager({ mode: 'edit', uuid: backendUuid })
       router.replace({ query: {} })
     }
   },
   { immediate: true },
 )
-
-const selectBackend = (uuid: string) => {
-  activeUuid.value = uuid
-  router.push({ name: ROUTE_NAME.proxies })
-}
-
-const editBackend = (backend: Backend) => {
-  editingBackendUuid.value = backend.uuid
-  showEditModal.value = true
-}
 
 type SetupForm = Omit<Backend, 'uuid'>
 
@@ -245,13 +124,13 @@ const finishLogin = async () => {
   router.push({ name: ROUTE_NAME.proxies })
 }
 
+// 提交 = 再确认一次连通性后存下并进入面板。
+// 失败不再弹 alert:原因写在表单里的可达性指示器上,用户改哪个字段一目了然。
 const handleSubmit = async (setupForm: SetupForm, quiet = false) => {
   const { protocol, host, port } = setupForm
 
-  if (!protocol || !host || !port) {
-    if (!quiet) alert('Please fill in all the fields.')
-    return
-  }
+  if (!protocol || !host || !port) return
+  if (isSubmitting.value) return
 
   if (
     window.location.protocol === 'https:' &&
@@ -262,25 +141,29 @@ const handleSubmit = async (setupForm: SetupForm, quiet = false) => {
     showNotification({ content: 'protocolTips' })
   }
 
-  const candidate: Backend = { uuid: '', ...setupForm }
+  isSubmitting.value = true
 
   try {
-    if (setupForm.type === 'singbox') {
-      if (!(await isSingboxChannelAvailable(candidate, 10000))) {
-        if (!quiet) alert(t('singboxConnectionFailed'))
-        return
+    const result = await probeBackend({ uuid: '', ...setupForm })
+
+    if (!result.ok) {
+      // 表单自身的失败已经由指示器呈现,让它重探一轮拿到最新结论即可;
+      // URL 带来的后端不在表单里,只能单独提示。
+      if (setupForm === form.value) {
+        reachability.retry()
+      } else if (!quiet) {
+        showNotification({
+          content: await describeProbeFailure(result, getBackendProbeUrl(setupForm)),
+          type: 'alert-error',
+        })
       }
-    } else {
-      if (!(await isBackendAvailable(candidate, 10000))) {
-        if (!quiet) alert(t('backendConnectionFailed'))
-        return
-      }
+      return
     }
 
     addBackend(setupForm)
     await finishLogin()
-  } catch (error) {
-    if (!quiet) alert(error)
+  } finally {
+    isSubmitting.value = false
   }
 }
 
@@ -289,6 +172,15 @@ const backend = isManualSetupRoute() || isEditBackendRoute() ? null : getBackend
 if (backend) {
   handleSubmit(backend)
 } else if (backendList.value.length === 0) {
-  handleSubmit(form, true)
+  // 一个后端都没有时,默认地址本来就通就别再让用户点一次 ——
+  // 但只认首轮探测的结论,之后一律以用户的操作为准。
+  const stopAutoLogin = watch(
+    () => reachability.status.value,
+    (status) => {
+      if (status === 'checking') return
+      stopAutoLogin()
+      if (status === 'online') handleSubmit(form.value, true)
+    },
+  )
 }
 </script>

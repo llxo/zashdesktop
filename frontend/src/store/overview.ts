@@ -36,12 +36,7 @@ export const uploadSpeedHistory = ref(makeInitValue())
 let cancel: (() => void) | undefined
 
 export const initSatistic = () => {
-  cancel?.()
-
-  downloadSpeedHistory.value = makeInitValue()
-  uploadSpeedHistory.value = makeInitValue()
-  memoryHistory.value = makeInitValue()
-  connectionsHistory.value = makeInitValue()
+  stopSatistic()
 
   const { data: memoryWsData, close: memoryWsClose } = fetchMemoryAPI<{
     inuse: number
@@ -117,7 +112,17 @@ export const initSatistic = () => {
   }
 }
 
+// 结束流时一并归零。这些标量原先谁也不重置,只被下一条消息覆盖 —— 新后端连不上时,
+// 侧栏与概览会一直显示上一个后端的速率 / 内存(见 store/connections 的同类注释)。
 export const stopSatistic = () => {
   cancel?.()
   cancel = undefined
+  memory.value = 0
+  goroutines.value = 0
+  downloadSpeed.value = 0
+  uploadSpeed.value = 0
+  downloadSpeedHistory.value = makeInitValue()
+  uploadSpeedHistory.value = makeInitValue()
+  memoryHistory.value = makeInitValue()
+  connectionsHistory.value = makeInitValue()
 }

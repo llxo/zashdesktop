@@ -2,6 +2,7 @@
   <div
     class="relative w-full overflow-hidden"
     :class="xAxisMode === 'seconds' ? 'h-36' : 'h-28'"
+    data-page-swipe-ignore
   >
     <div
       ref="chartRef"
@@ -60,7 +61,7 @@ const options = computed<EChartOption>(() => {
       bottom: 0,
       data: props.data.map((item) => item.name),
       textStyle: {
-        color: colors.baseContent,
+        color: colors.text,
         fontFamily: fontFamily.value,
         fontSize: 10,
       },
@@ -71,13 +72,13 @@ const options = computed<EChartOption>(() => {
     tooltip: {
       show: true,
       trigger: 'axis',
-      backgroundColor: colors.base70,
-      borderColor: colors.base70,
+      backgroundColor: colors.surface,
+      borderColor: colors.surface,
       borderRadius: 8,
       confine: true,
       padding: [0, 3],
       textStyle: {
-        color: colors.baseContent,
+        color: colors.text,
         fontFamily: fontFamily.value,
         fontSize: 11,
       },
@@ -93,7 +94,7 @@ const options = computed<EChartOption>(() => {
           splitLine: { show: false },
           axisLabel: {
             show: true,
-            color: colors.baseContent,
+            color: colors.text,
             fontFamily: fontFamily.value,
             fontSize: 10,
             formatter: (value: number) => (value < 0 ? '' : `${Math.round(value)} s`),
@@ -122,20 +123,22 @@ const options = computed<EChartOption>(() => {
         show: true,
         lineStyle: {
           type: 'dashed',
-          color: colors.baseContent10,
+          color: colors.grid,
         },
       },
       axisLabel: {
         formatter: props.labelFormatter,
-        color: colors.baseContent,
+        color: colors.text,
         fontFamily: fontFamily.value,
         fontSize: 10,
         ...(isSeconds ? {} : { align: 'left', padding: [0, 0, 0, -35] }),
       },
     },
     series: props.data.map((item, index) => {
-      const lineColor = index === props.data.length - 1 ? colors.primary60 : colors.info60
-      const areaColor = index === props.data.length - 1 ? colors.primary30 : colors.info30
+      const lineColor =
+        index === props.data.length - 1 ? colors.seriesPrimary : colors.seriesSecondary
+      const areaColor =
+        index === props.data.length - 1 ? colors.seriesPrimaryMuted : colors.seriesSecondaryMuted
 
       return {
         name: item.name,

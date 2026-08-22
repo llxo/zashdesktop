@@ -164,6 +164,36 @@
 
 /* ---------- 杂项 ---------- */
 
+.app-toast {
+  animation: appToastIn 0.22s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.app-toast.is-leaving {
+  animation: appToastOut 0.16s ease-in both;
+}
+
+@keyframes appToastIn {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes appToastOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(0.5rem) scale(0.98);
+  }
+}
+
 @keyframes progressBar {
   from {
     width: 100%;
@@ -173,14 +203,26 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .app-toast,
+  .app-toast.is-leaving {
+    animation-duration: 0.01ms;
+  }
+}
+
 /* ---------- 路由切换 ---------- */
 
-/* iOS-style slide transitions */
+:root {
+  --page-transition-duration: 0.35s;
+  --page-transition-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* 顶级页面之间:iOS 风格的整屏横向滑动 */
 .slide-right-enter-active,
 .slide-right-leave-active,
 .slide-left-enter-active,
 .slide-left-leave-active {
-  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform var(--page-transition-duration) var(--page-transition-ease);
   position: absolute;
   left: 0;
   top: 0;
@@ -227,4 +269,83 @@
 .page-enter-from,
 .page-leave-to {
   opacity: 0;
+}
+
+/*
+ * 壁纸模式下这个淡入淡出直接不做。opacity < 1（will-change: opacity 同理）会把这一屏变成
+ * backdrop root，屏内所有 backdrop-filter 就只能采样组内画过的东西；壁纸铺在 #app-content
+ * 上、在组外，于是整个过渡期间玻璃面板都是「完全没有模糊的半透明」，动画一结束组消失、
+ * 模糊又整块回来——就是切页时看到的那一下突变。
+ *
+ * 换成位移试过了：位移确实不形成 backdrop root，但 out-in 下换屏是瞬间的，紧跟一段位移
+ * 看着就是抖了一下。这里没有既能淡入又能保住模糊的写法，索性直接换屏。
+ */
+.custom-background :is(.page-enter-active, .page-leave-active) {
+  transition: none;
+  will-change: auto;
+}
+.custom-background :is(.page-enter-from, .page-leave-to) {
+  opacity: 1;
+}
+
+/*
+ * 设置页一级 <-> 二级。两屏共用同一个滚动容器、且二级内容必须常驻挂载(搜索索引),
+ * 没法像顶级页面那样让两屏同时在场做位移,所以只给进场的那一屏做动画。
+ */
+@keyframes settingsPanePush {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes settingsPanePop {
+  from {
+    opacity: 0;
+    transform: translateX(-25%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.settings-pane-push {
+  animation: settingsPanePush var(--page-transition-duration) var(--page-transition-ease);
+}
+
+.settings-pane-pop {
+  animation: settingsPanePop var(--page-transition-duration) var(--page-transition-ease);
+}
+
+/* 同上：壁纸模式下这一屏的 opacity 会掐掉屏内的 backdrop-filter，只留位移。 */
+@keyframes settingsPanePopWithoutFade {
+  from {
+    transform: translateX(-25%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.custom-background .settings-pane-pop {
+  animation-name: settingsPanePopWithoutFade;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-right-enter-active,
+  .slide-right-leave-active,
+  .slide-left-enter-active,
+  .slide-left-leave-active,
+  .page-enter-active,
+  .page-leave-active {
+    transition-duration: 0.01ms;
+  }
+
+  .settings-pane-push,
+  .settings-pane-pop {
+    animation-duration: 0.01ms;
+  }
 }

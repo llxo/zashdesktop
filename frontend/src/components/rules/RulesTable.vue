@@ -67,6 +67,7 @@ import {
   toggleRuleDisabledWithSideEffects,
 } from '@/composables/rules'
 import { RULE_TAB_TYPE } from '@/constant'
+import { notifyRequestError } from '@/helper/requestError'
 import { fromNow } from '@/helper/utils'
 import { displayLatencyInRule, displayNowNodeInRule } from '@/store/settings'
 import type { Rule, RuleProvider } from '@/types'
@@ -131,6 +132,8 @@ const updateProviderHandler = async (name: string) => {
   try {
     await updateRuleProviderAPI(name)
     await fetchRules()
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     updatingProviders.value = updatingProviders.value.filter((item) => item !== name)
   }
@@ -144,6 +147,8 @@ const toggleRuleHandler = async (rule: Rule) => {
   togglingRules.value.push(key)
   try {
     await toggleRuleDisabledWithSideEffects(rule)
+  } catch (e) {
+    notifyRequestError(e)
   } finally {
     togglingRules.value = togglingRules.value.filter((item) => item !== key)
   }

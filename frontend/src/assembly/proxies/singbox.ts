@@ -215,7 +215,8 @@ export const handlerProxySelect = async (proxyGroupName: string, proxyName: stri
   if (automaticDisconnection.value) {
     activeConnections.value
       .filter((c) => getConnectionChains(c).includes(proxyGroupName))
-      .forEach((c) => disconnectByIdAPI(c.id))
+      // 切换节点的顺带动作,失败不该盖掉「已切换」这件主事
+      .forEach((c) => disconnectByIdAPI(c.id).catch(() => {}))
   }
 }
 

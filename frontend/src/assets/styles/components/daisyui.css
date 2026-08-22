@@ -121,6 +121,28 @@
     @apply border-0;
   }
   @apply border-separate border-spacing-0;
+  --table-stripe: color-mix(in oklab, var(--color-base-content) 3%, transparent);
+}
+
+/*
+ * 斑马纹只做明暗叠加，不上实色：壁纸模式下行本身几乎是透明的，磨好的背景能透上来，
+ * 不会「容器 + 行」两层半透明底色叠成接近不透明。
+ */
+@utility table-row-stripe {
+  background-color: var(--table-stripe);
+}
+
+/*
+ * 行不再是实色之后，横向固定列得自己不透明，否则滚到它下面的单元格会透出来。
+ * 底色跟容器一致，斑马纹用一层等色渐变叠上去 —— 壁纸模式下 appearance.css 会把
+ * background-color 清成透明、换成一层玻璃，渐变不受影响，斑马纹依然在。
+ */
+.pinned-td {
+  background-color: var(--color-base-100);
+}
+
+tr.table-row-stripe > .pinned-td {
+  background-image: linear-gradient(var(--table-stripe), var(--table-stripe));
 }
 
 /*

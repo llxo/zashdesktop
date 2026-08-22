@@ -6,7 +6,7 @@ import ProxyNodeCard from './ProxyNodeCard.vue'
 import ProxyNodeGrid from './ProxyNodeGrid.vue'
 
 const props = defineProps<{
-  name: string
+  name?: string
   now?: string
   renderProxies: string[]
 }>()
@@ -26,7 +26,7 @@ const proxies = computed(() => props.renderProxies.slice(0, maxProxies.value))
       :name="node"
       :group-name="name"
       :active="node === now"
-      @click.stop="handlerProxySelect(name, node)"
+      @click.stop="name && handlerProxySelect(name, node)"
     />
   </ProxyNodeGrid>
 </template>

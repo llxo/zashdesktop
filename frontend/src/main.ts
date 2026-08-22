@@ -22,13 +22,10 @@ if (isEdge) {
 
 applyCustomThemes()
 applyKsuTheme()
-const bootstrap = async () => {
-  loadFonts()
+loadFonts()
 
-  const app = createApp(App)
-  app.use(router)
-  app.use(i18n)
-  app.mount('#app')
-}
+const app = createApp(App)
 
-void bootstrap()
+app.use(router)
+app.use(i18n)
+app.mount('#app')

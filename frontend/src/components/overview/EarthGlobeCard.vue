@@ -8,15 +8,16 @@
         {{ t('earthGlobeTitle') }}
       </div>
       <div class="flex items-center gap-1">
-        <select
+        <SelectInput
           v-model="earthVisualMode"
           class="select select-ghost select-sm h-8 min-h-8 w-auto border-0"
           :aria-label="t('earthVisualStyle')"
           :title="t('earthVisualStyle')"
-        >
-          <option value="space">{{ t('earthVisualStyle_space') }}</option>
-          <option value="flat">{{ t('earthVisualStyle_flat') }}</option>
-        </select>
+          :options="[
+            { value: 'space', label: t('earthVisualStyle_space') },
+            { value: 'flat', label: t('earthVisualStyle_flat') },
+          ]"
+        />
         <button
           class="btn btn-ghost btn-sm btn-square"
           :aria-label="t(showCityLabels ? 'earthHideCityLabels' : 'earthShowCityLabels')"
@@ -81,14 +82,12 @@
       />
 
       <div class="pointer-events-none absolute top-2 right-2 left-2 flex flex-wrap gap-1.5 text-xs">
-        <select
-          v-model="earthOriginSource"
+        <SelectInput
+          v-model="earthIPInfoAPI"
           class="select select-sm bg-base-100/75 pointer-events-auto h-8 min-h-8 w-auto rounded-lg border-0 shadow backdrop-blur-md"
           :aria-label="t('earthOriginAPI')"
-        >
-          <option value="china">ipip.info</option>
-          <option value="global">ip.sb</option>
-        </select>
+          :options="apiOptions"
+        />
 
         <div
           class="bg-base-100/75 pointer-events-auto flex h-8 items-center gap-1.5 rounded-lg px-2 shadow backdrop-blur-md"
@@ -305,11 +304,14 @@
 </template>
 
 <script setup lang="ts">
-import { getIPFromIpipnetAPI, getIPFromIpsbAPI } from '@/api/geoip'
-import { ipForChina, ipForGlobal } from '@/composables/overview'
+import SelectInput from '@/components/common/SelectInput.vue'
+import { getPublicIPInfo, type IPInfo } from '@/api/geoip'
+import { getCachedPublicIPInfo } from '@/composables/overview'
+import { IP_INFO_API } from '@/constant'
+import { themeColorScheme } from '@/helper/theme'
 import { prettyBytesHelper } from '@/helper/utils'
 import { activeConnections } from '@/store/connections'
-import { earthOriginSource, earthVisualMode, language, theme } from '@/store/settings'
+import { earthIPInfoAPI, earthVisualMode, language, theme } from '@/store/settings'
 import {
   ArrowPathIcon,
   ArrowsPointingInIcon,
@@ -330,6 +332,7 @@ import {
   DBIP_COMPRESSED_BYTES,
   type EarthEndpointInfo,
   type EarthLocation,
+  type EarthLocationHint,
   type GeoDatabaseError,
   type GeoDatabaseStatus,
   type GeoWorkerRequest,
@@ -338,6 +341,7 @@ import {
 import type { EarthRenderer } from './earth/earthRenderer'
 
 const { t } = useI18n()
+const apiOptions = Object.values(IP_INFO_API).map((value) => ({ value, label: value }))
 const canvasRef = ref<HTMLElement>()
 const renderer = shallowRef<EarthRenderer>()
 const rendererError = ref('')
@@ -347,6 +351,7 @@ const recoveredCorruptCache = ref(false)
 const downloadedBytes = ref(0)
 const downloadTotalBytes = ref(DBIP_COMPRESSED_BYTES)
 const originIP = ref('')
+const originAPIInfo = ref<IPInfo | null>(null)
 const originStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const showOriginIP = ref(false)
 const showCityLabels = ref(true)
@@ -430,12 +435,6 @@ const tooltipStyle = computed<CSSProperties>(() => ({
   top: `${Math.min(window.innerHeight - 100, tooltipPosition.value.y + 12)}px`,
 }))
 
-const getEarthColorScheme = (): 'dark' | 'light' => {
-  const colorScheme = getComputedStyle(document.body).getPropertyValue('color-scheme').trim()
-
-  return colorScheme.split(/\s+/).includes('dark') ? 'dark' : 'light'
-}
-
 const postWorker = (message: GeoWorkerRequest) => worker?.postMessage(message)
 
 const lookupLocations = async (ips: string[], locale: string) => {
@@ -488,22 +487,42 @@ const refreshRoutes = async () => {
 
     routesLoading.value = true
     const snapshot = activeConnections.value
+    const routeOriginIP = originIP.value
+    const routeOriginRequestID = originRequestID
+    const preferredOrigin: EarthLocationHint | null =
+      earthIPInfoAPI.value !== IP_INFO_API.IPIP && originAPIInfo.value
+        ? {
+            latitude: originAPIInfo.value.latitude,
+            longitude: originAPIInfo.value.longitude,
+            city: originAPIInfo.value.city,
+            country: originAPIInfo.value.country,
+          }
+        : null
 
     try {
       const result = await buildEarthRoutes(
         snapshot,
-        originIP.value,
+        routeOriginIP,
         language.value,
         lookupLocations,
+        preferredOrigin,
       )
 
-      if (!disposed) {
+      if (
+        !disposed &&
+        routeOriginRequestID === originRequestID &&
+        routeOriginIP === originIP.value
+      ) {
         routeCount.value = result.routes.length
         if (result.origin) renderer.value?.setInitialLocation(result.origin)
         renderer.value?.setRoutes(result.routes)
       }
     } catch {
-      if (!disposed) {
+      if (
+        !disposed &&
+        routeOriginRequestID === originRequestID &&
+        routeOriginIP === originIP.value
+      ) {
         routeCount.value = 0
         renderer.value?.setRoutes([])
       }
@@ -523,18 +542,14 @@ const scheduleRouteRefresh = () => {
   }, 150)
 }
 
-const cachedOriginIP = () => {
-  const info = earthOriginSource.value === 'global' ? ipForGlobal.value : ipForChina.value
-  return info.ipWithPrivacy.find(isValidIP) ?? ''
-}
-
 const loadOrigin = async (force = false) => {
   const requestID = ++originRequestID
-  const source = earthOriginSource.value
-  const cached = force ? '' : cachedOriginIP()
+  const api = earthIPInfoAPI.value
+  const cached = force ? null : getCachedPublicIPInfo(api)
 
-  if (cached) {
-    originIP.value = cached
+  if (cached && isValidIP(cached.ip)) {
+    originIP.value = cached.ip
+    originAPIInfo.value = cached
     originStatus.value = 'ready'
     scheduleRouteRefresh()
     return
@@ -542,42 +557,25 @@ const loadOrigin = async (force = false) => {
 
   originStatus.value = 'loading'
   originIP.value = ''
+  originAPIInfo.value = null
   routeCount.value = 0
   renderer.value?.setRoutes([])
 
   try {
-    if (source === 'global') {
-      const result = await getIPFromIpsbAPI()
+    const result = await getPublicIPInfo(api)
 
-      if (!isValidIP(result.ip)) throw new Error('Invalid origin IP')
-      ipForGlobal.value = {
-        ipWithPrivacy: [`${result.country} ${result.organization}`.trim(), result.ip],
-        ip: [`${result.country} ${result.organization}`.trim(), maskIP(result.ip)],
-      }
-      if (requestID === originRequestID && source === earthOriginSource.value) {
-        originIP.value = result.ip
-      }
-    } else {
-      const result = await getIPFromIpipnetAPI()
-      const ip = result.data.ip
+    if (!isValidIP(result.ip)) throw new Error('Invalid origin IP')
+    if (requestID !== originRequestID || api !== earthIPInfoAPI.value) return
 
-      if (!isValidIP(ip)) throw new Error('Invalid origin IP')
-      ipForChina.value = {
-        ipWithPrivacy: [result.data.location.join(' '), ip],
-        ip: [`${result.data.location[0]} ** ** **`, maskIP(ip)],
-      }
-      if (requestID === originRequestID && source === earthOriginSource.value) {
-        originIP.value = ip
-      }
-    }
-
-    if (requestID !== originRequestID || source !== earthOriginSource.value) return
+    originIP.value = result.ip
+    originAPIInfo.value = result
     originStatus.value = 'ready'
     scheduleRouteRefresh()
   } catch {
-    if (requestID !== originRequestID || source !== earthOriginSource.value) return
+    if (requestID !== originRequestID || api !== earthIPInfoAPI.value) return
     originStatus.value = 'error'
     originIP.value = ''
+    originAPIInfo.value = null
   }
 }
 
@@ -635,7 +633,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 watch(activeConnections, scheduleRouteRefresh)
-watch(earthOriginSource, () => void loadOrigin())
+watch(earthIPInfoAPI, () => void loadOrigin())
 watch(language, () => {
   locationCache.clear()
   scheduleRouteRefresh()
@@ -646,7 +644,7 @@ watch(
   theme,
   async () => {
     await nextTick()
-    renderer.value?.setColorScheme(getEarthColorScheme())
+    renderer.value?.setColorScheme(themeColorScheme.value)
   },
   { flush: 'post' },
 )
@@ -668,7 +666,7 @@ const initialize = async () => {
     const createdRenderer = await createEarthRenderer(canvasRef.value, {
       reducedMotion: reducedMotion.value,
       visualMode: earthVisualMode.value,
-      colorScheme: getEarthColorScheme(),
+      colorScheme: themeColorScheme.value,
       onEndpointHover: handleEndpointHover,
     })
 

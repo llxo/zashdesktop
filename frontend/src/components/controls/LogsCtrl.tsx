@@ -30,6 +30,7 @@ import { computed, defineComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CtrlsBar from '../common/CtrlsBar.vue'
 import DialogWrapper from '../common/DialogWrapper.vue'
+import SelectInput from '../common/SelectInput.vue'
 import TextInput from '../common/TextInput.vue'
 
 export default defineComponent({
@@ -131,20 +132,13 @@ export default defineComponent({
 
     return () => {
       const levelSelect = (
-        <select
+        <SelectInput
           class={['select select-sm min-w-30']}
-          v-model={logLevel.value}
+          modelValue={logLevel.value}
+          onUpdate:modelValue={(value) => (logLevel.value = value as string)}
           onChange={initLogs}
-        >
-          {logLevels.value.map((opt) => (
-            <option
-              key={opt}
-              value={opt}
-            >
-              {opt}
-            </option>
-          ))}
-        </select>
+          options={logLevels.value.map((value) => ({ value, label: value }))}
+        />
       )
       const searchInput = (
         <TextInput
@@ -159,35 +153,27 @@ export default defineComponent({
       )
 
       const logTypeSelect = (
-        <select
+        <SelectInput
           class={[
             'join-item select select-sm',
             isLargeCtrlsBar.value ? 'w-36' : 'w-24 max-w-40 flex-1',
           ]}
-          v-model={logTypeFilter.value}
-        >
-          <option value="">{t('all')}</option>
-          <optgroup label={t('logLevel')}>
-            {logFilterOptions.value.levels.map((opt) => (
-              <option
-                key={opt}
-                value={opt}
-              >
-                {opt}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label={t('logType')}>
-            {logFilterOptions.value.types.map((opt) => (
-              <option
-                key={opt}
-                value={opt}
-              >
-                {opt}
-              </option>
-            ))}
-          </optgroup>
-        </select>
+          modelValue={logTypeFilter.value}
+          onUpdate:modelValue={(value) => (logTypeFilter.value = value as string)}
+          options={[
+            { value: '', label: t('all') },
+            ...logFilterOptions.value.levels.map((value) => ({
+              value,
+              label: value,
+              group: t('logLevel'),
+            })),
+            ...logFilterOptions.value.types.map((value) => ({
+              value,
+              label: value,
+              group: t('logType'),
+            })),
+          ]}
+        />
       )
 
       const settingsModal = (
@@ -206,19 +192,17 @@ export default defineComponent({
               <div class="settings-grid">
                 <div class="setting-item">
                   <div class="setting-item-label">{t('logStyle')}</div>
-                  <select
+                  <SelectInput
                     class="select select-sm min-w-24"
-                    v-model={logDisplayStyle.value}
-                  >
-                    {Object.values(LIST_DISPLAY_STYLE).map((opt) => (
-                      <option
-                        key={opt}
-                        value={opt}
-                      >
-                        {t(opt)}
-                      </option>
-                    ))}
-                  </select>
+                    modelValue={logDisplayStyle.value}
+                    onUpdate:modelValue={(value) =>
+                      (logDisplayStyle.value = value as LIST_DISPLAY_STYLE)
+                    }
+                    options={Object.values(LIST_DISPLAY_STYLE).map((value) => ({
+                      value,
+                      label: t(value),
+                    }))}
+                  />
                 </div>
                 <div class="setting-item">
                   <div class="setting-item-label">{t('logRetentionLimit')}</div>

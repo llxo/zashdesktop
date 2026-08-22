@@ -1,5 +1,10 @@
 <template>
+  <!--
+    DialogWrapper 会 teleport 到 #app-content,而那正是挂载本组件的 App 根节点 ——
+    首帧它还没进 DOM。等挂载完再渲染,与同处 App 根下的 BackendManager 一致。
+  -->
   <DialogWrapper
+    v-if="isReady"
     v-model="modalValue"
     :title="$t('upgradeCore')"
   >
@@ -45,11 +50,16 @@
 <script setup lang="ts">
 import { upgradeCoreAPI } from '@/assembly/version'
 import { handlerUpgradeSuccess } from '@/helper'
+import { showConfirmDialog } from '@/helper/confirmDialog'
+import { notifyRequestError } from '@/helper/requestError'
 import { fetchConfigs } from '@/assembly/config'
 import { fetchProxies } from '@/assembly/proxies'
 import { fetchRules } from '@/assembly/rules'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import DialogWrapper from '../../common/DialogWrapper.vue'
+
+const { t } = useI18n()
 
 const reloadAll = () => {
   fetchConfigs()
@@ -59,9 +69,29 @@ const reloadAll = () => {
 
 const upgradingType = ref<'release' | 'alpha' | 'auto'>('auto')
 const modalValue = defineModel<boolean>()
+
+const isReady = ref(false)
+onMounted(() => {
+  isReady.value = true
+})
+
+const UPGRADE_LABELS: Record<'release' | 'alpha' | 'auto', string> = {
+  auto: 'upgradeCore',
+  release: 'upgradeToRelease',
+  alpha: 'upgradeToAlpha',
+}
+
 const isCoreUpgrading = ref(false)
 const handlerClickUpgradeCore = async (type: 'release' | 'alpha' | 'auto') => {
   if (isCoreUpgrading.value) return
+
+  // 升级会重启内核,误点的代价不小 —— 先问一句。
+  const { confirmed } = await showConfirmDialog({
+    title: t(UPGRADE_LABELS[type]),
+    message: t('upgradeCoreConfirm'),
+  })
+
+  if (!confirmed || isCoreUpgrading.value) return
 
   upgradingType.value = type
   isCoreUpgrading.value = true
@@ -70,9 +100,9 @@ const handlerClickUpgradeCore = async (type: 'release' | 'alpha' | 'auto') => {
     reloadAll()
     modalValue.value = false
     handlerUpgradeSuccess()
-    isCoreUpgrading.value = false
   } catch (e) {
-    console.error(e)
+    notifyRequestError(e)
+  } finally {
     isCoreUpgrading.value = false
   }
 }

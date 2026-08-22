@@ -1,4 +1,4 @@
-import { useStorage } from '@vueuse/core'
+import { useStorage } from '@/helper/storage'
 
 export interface TerminalConfig {
   lightThemeName: string

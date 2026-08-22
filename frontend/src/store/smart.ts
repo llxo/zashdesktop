@@ -27,21 +27,29 @@ const fetchSmartGroupWeights = async (proxyName: string) => {
   restructWeights(proxyName, data.weights)
 }
 
+// 权重是拉取代理列表时顺带取的,不是用户点出来的,失败一律静默:
+// 旧内核没有 /group/weights,回落到按组逐个拉。
 export const initSmartWeights = async (smartGroups: string[]) => {
-  const { status, data: smartWeights } = await fetchSmartWeightsAPI()
+  let smartWeights: Record<string, NodeRank[]> | null = null
+
+  try {
+    smartWeights = (await fetchSmartWeightsAPI()).data.weights
+  } catch {
+    smartWeights = null
+  }
 
   smartWeightsMap.value = {}
   smartOrderMap.value = {}
 
-  if (status !== 200) {
+  if (!smartWeights) {
     // deprecated fallback
     smartGroups.forEach((name) => {
-      fetchSmartGroupWeights(name)
+      fetchSmartGroupWeights(name).catch(() => {})
     })
     return
   }
 
-  for (const [group, weights] of Object.entries(smartWeights.weights)) {
+  for (const [group, weights] of Object.entries(smartWeights)) {
     if (!weights?.length) continue
 
     restructWeights(group, weights)

@@ -29,6 +29,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import CtrlsBar from '../common/CtrlsBar.vue'
 import DialogWrapper from '../common/DialogWrapper.vue'
+import SelectInput from '../common/SelectInput.vue'
 import TextInput from '../common/TextInput.vue'
 import ConnectionCardSettings from '../settings/connections/ConnectionCardSettings.vue'
 import TableSettings from '../settings/connections/TableSettings.vue'
@@ -62,19 +63,15 @@ export default defineComponent({
     return () => {
       const sortForCards = (
         <div class={`join flex-1 ${isLargeCtrlsBar.value ? 'min-w-46' : ''}`}>
-          <select
+          <SelectInput
             class="join-item select select-sm flex-1"
-            v-model={connectionSortType.value}
-          >
-            {(Object.values(SORT_TYPE) as string[]).map((opt) => (
-              <option
-                key={opt}
-                value={opt}
-              >
-                {t(opt) || opt}
-              </option>
-            ))}
-          </select>
+            modelValue={connectionSortType.value}
+            onUpdate:modelValue={(value) => (connectionSortType.value = value as SORT_TYPE)}
+            options={(Object.values(SORT_TYPE) as string[]).map((value) => ({
+              value,
+              label: t(value) || value,
+            }))}
+          />
           <button
             class="btn join-item btn-sm"
             onClick={() => {
@@ -135,14 +132,13 @@ export default defineComponent({
                 </div>
                 {isConnectionCard.value ? <ConnectionCardSettings /> : <TableSettings />}
               </div>
-              <div class="divider m-0"></div>
               <button
                 class="btn btn-block"
                 onClick={() => {
                   settingsModel.value = false
                   router.push({
                     name: ROUTE_NAME.settings,
-                    query: { scrollTo: SETTINGS_MENU_KEY.connections },
+                    query: { section: SETTINGS_MENU_KEY.connections },
                   })
                 }}
               >

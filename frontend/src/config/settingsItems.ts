@@ -3,191 +3,409 @@ import { SETTINGS_MENU_KEY } from '@/constant'
 export type SettingsCategoryItem = {
   key: string
   label: string
+  section: string
+  keywords?: string[]
+  searchEntries?: Array<{ anchorKey: string; label: string }>
 }
 
 export type SettingsCategory = {
   key: SETTINGS_MENU_KEY
   label: string
+  description: string
   items: SettingsCategoryItem[]
+}
+
+export const DEFAULT_SETTINGS_MENU_ORDER = [
+  SETTINGS_MENU_KEY.general,
+  SETTINGS_MENU_KEY.overview,
+  SETTINGS_MENU_KEY.backend,
+  SETTINGS_MENU_KEY.proxies,
+  SETTINGS_MENU_KEY.connections,
+]
+
+export const SETTINGS_MENU_LABELS: Record<SETTINGS_MENU_KEY, string> = {
+  [SETTINGS_MENU_KEY.general]: 'settingsMenuGeneral',
+  [SETTINGS_MENU_KEY.backend]: 'settingsMenuBackend',
+  [SETTINGS_MENU_KEY.proxies]: 'settingsMenuProxies',
+  [SETTINGS_MENU_KEY.connections]: 'settingsMenuConnections',
+  [SETTINGS_MENU_KEY.overview]: 'settingsMenuOverview',
 }
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     key: SETTINGS_MENU_KEY.backend,
     label: 'backendSettings',
+    description: 'settingsDescriptionBackend',
     items: [
-      { key: `${SETTINGS_MENU_KEY.backend}.backendSwitch`, label: 'backend' },
-      { key: `${SETTINGS_MENU_KEY.backend}.upgradeCore`, label: 'upgradeCore' },
-      { key: `${SETTINGS_MENU_KEY.backend}.restartCore`, label: 'restartCore' },
-      { key: `${SETTINGS_MENU_KEY.backend}.reloadConfigs`, label: 'reloadConfigs' },
-      { key: `${SETTINGS_MENU_KEY.backend}.updateConfigs`, label: 'updateConfigs' },
-      { key: `${SETTINGS_MENU_KEY.backend}.updateGeoDatabase`, label: 'updateGeoDatabase' },
-      { key: `${SETTINGS_MENU_KEY.backend}.flushDNSCache`, label: 'flushDNSCache' },
-      { key: `${SETTINGS_MENU_KEY.backend}.flushFakeIP`, label: 'flushFakeIP' },
-      { key: `${SETTINGS_MENU_KEY.backend}.flushSmartWeights`, label: 'flushSmartWeights' },
-      { key: `${SETTINGS_MENU_KEY.backend}.dnsQuery`, label: 'DNSQuery' },
-      { key: `${SETTINGS_MENU_KEY.backend}.ports`, label: 'ports' },
-      { key: `${SETTINGS_MENU_KEY.backend}.tunMode`, label: 'tunMode' },
-      { key: `${SETTINGS_MENU_KEY.backend}.allowLan`, label: 'allowLan' },
-      { key: `${SETTINGS_MENU_KEY.backend}.checkCoreUpgrade`, label: 'checkCoreUpgrade' },
-      { key: `${SETTINGS_MENU_KEY.backend}.autoUpgradeCore`, label: 'autoUpgradeCore' },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.backendSwitch`,
+        label: 'backend',
+        section: 'settingsSectionCurrentBackend',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.upgradeCore`,
+        label: 'upgradeCore',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.restartCore`,
+        label: 'restartCore',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.reloadConfigs`,
+        label: 'reloadConfigs',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.updateConfigs`,
+        label: 'updateConfigs',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.updateGeoDatabase`,
+        label: 'updateGeoDatabase',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.flushDNSCache`,
+        label: 'flushDNSCache',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.flushFakeIP`,
+        label: 'flushFakeIP',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.flushSmartWeights`,
+        label: 'flushSmartWeights',
+        section: 'settingsSectionCoreOperations',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.dnsQuery`,
+        label: 'DNSQuery',
+        section: 'settingsSectionDiagnostics',
+        keywords: ['dns'],
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.ports`,
+        label: 'ports',
+        section: 'settingsSectionNetworkListening',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.tunMode`,
+        label: 'tunMode',
+        section: 'settingsSectionNetworkListening',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.allowLan`,
+        label: 'allowLan',
+        section: 'settingsSectionNetworkListening',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.checkCoreUpgrade`,
+        label: 'checkCoreUpgrade',
+        section: 'settingsSectionCoreUpdates',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.backend}.autoUpgradeCore`,
+        label: 'autoUpgradeCore',
+        section: 'settingsSectionCoreUpdates',
+      },
     ],
   },
   {
     key: SETTINGS_MENU_KEY.general,
     label: 'zashboardSettings',
+    description: 'settingsDescriptionGeneral',
     items: [
-      { key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.actions`, label: 'actions' },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.actions`,
+        label: 'actions',
+        section: 'settingsSectionApplication',
+        searchEntries: [
+          {
+            anchorKey: `${SETTINGS_MENU_KEY.general}.zashboardSettings.actions.upgradeDashboard`,
+            label: 'upgradeDashboard',
+          },
+          {
+            anchorKey: `${SETTINGS_MENU_KEY.general}.zashboardSettings.actions`,
+            label: 'dashboardSettings',
+          },
+        ],
+      },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.autoSwitchTheme`,
         label: 'autoSwitchTheme',
+        section: 'appearance',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.defaultTheme`,
         label: 'defaultTheme',
+        section: 'appearance',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.darkTheme`,
         label: 'darkTheme',
+        section: 'appearance',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.customBackgroundURL`,
         label: 'customBackgroundURL',
+        section: 'appearance',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.transparent`,
         label: 'transparent',
+        section: 'appearance',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.blurIntensity`,
         label: 'blurIntensity',
+        section: 'appearance',
       },
-      { key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.fonts`, label: 'fonts' },
-      { key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.emoji`, label: 'emoji' },
-      { key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.language`, label: 'language' },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.fonts`,
+        label: 'fonts',
+        section: 'appearance',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.emoji`,
+        label: 'emoji',
+        section: 'appearance',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.language`,
+        label: 'language',
+        section: 'settingsSectionApplication',
+      },
       {
         key: `${SETTINGS_MENU_KEY.general}.zashboardSettings.autoUpgradeDashboard`,
         label: 'autoUpgradeDashboard',
+        section: 'settingsSectionApplication',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.autoDisconnectIdleUDP`,
         label: 'autoDisconnectIdleUDP',
+        section: 'settingsSectionNetworkData',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.autoDisconnectIdleUDPTime`,
         label: 'autoDisconnectIdleUDPTime',
+        section: 'settingsSectionNetworkData',
       },
-      { key: `${SETTINGS_MENU_KEY.general}.IPInfoAPI`, label: 'IPInfoAPI' },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.IPInfoAPI`,
+        label: 'IPInfoAPI',
+        section: 'settingsSectionNetworkData',
+      },
       {
         key: `${SETTINGS_MENU_KEY.general}.geoipCountryDatabaseURL`,
         label: 'geoipCountryDatabaseURL',
+        section: 'settingsSectionNetworkData',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.geoipASNDatabaseURL`,
         label: 'geoipASNDatabaseURL',
+        section: 'settingsSectionNetworkData',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.scrollAnimationEffect`,
         label: 'scrollAnimationEffect',
+        section: 'settingsSectionInteraction',
       },
-      { key: `${SETTINGS_MENU_KEY.general}.swipeInPages`, label: 'swipeInPages' },
-      { key: `${SETTINGS_MENU_KEY.general}.swipeInTabs`, label: 'swipeInTabs' },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.swipeInPages`,
+        label: 'swipeInPages',
+        section: 'settingsSectionInteraction',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.general}.swipeInTabs`,
+        label: 'swipeInTabs',
+        section: 'settingsSectionInteraction',
+      },
       {
         key: `${SETTINGS_MENU_KEY.general}.disablePullToRefresh`,
         label: 'disablePullToRefresh',
+        section: 'settingsSectionInteraction',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.shortcuts`,
         label: 'keyboardShortcuts',
+        section: 'settingsSectionInteraction',
       },
       {
         key: `${SETTINGS_MENU_KEY.general}.displayAllFeatures`,
         label: 'displayAllFeatures',
+        section: 'settingsSectionInteraction',
       },
     ],
   },
   {
     key: SETTINGS_MENU_KEY.overview,
     label: 'overviewSettings',
+    description: 'settingsDescriptionOverview',
     items: [
-      { key: `${SETTINGS_MENU_KEY.overview}.overviewCard`, label: 'chartsCard' },
-      { key: `${SETTINGS_MENU_KEY.overview}.networkCard`, label: 'networkCard' },
-      { key: `${SETTINGS_MENU_KEY.overview}.splitOverviewPage`, label: 'splitOverviewPage' },
+      {
+        key: `${SETTINGS_MENU_KEY.overview}.splitOverviewPage`,
+        label: 'splitOverviewPage',
+        section: 'settingsSectionCardsLayout',
+      },
       {
         key: `${SETTINGS_MENU_KEY.overview}.autoIPCheckWhenStart`,
         label: 'autoIPCheckWhenStart',
+        section: 'settingsSectionStartupChecks',
       },
       {
         key: `${SETTINGS_MENU_KEY.overview}.autoConnectionCheckWhenStart`,
         label: 'autoConnectionCheckWhenStart',
+        section: 'settingsSectionStartupChecks',
       },
       {
         key: `${SETTINGS_MENU_KEY.overview}.showStatisticsWhenSidebarCollapsed`,
         label: 'showStatisticsWhenSidebarCollapsed',
+        section: 'settingsSectionDesktopSidebar',
       },
       {
         key: `${SETTINGS_MENU_KEY.overview}.numberOfChartsInSidebar`,
         label: 'numberOfChartsInSidebar',
+        section: 'settingsSectionDesktopSidebar',
       },
     ],
   },
   {
     key: SETTINGS_MENU_KEY.proxies,
     label: 'proxySettings',
+    description: 'settingsDescriptionProxies',
     items: [
-      { key: `${SETTINGS_MENU_KEY.proxies}.speedtestMode`, label: 'speedtestMode' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.speedtestUrl`, label: 'speedtestUrl' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.speedtestTimeout`, label: 'speedtestTimeout' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.lowLatency`, label: 'lowLatencyDesc' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.mediumLatency`, label: 'mediumLatencyDesc' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.ipv6Test`, label: 'ipv6Test' },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.speedtestMode`,
+        label: 'speedtestMode',
+        section: 'latency',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.speedtestUrl`,
+        label: 'speedtestUrl',
+        section: 'latency',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.speedtestTimeout`,
+        label: 'speedtestTimeout',
+        section: 'latency',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.lowLatency`,
+        label: 'lowLatencyDesc',
+        section: 'latency',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.mediumLatency`,
+        label: 'mediumLatencyDesc',
+        section: 'latency',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.ipv6Test`,
+        label: 'ipv6Test',
+        section: 'latency',
+      },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.independentLatencyTest`,
         label: 'independentLatencyTest',
+        section: 'latency',
       },
-      { key: `${SETTINGS_MENU_KEY.proxies}.groupTestUrls`, label: 'groupTestUrls' },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.groupTestUrls`,
+        label: 'groupTestUrls',
+        section: 'latency',
+      },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.proxyFolderMode`,
         label: 'proxyFolderMode',
+        section: 'settingsSectionProxyDisplay',
       },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.twoColumnProxyGroup`,
         label: 'twoColumnProxyGroup',
+        section: 'settingsSectionProxyDisplay',
       },
-      { key: `${SETTINGS_MENU_KEY.proxies}.truncateProxyName`, label: 'truncateProxyName' },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.truncateProxyName`,
+        label: 'truncateProxyName',
+        section: 'settingsSectionProxyDisplay',
+      },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.displayGlobalByMode`,
         label: 'displayGlobalByMode',
+        section: 'settingsSectionProxyDisplay',
       },
-      { key: `${SETTINGS_MENU_KEY.proxies}.customGlobalNode`, label: 'customGlobalNode' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.proxyPreviewType`, label: 'proxyPreviewType' },
-      { key: `${SETTINGS_MENU_KEY.proxies}.proxyCardSize`, label: 'proxyCardSize' },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.customGlobalNode`,
+        label: 'customGlobalNode',
+        section: 'settingsSectionProxyDisplay',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.proxyPreviewType`,
+        label: 'proxyPreviewType',
+        section: 'settingsSectionProxyDisplay',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.proxyCardSize`,
+        label: 'proxyCardSize',
+        section: 'settingsSectionProxyDisplay',
+      },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.proxyGroupIconSize`,
         label: 'proxyGroupIconSize',
+        section: 'settingsSectionProxyAdvanced',
       },
       {
         key: `${SETTINGS_MENU_KEY.proxies}.proxyGroupIconMargin`,
         label: 'proxyGroupIconMargin',
+        section: 'settingsSectionProxyAdvanced',
       },
-      { key: `${SETTINGS_MENU_KEY.proxies}.iconSettings`, label: 'icon' },
+      {
+        key: `${SETTINGS_MENU_KEY.proxies}.iconSettings`,
+        label: 'icon',
+        section: 'settingsSectionProxyAdvanced',
+      },
     ],
   },
   {
     key: SETTINGS_MENU_KEY.connections,
     label: 'connectionSettings',
+    description: 'settingsDescriptionConnections',
     items: [
       {
         key: `${SETTINGS_MENU_KEY.connections}.connectionStyle`,
         label: 'connectionStyle',
+        section: 'settingsSectionConnectionDisplay',
       },
       {
         key: `${SETTINGS_MENU_KEY.connections}.proxyChainDirection`,
         label: 'proxyChainDirection',
+        section: 'settingsSectionConnectionDisplay',
       },
-      { key: `${SETTINGS_MENU_KEY.connections}.tableWidthMode`, label: 'tableWidthMode' },
-      { key: `${SETTINGS_MENU_KEY.connections}.tableSize`, label: 'tableSize' },
-      { key: `${SETTINGS_MENU_KEY.connections}.sourceIPLabels`, label: 'sourceIPLabels' },
+      {
+        key: `${SETTINGS_MENU_KEY.connections}.tableWidthMode`,
+        label: 'tableWidthMode',
+        section: 'settingsSectionConnectionDisplay',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.connections}.tableSize`,
+        label: 'tableSize',
+        section: 'settingsSectionConnectionDisplay',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.connections}.resolveClientHostname`,
+        label: 'resolveClientHostname',
+        section: 'settingsSectionClientIdentity',
+      },
+      {
+        key: `${SETTINGS_MENU_KEY.connections}.sourceIPLabels`,
+        label: 'sourceIPLabels',
+        section: 'settingsSectionClientIdentity',
+      },
     ],
   },
 ]

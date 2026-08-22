@@ -1,8 +1,6 @@
 import { renderRoutes } from '@/helper'
-import { showNotification } from '@/helper/notification'
-import { getLabelFromBackend } from '@/helper/utils'
 import { isSidebarCollapsed, keyboardShortcuts, manageHiddenGroup } from '@/store/settings'
-import { activeBackend, switchActiveBackend, toggleBackendSettingsDialog } from '@/store/setup'
+import { activeBackend, switchActiveBackend } from '@/store/setup'
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -11,7 +9,6 @@ export enum KEYBOARD_SHORTCUT_ACTION {
   TOGGLE_MANAGE_HIDDEN_GROUP = 'proxies:toggle-manage-hidden-group',
   BACKEND_PREVIOUS = 'backend:previous',
   BACKEND_NEXT = 'backend:next',
-  BACKEND_OPEN_SETTINGS = 'backend:open-settings',
   PAGE_1 = 'page:1',
   PAGE_2 = 'page:2',
   PAGE_3 = 'page:3',
@@ -19,6 +16,22 @@ export enum KEYBOARD_SHORTCUT_ACTION {
   PAGE_5 = 'page:5',
   PAGE_6 = 'page:6',
 }
+
+// 移除一个功能后,用户本地仍存着绑定到它的自定义键位。这条记录本身是惰性的
+// (按键分发只遍历 KEYBOARD_SHORTCUTS 里已知的动作,认不出的键根本进不了表),
+// 但 config/keyboard-shortcuts 会随设置一起导出和同步 —— 不清掉就会把死键位
+// 一路带到其他设备上,而且越积越多。启动时按当前的动作表裁一次。
+const pruneOrphanedShortcuts = () => {
+  const known = new Set<string>(Object.values(KEYBOARD_SHORTCUT_ACTION))
+  const entries = Object.entries(keyboardShortcuts.value)
+  const kept = entries.filter(([action]) => known.has(action))
+
+  if (kept.length !== entries.length) {
+    keyboardShortcuts.value = Object.fromEntries(kept)
+  }
+}
+
+pruneOrphanedShortcuts()
 
 export const PAGE_SHORTCUT_ACTIONS = [
   KEYBOARD_SHORTCUT_ACTION.PAGE_1,
@@ -56,10 +69,6 @@ export const KEYBOARD_SHORTCUTS = {
   [KEYBOARD_SHORTCUT_ACTION.BACKEND_NEXT]: {
     defaultKey: 'N',
     label: 'switchToNextBackend',
-  },
-  [KEYBOARD_SHORTCUT_ACTION.BACKEND_OPEN_SETTINGS]: {
-    defaultKey: 'S',
-    label: 'openBackendSettings',
   },
   [KEYBOARD_SHORTCUT_ACTION.PAGE_1]: {
     defaultKey: '1',
@@ -234,22 +243,8 @@ export const useKeyboard = () => {
 
       event.preventDefault()
       const direction = action === KEYBOARD_SHORTCUT_ACTION.BACKEND_NEXT ? 1 : -1
-      const backend = switchActiveBackend(direction)
-      if (backend) {
-        showNotification({
-          content: 'backendSwitchTo',
-          params: {
-            backend: getLabelFromBackend(backend),
-          },
-          type: 'alert-success',
-        })
-      }
-      return
-    }
-
-    if (action === KEYBOARD_SHORTCUT_ACTION.BACKEND_OPEN_SETTINGS) {
-      event.preventDefault()
-      toggleBackendSettingsDialog()
+      // 切到哪个后端、连不连得上,由 BackendSwitchToast 统一提示。
+      switchActiveBackend(direction)
       return
     }
 

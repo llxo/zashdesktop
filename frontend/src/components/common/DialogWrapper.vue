@@ -81,7 +81,11 @@ import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { ref, watch } from 'vue'
 
 const isOpen = defineModel<boolean>()
-defineProps<{ noPadding?: boolean; boxClass?: string; title?: string }>()
+defineProps<{
+  noPadding?: boolean
+  boxClass?: string
+  title?: string
+}>()
 const emits = defineEmits<{
   (e: 'enter'): void
 }>()

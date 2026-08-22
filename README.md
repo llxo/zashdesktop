@@ -24,7 +24,7 @@
 
 ## 前端基线
 
-桌面版前端基于 [zashboard](https://github.com/Zephyruso/zashboard) `3.18.0`，基线 commit 为 [`58eb346b2846d72edc376647d9935bd65556669e`](https://github.com/Zephyruso/zashboard/commit/58eb346b2846d72edc376647d9935bd65556669e)。
+桌面版前端基于 [zashboard](https://github.com/Zephyruso/zashboard) `3.21.0`
 
 ## 使用
 

@@ -126,7 +126,7 @@ const syncTabIndicator = () => {
 }
 
 watch(
-  [() => route.name, isSidebarCollapsed],
+  [() => route.name, isSidebarCollapsed, () => renderRoutes.value.length],
   async () => {
     await nextTick()
     syncTabIndicator()

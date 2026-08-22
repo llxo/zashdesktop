@@ -50,7 +50,8 @@ export const toggleRuleDisabledWithSideEffects = async (rule: Rule) => {
       return ruleTypeMatches && rulePayloadMatches
     })
 
-    matchingConnections.forEach((conn) => disconnectByIdAPI(conn.id))
+    // 禁用规则的顺带动作,失败不该盖掉「规则已禁用」这件主事
+    matchingConnections.forEach((conn) => disconnectByIdAPI(conn.id).catch(() => {}))
   }
 
   await fetchRules()

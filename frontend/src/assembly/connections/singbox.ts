@@ -196,9 +196,10 @@ export const connectionAccessor: ConnectionAccessor = {
     return `${host}:${destinationPort}`
   },
   process: (connection) => {
-    const processPath = asSingbox(connection).processInfo?.processPath ?? ''
+    const processInfo = asSingbox(connection).processInfo
+    const processPath = processInfo?.processPath ?? ''
 
-    return processPath.replace(/^.*[/\\](.*)$/, '$1') || '-'
+    return processInfo?.packageNames[0] || processPath.replace(/^.*[/\\](.*)$/, '$1') || '-'
   },
   destination: (connection) => {
     const c = asSingbox(connection)
