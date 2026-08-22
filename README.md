@@ -16,7 +16,7 @@
 
 | 状态 | 内存占用 | 行为 |
 | --- | ---: | --- |
-| 仅运行托盘 | 不超过 10 MB | 核心和托盘保持运行 |
+| 仅运行托盘 | 不超过 20 MB | 核心和托盘保持运行 |
 | 打开管理窗口 | 约 100-300 MB | 使用系统 WebView2 显示前端 |
 | 关闭管理窗口 | 立即释放窗口内存 | WebView2 被销毁，核心和托盘继续运行 |
 
@@ -46,12 +46,12 @@
 核心页面可以在 `sing-box` 和 `mihomo` 之间切换，并提供以下操作：
 
 - 查看核心和配置的安装状态与路径
-- 下载或手动添加核心
+- 下载核心
 - 下载核心配置
 - 启动、停止和重启核心
 - 设置命令行参数、核心自启动和程序自启动
 
-完成核心和配置初始化后，再返回面板初始化页面填写 API 信息即可进入代理面板。
+下载核心及配置，启动成功后，再返回面板初始化页面填写 API 信息即可进入代理面板。
 
 ### 手动添加核心和配置
 
@@ -78,6 +78,15 @@ C:\DEV\zashdesktop\
 
 核心文件名和配置文件名需要保持不变，配置文件也要放在对应核心目录中。两个核心可以同时保留，运行时选择其中一个作为当前核心。
 
+### 启动报错的处理
+
+以 sing-box 为例
+
+- 查看 /sing-box/core.log 的具体报错
+- 检查 /sing-box/config.json 是否有问题
+- 检查 /sing-box/sing-box.exe 是否为对应版本
+- 删除 /sing-box/cache.db
+
 ### 构建程序
 
 在 Windows PowerShell 中执行：
@@ -92,24 +101,9 @@ C:\DEV\zashdesktop\
 build/bin/zashdesktop.exe
 ```
 
-### 命令行参数
-
-```text
-zashdesktop.exe --api-url http://127.0.0.1:9090 --api-secret secret --api-type clash
-zashdesktop.exe --start-hidden
-zashdesktop.exe --no-tray
-```
-
-| 参数 | 说明 |
-| --- | --- |
-| `--api-url` | Clash API 地址 |
-| `--api-secret` | Clash API 密钥 |
-| `--api-type` | API 类型，可选 `clash` 或 `sing-box` |
-| `--start-hidden` | 启动后直接进入系统托盘 |
-| `--no-tray` | 禁用系统托盘 |
-
 ## 后续计划
 
-继续完善托盘右键菜单，增加以下快捷操作：
-
-- 启动、停止和重启核心
+- 核心启动前清理旧的 log
+- 优化管理窗口的启动速度
+- 托盘右键启动、停止和重启核心
+- 无系统代理时使用加速链接下载核心
