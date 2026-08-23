@@ -632,35 +632,56 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   Object.assign(config, next)
   if (coreChanged) emit('update:coreType', nextCoreType)
   if (syncAllDrafts || !draftState.url.dirty) {
-    urlInput.value = next.urlTemplate
+    if (urlInput.value !== next.urlTemplate) {
+      urlInput.value = next.urlTemplate
+    }
     resetDraft('url')
-    selectedSourceURL.value = sourceOptions.value.some(
+    const matchURL = sourceOptions.value.some(
       (source) => sourceURL(source) === next.urlTemplate,
     )
       ? next.urlTemplate
       : ''
+    if (selectedSourceURL.value !== matchURL) {
+      selectedSourceURL.value = matchURL
+    }
   }
   if (syncAllDrafts || !draftState.runArgs.dirty) {
-    runArgsInput.value = next.runArgs
+    if (runArgsInput.value !== next.runArgs) {
+      runArgsInput.value = next.runArgs
+    }
     resetDraft('runArgs')
   }
   if (syncAllDrafts || !draftState.configURL.dirty) {
-    configURLInput.value = next.configURL
+    if (configURLInput.value !== next.configURL) {
+      configURLInput.value = next.configURL
+    }
     resetDraft('configURL')
   }
   if (syncAllDrafts || !draftState.configFileName.dirty) {
-    configFileNameInput.value = next.configFileName || defaultConfigFileName.value
+    const expectedName = next.configFileName || defaultConfigFileName.value
+    if (configFileNameInput.value !== expectedName) {
+      configFileNameInput.value = expectedName
+    }
     resetDraft('configFileName')
   }
   if (syncAllDrafts || !draftState.behavior.dirty) {
-    Object.assign(behaviorDraft, {
-      runAsAdmin: next.runAsAdmin,
-      autoStart: next.autoStart,
-      autoStartSingBox: next.autoStartSingBox,
-      autoStartMihomo: next.autoStartMihomo,
-      backendDebugLog: next.backendDebugLog,
-      trayAPIURL: next.trayAPIURL,
-    })
+    if (
+      behaviorDraft.runAsAdmin !== next.runAsAdmin ||
+      behaviorDraft.autoStart !== next.autoStart ||
+      behaviorDraft.autoStartSingBox !== next.autoStartSingBox ||
+      behaviorDraft.autoStartMihomo !== next.autoStartMihomo ||
+      behaviorDraft.backendDebugLog !== next.backendDebugLog ||
+      behaviorDraft.trayAPIURL !== next.trayAPIURL
+    ) {
+      Object.assign(behaviorDraft, {
+        runAsAdmin: next.runAsAdmin,
+        autoStart: next.autoStart,
+        autoStartSingBox: next.autoStartSingBox,
+        autoStartMihomo: next.autoStartMihomo,
+        backendDebugLog: next.backendDebugLog,
+        trayAPIURL: next.trayAPIURL,
+      })
+    }
     resetDraft('behavior')
   }
 }
@@ -898,7 +919,7 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
       : await CoreService.GetConfigForType(request.coreType)
     return applyCurrentConfig(request, next, forceDrafts)
   } catch (error) {
-    if (isCurrentConfigRequest(request)) {
+    if (forceDrafts && isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
     return false

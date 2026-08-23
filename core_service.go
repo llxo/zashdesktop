@@ -97,6 +97,13 @@ type persistedCoreProfiles struct {
 	Profiles   map[string]CoreConfig `json:"profiles"`
 }
 
+type coreVersionCacheItem struct {
+	modTime time.Time
+	size    int64
+	version string
+	detail  string
+}
+
 type CoreService struct {
 	executableDir      string
 	applicationPath    string
@@ -117,6 +124,10 @@ type CoreService struct {
 	trayAPIURL         string
 	keepCoreOnShutdown bool
 	onStateChange      func()
+
+	cachedProfiles     *persistedCoreProfiles
+	configModTime      time.Time
+	versionCache       map[string]coreVersionCacheItem
 }
 
 type githubRelease struct {
@@ -139,6 +150,7 @@ func NewCoreService() (*CoreService, error) {
 	return &CoreService{
 		executableDir:   filepath.Dir(executable),
 		applicationPath: executable,
+		versionCache:    make(map[string]coreVersionCacheItem),
 	}, nil
 }
 
@@ -197,15 +209,21 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 	startupContext, cancelStartup := context.WithCancel(ctx)
 	startupDone := make(chan struct{})
 	s.mu.Lock()
+	if s.versionCache == nil {
+		s.versionCache = make(map[string]coreVersionCacheItem)
+	}
 	s.startupCancel = cancelStartup
 	s.startupDone = startupDone
 	s.shuttingDown = false
-	s.mu.Unlock()
 	startupConfig, configErr := s.loadConfigLocked()
 	if configErr == nil {
-		s.mu.Lock()
 		s.trayAPIURL = startupConfig.TrayAPIURL
-		s.mu.Unlock()
+		if s.cachedProfiles != nil {
+			s.syncSystemBehaviorOnce(&s.cachedProfiles.Behavior)
+		}
+	}
+	s.mu.Unlock()
+	if configErr == nil {
 		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
 			log.Printf("zashdesktop: configure backend debug log: %v", debugErr)
 		}
@@ -288,12 +306,12 @@ func (s *CoreService) notifyStateChangeLocked() {
 }
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	config, err := s.loadConfigLocked()
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
 	return config, nil
 }
@@ -303,12 +321,12 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
 	return config, nil
 }
@@ -660,6 +678,17 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 		return CoreConfig{}, versionErr
 	}
 	coreDebugf("core replacement verified: type=%s installedVersion=%s", config.CoreType, installedVersion)
+	if stat, statErr := os.Stat(corePath); statErr == nil {
+		if s.versionCache == nil {
+			s.versionCache = make(map[string]coreVersionCacheItem)
+		}
+		s.versionCache[config.CoreType] = coreVersionCacheItem{
+			modTime: stat.ModTime(),
+			size:    stat.Size(),
+			version: installedVersion,
+			detail:  versionDetail,
+		}
+	}
 	config.Version = installedVersion
 	config.VersionDetail = versionDetail
 	config.Channel = coreChannel(installedVersion)
@@ -1249,17 +1278,19 @@ func (s *CoreService) detectAnyExternalProcessLocked() {
 	}
 }
 
-func (s *CoreService) applySystemBehavior(config *CoreConfig) {
-	if runtime.GOOS != "windows" || s.applicationPath == "" {
+func (s *CoreService) syncSystemBehaviorOnce(behavior *sharedBehaviorConfig) {
+	if runtime.GOOS != "windows" || s.applicationPath == "" || behavior == nil {
 		return
 	}
 	if runAsAdmin, err := readRunAsAdminSetting(s.applicationPath); err == nil {
-		config.RunAsAdmin = runAsAdmin
+		behavior.RunAsAdmin = runAsAdmin
 	}
 	if autoStart, err := readAutoStartSetting(); err == nil {
-		config.AutoStart = autoStart
+		behavior.AutoStart = autoStart
 	}
 }
+
+func (s *CoreService) applySystemBehavior(config *CoreConfig) {}
 
 func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 	if ctx.Err() != nil {
@@ -1313,8 +1344,8 @@ func (s *CoreService) loadConfigForTypeLocked(coreType string) (CoreConfig, erro
 
 func (s *CoreService) loadConfigSnapshot(coreType string) (CoreConfig, uint64, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	generation := s.configGeneration
-	s.mu.Unlock()
 	config, err := s.loadConfigForTypeLocked(coreType)
 	return config, generation, err
 }
@@ -1355,19 +1386,34 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 }
 
 func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
-	data, err := os.ReadFile(s.configPath())
+	configPath := s.configPath()
+	stat, statErr := os.Stat(configPath)
+	if statErr == nil && s.cachedProfiles != nil && stat.ModTime().Equal(s.configModTime) {
+		return *s.cachedProfiles, nil
+	}
+
+	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return persistedCoreProfiles{
+		profiles := persistedCoreProfiles{
 			ActiveCore: coreTypeSingBox,
 			Profiles:   make(map[string]CoreConfig),
-		}, nil
+		}
+		s.cachedProfiles = &profiles
+		s.configModTime = time.Time{}
+		return profiles, nil
 	}
 	if err != nil {
+		if s.cachedProfiles != nil {
+			return *s.cachedProfiles, nil
+		}
 		return persistedCoreProfiles{}, fmt.Errorf("read core config: %w", err)
 	}
 
 	var profiles persistedCoreProfiles
 	if err := json.Unmarshal(data, &profiles); err != nil {
+		if s.cachedProfiles != nil {
+			return *s.cachedProfiles, nil
+		}
 		return persistedCoreProfiles{}, fmt.Errorf("parse core config: %w", err)
 	}
 	if profiles.Profiles == nil {
@@ -1378,6 +1424,11 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	}
 	profiles.ActiveCore = normalizedCoreType(profiles.ActiveCore)
 	normalizeSharedBehavior(&profiles.Behavior, profiles.ActiveCore)
+
+	s.cachedProfiles = &profiles
+	if statErr == nil {
+		s.configModTime = stat.ModTime()
+	}
 	return profiles, nil
 }
 
@@ -1445,9 +1496,14 @@ func (s *CoreService) writeProfilesLocked(profiles persistedCoreProfiles) error 
 		return err
 	}
 	data = append(data, '\n')
-	if err := writeFileAtomically(s.configPath(), data, 0o600); err != nil {
+	configPath := s.configPath()
+	if err := writeFileAtomically(configPath, data, 0o600); err != nil {
 		return err
 	}
+	if stat, err := os.Stat(configPath); err == nil {
+		s.configModTime = stat.ModTime()
+	}
+	s.cachedProfiles = &profiles
 	s.configGeneration++
 	return nil
 }
@@ -1942,21 +1998,61 @@ func (s *CoreService) configFilePath(config CoreConfig) string {
 }
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
-	version := normalizeCoreVersion(supplied)
+	suppliedVersion := normalizeCoreVersion(supplied)
 	corePath := s.corePathFor(config.CoreType)
-	if version == "" && fileExists(corePath) {
-		version, _, _ = readCoreVersionDetail(corePath, config.CoreType)
-	}
-	if version == "" {
+
+	stat, err := os.Stat(corePath)
+	if err != nil || stat.IsDir() {
+		config.Installed = false
+		config.InstalledVersion = ""
+		config.Version = suppliedVersion
+		if config.Channel == "" && suppliedVersion != "" {
+			config.Channel = coreChannel(suppliedVersion)
+		}
 		return
 	}
-	config.Version = version
-	if config.Channel == "" {
-		config.Channel = coreChannel(version)
+
+	config.Installed = true
+
+	if suppliedVersion != "" {
+		config.Version = suppliedVersion
+		config.InstalledVersion = suppliedVersion
+		if config.Channel == "" {
+			config.Channel = coreChannel(suppliedVersion)
+		}
+		return
 	}
-	if fileExists(corePath) {
+
+	if s.versionCache == nil {
+		s.versionCache = make(map[string]coreVersionCacheItem)
+	}
+	cached, ok := s.versionCache[config.CoreType]
+	if ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() && cached.version != "" {
+		config.Version = cached.version
+		config.VersionDetail = cached.detail
+		config.InstalledVersion = cached.version
+		if config.Channel == "" {
+			config.Channel = coreChannel(cached.version)
+		}
+		return
+	}
+
+	version, versionDetail, err := readCoreVersionDetail(corePath, config.CoreType)
+	if err == nil && version != "" {
+		s.versionCache[config.CoreType] = coreVersionCacheItem{
+			modTime: stat.ModTime(),
+			size:    stat.Size(),
+			version: version,
+			detail:  versionDetail,
+		}
+		config.Version = version
+		config.VersionDetail = versionDetail
 		config.InstalledVersion = version
-		config.Installed = true
+		if config.Channel == "" {
+			config.Channel = coreChannel(version)
+		}
+	} else if config.InstalledVersion != "" {
+		config.Version = config.InstalledVersion
 	}
 }
 

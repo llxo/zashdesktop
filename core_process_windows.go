@@ -3,14 +3,12 @@
 package main
 
 import (
-	"encoding/csv"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -33,34 +31,33 @@ func configureCoreCommand(command *exec.Cmd) {
 }
 
 func findExternalCoreProcess(coreType string) (*os.Process, error) {
-	name := coreExecutableNameFor(coreType)
-	command := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/FO", "CSV", "/NH")
-	configureCoreCommand(command)
-	output, err := command.Output()
+	name := strings.ToLower(coreExecutableNameFor(coreType))
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return nil, fmt.Errorf("list %s processes: %w", name, err)
+		return nil, fmt.Errorf("create process snapshot: %w", err)
+	}
+	defer windows.CloseHandle(snapshot)
+
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	if err := windows.Process32First(snapshot, &entry); err != nil {
+		return nil, nil
 	}
 
-	reader := csv.NewReader(strings.NewReader(string(output)))
-	reader.FieldsPerRecord = -1
+	currentPID := uint32(os.Getpid())
 	for {
-		record, readErr := reader.Read()
-		if readErr == io.EOF {
-			return nil, nil
+		processName := strings.ToLower(windows.UTF16ToString(entry.ExeFile[:]))
+		if processName == name && entry.ProcessID != currentPID && entry.ProcessID > 0 {
+			process, err := os.FindProcess(int(entry.ProcessID))
+			if err == nil {
+				return process, nil
+			}
 		}
-		if readErr != nil || len(record) < 2 {
-			continue
+		if err := windows.Process32Next(snapshot, &entry); err != nil {
+			break
 		}
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(record[1]))
-		if parseErr != nil || pid <= 0 || pid == os.Getpid() {
-			continue
-		}
-		process, processErr := os.FindProcess(pid)
-		if processErr != nil {
-			continue
-		}
-		return process, nil
 	}
+	return nil, nil
 }
 
 func requestCoreStop(process *os.Process) error {
