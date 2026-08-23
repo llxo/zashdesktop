@@ -123,7 +123,18 @@ func (a *App) setupTray() {
 	a.tray = tray
 	tray.SetIcon(appIcon)
 	tray.SetTooltip("zashdesktop")
-	a.setTrayMenu(nil)
+
+	var initialConfig CoreConfig
+	if a.coreService != nil {
+		if config, err := a.coreService.GetConfig(); err == nil {
+			initialConfig = config
+		}
+		a.coreService.setOnStateChange(func() {
+			a.refreshTrayProxyGroups(context.Background())
+		})
+	}
+
+	a.setTrayMenu(initialConfig, nil)
 	tray.OnClick(a.showWindow)
 	a.startTrayProxyRefresh()
 }

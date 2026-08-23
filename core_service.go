@@ -116,6 +116,7 @@ type CoreService struct {
 	lastPID            int
 	trayAPIURL         string
 	keepCoreOnShutdown bool
+	onStateChange      func()
 }
 
 type githubRelease struct {
@@ -262,6 +263,28 @@ func (s *CoreService) keepCoreRunningOnShutdown() {
 	s.mu.Lock()
 	s.keepCoreOnShutdown = true
 	s.mu.Unlock()
+}
+
+func (s *CoreService) setOnStateChange(cb func()) {
+	s.mu.Lock()
+	s.onStateChange = cb
+	s.mu.Unlock()
+}
+
+func (s *CoreService) notifyStateChange() {
+	s.mu.Lock()
+	cb := s.onStateChange
+	s.mu.Unlock()
+	if cb != nil {
+		go cb()
+	}
+}
+
+func (s *CoreService) notifyStateChangeLocked() {
+	if s.onStateChange != nil {
+		cb := s.onStateChange
+		go cb()
+	}
 }
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {
@@ -914,6 +937,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	go s.waitForCore(command, logFile, done)
 
 	s.applyRuntimeState(&config)
+	s.notifyStateChangeLocked()
 	return config, nil
 }
 
@@ -935,6 +959,7 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.applyRuntimeState(&config)
+	s.notifyStateChangeLocked()
 	return config, nil
 }
 
@@ -1145,6 +1170,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 	}
 	s.mu.Unlock()
 	close(done)
+	s.notifyStateChange()
 }
 
 func (s *CoreService) applyRuntimeState(config *CoreConfig) {

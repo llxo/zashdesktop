@@ -32,6 +32,13 @@ type trayProxyResponse struct {
 	Proxies map[string]trayProxy `json:"proxies"`
 }
 
+type trayMenuState struct {
+	CoreRunning   bool        `json:"coreRunning"`
+	CoreInstalled bool        `json:"coreInstalled"`
+	CoreType      string      `json:"coreType"`
+	Groups        []trayProxy `json:"groups"`
+}
+
 var trayProxyHTTPClient = &http.Client{
 	Timeout: 3 * time.Second,
 	Transport: &http.Transport{
@@ -64,13 +71,33 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 	a.trayProxyRefreshMu.Lock()
 	defer a.trayProxyRefreshMu.Unlock()
 
-	groups, err := fetchTrayProxyGroups(ctx, a.trayAPIURL(), a.launch.APISecret)
-	if err != nil {
-		coreDebugf("refresh tray proxy groups: %v", err)
-		groups = nil
+	var coreConfig CoreConfig
+	if a.coreService != nil {
+		var err error
+		coreConfig, err = a.coreService.GetConfig()
+		if err != nil {
+			coreDebugf("refresh tray proxy groups get core config: %v", err)
+		}
 	}
 
-	fingerprintData, _ := json.Marshal(groups)
+	var groups []trayProxy
+	if coreConfig.Running {
+		var err error
+		groups, err = fetchTrayProxyGroups(ctx, a.trayAPIURL(), a.launch.APISecret)
+		if err != nil {
+			coreDebugf("refresh tray proxy groups: %v", err)
+			groups = nil
+		}
+	}
+
+	state := trayMenuState{
+		CoreRunning:   coreConfig.Running,
+		CoreInstalled: coreConfig.Installed,
+		CoreType:      coreConfig.CoreType,
+		Groups:        groups,
+	}
+
+	fingerprintData, _ := json.Marshal(state)
 	fingerprint := string(fingerprintData)
 
 	a.mu.Lock()
@@ -81,14 +108,37 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 	a.trayProxyFingerprint = fingerprint
 	a.mu.Unlock()
 
-	a.setTrayMenu(groups)
+	a.setTrayMenu(coreConfig, groups)
 }
 
-func (a *App) setTrayMenu(groups []trayProxy) {
+func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	menu := a.app.Menu.New()
 	menu.Add("打开 zashdesktop").OnClick(func(*application.Context) {
 		a.showWindow()
 	})
+
+	menu.AddSeparator()
+	if coreConfig.Running {
+		menu.Add("停止核心").OnClick(func(*application.Context) {
+			go a.trayStopCore()
+		})
+		restartItem := menu.Add("重启核心")
+		restartItem.SetEnabled(coreConfig.Installed)
+		restartItem.OnClick(func(*application.Context) {
+			go a.trayRestartCore()
+		})
+	} else {
+		startItem := menu.Add("启动核心")
+		startItem.SetEnabled(coreConfig.Installed)
+		startItem.OnClick(func(*application.Context) {
+			go a.trayStartCore()
+		})
+		restartItem := menu.Add("重启核心")
+		restartItem.SetEnabled(coreConfig.Installed)
+		restartItem.OnClick(func(*application.Context) {
+			go a.trayRestartCore()
+		})
+	}
 
 	if len(groups) > 0 {
 		proxyMenu := menu.AddSubmenu("代理组")
@@ -118,6 +168,51 @@ func (a *App) setTrayMenu(groups []trayProxy) {
 		a.quit()
 	})
 	a.tray.SetMenu(menu)
+}
+
+func (a *App) trayStartCore() {
+	if a.coreService == nil {
+		return
+	}
+	config, err := a.coreService.GetConfig()
+	if err != nil {
+		coreDebugf("tray start core get config: %v", err)
+		return
+	}
+	if !config.Installed {
+		coreDebugf("tray start core: core not installed")
+		return
+	}
+	if _, err := a.coreService.StartCore(config.RunArgs, config.CoreType); err != nil {
+		coreDebugf("tray start core failed: %v", err)
+	}
+}
+
+func (a *App) trayStopCore() {
+	if a.coreService == nil {
+		return
+	}
+	if _, err := a.coreService.StopCore(); err != nil {
+		coreDebugf("tray stop core failed: %v", err)
+	}
+}
+
+func (a *App) trayRestartCore() {
+	if a.coreService == nil {
+		return
+	}
+	config, err := a.coreService.GetConfig()
+	if err != nil {
+		coreDebugf("tray restart core get config: %v", err)
+		return
+	}
+	if !config.Installed {
+		coreDebugf("tray restart core: core not installed")
+		return
+	}
+	if _, err := a.coreService.RestartCore(config.RunArgs, config.CoreType); err != nil {
+		coreDebugf("tray restart core failed: %v", err)
+	}
 }
 
 func (a *App) selectTrayProxy(group, proxy string) {
