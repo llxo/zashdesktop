@@ -41,10 +41,11 @@ function Invoke-NativeCommand {
         [Parameter(Mandatory)]
         [string]$Command,
         [Parameter(ValueFromRemainingArguments)]
-        [string[]]$Arguments
+        [object[]]$Arguments
     )
 
-    & $Command @Arguments
+    $flatArgs = @($Arguments | ForEach-Object { $_ })
+    & $Command @flatArgs
     if ($LASTEXITCODE -ne 0) {
         throw "$Command failed with exit code $LASTEXITCODE"
     }

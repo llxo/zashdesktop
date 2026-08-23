@@ -881,7 +881,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	logFile, err := os.OpenFile(s.logFilePath(config.CoreType), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	s.cleanCoreLogs(config.CoreType)
+	logFile, err := os.OpenFile(s.logFilePath(config.CoreType), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return CoreConfig{}, fmt.Errorf("open core log: %w", err)
 	}
@@ -2063,3 +2064,33 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	}
 	return os.Rename(temporaryPath, path)
 }
+
+func cleanLogFile(path string) {
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	if cleanPath == "" || cleanPath == "." {
+		return
+	}
+	if err := os.Remove(cleanPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if file, openErr := os.OpenFile(cleanPath, os.O_WRONLY|os.O_TRUNC, 0o600); openErr == nil {
+			_ = file.Close()
+		}
+	}
+}
+
+func (s *CoreService) cleanCoreLogs(coreType string) {
+	coreDir := s.coreDirFor(coreType)
+	entries, err := os.ReadDir(coreDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(entry.Name()), ".log") {
+			cleanLogFile(filepath.Join(coreDir, entry.Name()))
+		}
+	}
+}
+
+
