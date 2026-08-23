@@ -14,7 +14,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -829,13 +828,11 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		return CoreConfig{}, err
 	}
 
-	if runtime.GOOS == "windows" {
-		if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
-			return CoreConfig{}, err
-		}
-		if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
-			return CoreConfig{}, err
-		}
+	if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
+		return CoreConfig{}, err
+	}
+	if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
+		return CoreConfig{}, err
 	}
 
 	behavior := sharedBehaviorConfig{
@@ -1279,7 +1276,7 @@ func (s *CoreService) detectAnyExternalProcessLocked() {
 }
 
 func (s *CoreService) syncSystemBehaviorOnce(behavior *sharedBehaviorConfig) {
-	if runtime.GOOS != "windows" || s.applicationPath == "" || behavior == nil {
+	if s.applicationPath == "" || behavior == nil {
 		return
 	}
 	if runAsAdmin, err := readRunAsAdminSetting(s.applicationPath); err == nil {
@@ -1556,10 +1553,7 @@ func coreExecutableNameFor(coreType string) string {
 	if normalizedCoreType(coreType) == coreTypeMihomo {
 		baseName = mihomoExecutableName
 	}
-	if runtime.GOOS == "windows" {
-		return baseName + ".exe"
-	}
-	return baseName
+	return baseName + ".exe"
 }
 
 func normalizeCoreType(raw string) (string, error) {

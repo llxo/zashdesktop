@@ -84,12 +84,13 @@ try {
     $info = Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
     $info.fixed.file_version = $version
     $info.info.'0000'.ProductVersion = $version
-    $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $versionedInfoPath -Encoding utf8
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($versionedInfoPath, ($info | ConvertTo-Json -Depth 10), $utf8NoBom)
 
     $versionedManifestPath = Join-Path $resourceTempDir "wails.exe.manifest"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw
     $manifest = $manifest -replace '(<assemblyIdentity type="win32" name="com\.singbox\.gui" version=")[^"]+(" processorArchitecture="\*"/>)', "`$1$windowsVersion`$2"
-    Set-Content -LiteralPath $versionedManifestPath -Value $manifest -Encoding utf8
+    [System.IO.File]::WriteAllText($versionedManifestPath, $manifest, $utf8NoBom)
 
     if (-not (Test-Path -LiteralPath $binDir)) {
         New-Item -ItemType Directory -Path $binDir -Force | Out-Null
