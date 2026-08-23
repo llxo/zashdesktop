@@ -161,6 +161,11 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	}
 
 	menu.AddSeparator()
+	menu.Add("清理前端缓存").OnClick(func(*application.Context) {
+		go a.clearFrontendCache()
+	})
+
+	menu.AddSeparator()
 	menu.Add("退出 zashdesktop").OnClick(func(*application.Context) {
 		a.quitWithoutStoppingCore()
 	})

@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +26,7 @@ type App struct {
 	trayProxyCancel      context.CancelFunc
 	trayProxyFingerprint string
 	trayProxyRefreshMu   sync.Mutex
+	clearCacheMu         sync.Mutex
 	quitting             bool
 	mu                   sync.Mutex
 }
@@ -156,3 +160,101 @@ func (a *App) quitWithoutStoppingCore() {
 	}
 	a.quit()
 }
+
+func (a *App) clearFrontendCache() {
+	if !a.clearCacheMu.TryLock() {
+		return
+	}
+	defer a.clearCacheMu.Unlock()
+
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	window := a.window
+	wasOpen := window != nil
+	a.mu.Unlock()
+
+	if wasOpen {
+		window.Close()
+		for i := 0; i < 20; i++ {
+			time.Sleep(50 * time.Millisecond)
+			a.mu.Lock()
+			currentWindow := a.window
+			a.mu.Unlock()
+			if currentWindow == nil {
+				break
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	for _, dir := range getWebviewCacheDirs() {
+		_ = removeDirectoryWithRetry(dir, 5, 100*time.Millisecond)
+	}
+
+	if wasOpen {
+		a.showWindow()
+	}
+}
+
+func removeDirectoryWithRetry(dir string, maxAttempts int, delay time.Duration) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	var lastErr error
+	for i := 0; i < maxAttempts; i++ {
+		lastErr = os.RemoveAll(dir)
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(delay)
+	}
+	return lastErr
+}
+
+func getWebviewCacheDirs() []string {
+	var dirs []string
+	seen := make(map[string]struct{})
+	add := func(dir string) {
+		cleaned := filepath.Clean(dir)
+		if cleaned == "" || cleaned == "." {
+			return
+		}
+		if _, exists := seen[cleaned]; !exists {
+			seen[cleaned] = struct{}{}
+			dirs = append(dirs, cleaned)
+		}
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err == nil && configDir != "" {
+		executable, err := os.Executable()
+		if err == nil && executable != "" {
+			base := filepath.Base(executable)
+			add(filepath.Join(configDir, base, "EBWebView"))
+			withoutExt := strings.TrimSuffix(base, filepath.Ext(base))
+			if withoutExt != base {
+				add(filepath.Join(configDir, withoutExt, "EBWebView"))
+			}
+		}
+		add(filepath.Join(configDir, "zashdesktop.exe", "EBWebView"))
+		add(filepath.Join(configDir, "zashdesktop", "EBWebView"))
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err == nil && cacheDir != "" {
+		executable, err := os.Executable()
+		if err == nil && executable != "" {
+			base := filepath.Base(executable)
+			add(filepath.Join(cacheDir, base))
+			withoutExt := strings.TrimSuffix(base, filepath.Ext(base))
+			if withoutExt != base {
+				add(filepath.Join(cacheDir, withoutExt))
+			}
+		}
+		add(filepath.Join(cacheDir, "zashdesktop"))
+	}
+	return dirs
+}
+
