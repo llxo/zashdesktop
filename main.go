@@ -34,6 +34,12 @@ func main() {
 		windowStatePath: windowStatePath,
 	}
 
+	configDir, _ := os.UserConfigDir()
+	userDataPath := ""
+	if configDir != "" {
+		userDataPath = filepath.Join(configDir, "zashdesktop")
+	}
+
 	app := application.New(application.Options{
 		Name:        "zashdesktop",
 		Description: "A native sing-box dashboard using the Clash API",
@@ -44,6 +50,7 @@ func main() {
 		},
 		Windows: application.WindowsOptions{
 			DisableQuitOnLastWindowClosed: !launch.NoTray,
+			WebviewUserDataPath:           userDataPath,
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: singleInstanceID(launch),

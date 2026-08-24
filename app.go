@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -215,46 +214,10 @@ func removeDirectoryWithRetry(dir string, maxAttempts int, delay time.Duration) 
 }
 
 func getWebviewCacheDirs() []string {
-	var dirs []string
-	seen := make(map[string]struct{})
-	add := func(dir string) {
-		cleaned := filepath.Clean(dir)
-		if cleaned == "" || cleaned == "." {
-			return
-		}
-		if _, exists := seen[cleaned]; !exists {
-			seen[cleaned] = struct{}{}
-			dirs = append(dirs, cleaned)
-		}
-	}
-
 	configDir, err := os.UserConfigDir()
-	if err == nil && configDir != "" {
-		executable, err := os.Executable()
-		if err == nil && executable != "" {
-			base := filepath.Base(executable)
-			add(filepath.Join(configDir, base, "EBWebView"))
-			withoutExt := strings.TrimSuffix(base, filepath.Ext(base))
-			if withoutExt != base {
-				add(filepath.Join(configDir, withoutExt, "EBWebView"))
-			}
-		}
-		add(filepath.Join(configDir, "zashdesktop.exe", "EBWebView"))
-		add(filepath.Join(configDir, "zashdesktop", "EBWebView"))
+	if err != nil || configDir == "" {
+		return nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err == nil && cacheDir != "" {
-		executable, err := os.Executable()
-		if err == nil && executable != "" {
-			base := filepath.Base(executable)
-			add(filepath.Join(cacheDir, base))
-			withoutExt := strings.TrimSuffix(base, filepath.Ext(base))
-			if withoutExt != base {
-				add(filepath.Join(cacheDir, withoutExt))
-			}
-		}
-		add(filepath.Join(cacheDir, "zashdesktop"))
-	}
-	return dirs
+	return []string{filepath.Join(configDir, "zashdesktop", "EBWebView")}
 }
 

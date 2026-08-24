@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -14,11 +15,12 @@ import (
 const attachParentProcess uintptr = ^uintptr(0)
 
 var (
-	coreKernel32                 = windows.NewLazySystemDLL("kernel32.dll")
-	coreFreeConsole              = coreKernel32.NewProc("FreeConsole")
-	coreAttachConsole            = coreKernel32.NewProc("AttachConsole")
-	coreSetConsoleCtrlHandler    = coreKernel32.NewProc("SetConsoleCtrlHandler")
-	coreGenerateConsoleCtrlEvent = coreKernel32.NewProc("GenerateConsoleCtrlEvent")
+	coreKernel32                  = windows.NewLazySystemDLL("kernel32.dll")
+	coreFreeConsole               = coreKernel32.NewProc("FreeConsole")
+	coreAttachConsole             = coreKernel32.NewProc("AttachConsole")
+	coreSetConsoleCtrlHandler     = coreKernel32.NewProc("SetConsoleCtrlHandler")
+	coreGenerateConsoleCtrlEvent  = coreKernel32.NewProc("GenerateConsoleCtrlEvent")
+	coreQueryFullProcessImageName = coreKernel32.NewProc("QueryFullProcessImageNameW")
 )
 
 func configureCoreCommand(command *exec.Cmd) {
@@ -28,8 +30,37 @@ func configureCoreCommand(command *exec.Cmd) {
 	}
 }
 
-func findExternalCoreProcess(coreType string) (*os.Process, error) {
+func getProcessImagePath(pid uint32) (string, error) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(handle)
+
+	buf := make([]uint16, 1024)
+	size := uint32(len(buf))
+	ret, _, callErr := coreQueryFullProcessImageName.Call(
+		uintptr(handle),
+		0,
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&size)),
+	)
+	if ret == 0 {
+		return "", callErr
+	}
+	return windows.UTF16ToString(buf[:size]), nil
+}
+
+func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error) {
 	name := strings.ToLower(coreExecutableNameFor(coreType))
+	var cleanExpected string
+	if expectedPath != "" {
+		cleanExpected = filepath.Clean(expectedPath)
+		if eval, err := filepath.EvalSymlinks(cleanExpected); err == nil {
+			cleanExpected = eval
+		}
+	}
+
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return nil, fmt.Errorf("create process snapshot: %w", err)
@@ -46,9 +77,23 @@ func findExternalCoreProcess(coreType string) (*os.Process, error) {
 	for {
 		processName := strings.ToLower(windows.UTF16ToString(entry.ExeFile[:]))
 		if processName == name && entry.ProcessID != currentPID && entry.ProcessID > 0 {
-			process, err := os.FindProcess(int(entry.ProcessID))
-			if err == nil {
-				return process, nil
+			if cleanExpected != "" {
+				imagePath, err := getProcessImagePath(entry.ProcessID)
+				if err == nil && imagePath != "" {
+					cleanImage := filepath.Clean(imagePath)
+					if eval, err := filepath.EvalSymlinks(cleanImage); err == nil {
+						cleanImage = eval
+					}
+					if strings.EqualFold(cleanImage, cleanExpected) {
+						if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
+							return process, nil
+						}
+					}
+				}
+			} else {
+				if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
+					return process, nil
+				}
 			}
 		}
 		if err := windows.Process32Next(snapshot, &entry); err != nil {

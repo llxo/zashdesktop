@@ -1526,7 +1526,7 @@ func (s *CoreService) detectExternalProcessLocked(coreType string) {
 		s.externalProcess = nil
 		s.externalCoreType = ""
 	}
-	process, err := findExternalCoreProcess(coreType)
+	process, err := findExternalCoreProcess(coreType, s.corePathFor(coreType))
 	if err != nil {
 		coreDebugf("external core detection failed: type=%s err=%v", coreType, err)
 		return

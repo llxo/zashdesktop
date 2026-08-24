@@ -97,7 +97,9 @@ func readAutoStartSetting() (bool, error) {
 }
 
 func autoStartTaskXML(applicationPath string) []byte {
-	configuration := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
+	escapedTaskName := xmlEscape(autoStartTaskName)
+	escapedAppPath := xmlEscape(applicationPath)
+	configuration := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>%[1]s at startup</Description>
@@ -140,8 +142,29 @@ func autoStartTaskXML(applicationPath string) []byte {
       <Arguments>--start-hidden</Arguments>
     </Exec>
   </Actions>
-</Task>`, autoStartTaskName, autoStartDelay, applicationPath)
+</Task>`, escapedTaskName, autoStartDelay, escapedAppPath)
 	return []byte(configuration)
+}
+
+func xmlEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\'':
+			b.WriteString("&apos;")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func isPrivileged() (bool, error) {
