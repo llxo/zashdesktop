@@ -225,6 +225,95 @@
               @change="importConfig"
             />
           </div>
+
+          <div
+            class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
+          >
+            <span class="setting-item-label">{{ $t('coreActiveConfig') }}</span>
+            <select
+              v-model="activeConfigFile"
+              class="select select-sm w-full min-w-0 font-mono"
+              :aria-label="$t('coreActiveConfig')"
+              :disabled="
+                config.running ||
+                isStarting ||
+                isStopping ||
+                isRestarting ||
+                isSelectingConfigFile ||
+                isDeletingConfigFile ||
+                isRevertingConfigFile
+              "
+              @focus="scanConfigFiles(false)"
+              @mousedown="scanConfigFiles(false)"
+              @change="handleSelectConfigFile"
+            >
+              <option
+                v-if="availableConfigFiles.length === 0"
+                disabled
+                value=""
+              >
+                {{ $t('noConfigFilesFound') }}
+              </option>
+              <option
+                v-for="file in availableConfigFiles"
+                :key="file"
+                :value="file"
+              >
+                {{ file }}
+              </option>
+            </select>
+            <button
+              class="btn btn-sm text-error"
+              type="button"
+              :disabled="
+                config.running ||
+                isStarting ||
+                isStopping ||
+                isRestarting ||
+                isSelectingConfigFile ||
+                isDeletingConfigFile ||
+                isUndoingDelete ||
+                !activeConfigFile ||
+                availableConfigFiles.length === 0
+              "
+              @click="deleteActiveConfigFile"
+            >
+              <span
+                v-if="isDeletingConfigFile"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <TrashIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('delete') }}
+            </button>
+            <button
+              class="btn btn-sm"
+              type="button"
+              :disabled="
+                config.running ||
+                isStarting ||
+                isStopping ||
+                isRestarting ||
+                isSelectingConfigFile ||
+                isDeletingConfigFile ||
+                isUndoingDelete ||
+                !canUndoDelete
+              "
+              @click="undoDeleteConfigFile"
+            >
+              <span
+                v-if="isUndoingDelete"
+                class="loading loading-spinner h-4 w-4"
+              ></span>
+              <ArrowUturnLeftIcon
+                v-else
+                class="h-4 w-4"
+              />
+              {{ $t('undo') }}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -426,9 +515,11 @@ import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
+  ArrowUturnLeftIcon,
   Cog6ToothIcon,
   PlayIcon,
   StopIcon,
+  TrashIcon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
@@ -597,6 +688,13 @@ const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
 const isCheckingAppUpdate = ref(false)
 const isUpdatingApp = ref(false)
+const isScanningConfigFiles = ref(false)
+const isSelectingConfigFile = ref(false)
+const isDeletingConfigFile = ref(false)
+const isUndoingDelete = ref(false)
+const canUndoDelete = ref(false)
+const availableConfigFiles = ref<string[]>([])
+const activeConfigFile = ref('')
 const appVersion = ref(__APP_VERSION__)
 const appUpdateInfo = reactive<AppUpdateInfo>({
   currentVersion: __APP_VERSION__,
@@ -623,7 +721,10 @@ const isConfigMutationPending = computed(
     isSavingConfigFileName.value ||
     isImportingConfig.value ||
     isSavingBehavior.value ||
-    isUpdatingApp.value,
+    isUpdatingApp.value ||
+    isSelectingConfigFile.value ||
+    isDeletingConfigFile.value ||
+    isUndoingDelete.value,
 )
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 const installedVersionLabel = computed(() => {
@@ -765,6 +866,122 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
     }
     resetDraft('behavior')
   }
+  syncActiveConfigFile()
+}
+
+const extractConfigFileFromRunArgs = (runArgs: string, core: CoreType): string => {
+  const trimmed = runArgs.trim()
+  if (core === 'mihomo') {
+    const match = /(?:^|\s)-f\s+([^\s]+)/i.exec(trimmed)
+    return match ? match[1].split(/[\\/]/).pop() || '' : ''
+  }
+  const match = /(?:^|\s)-c\s+([^\s]+)/i.exec(trimmed)
+  return match ? match[1].split(/[\\/]/).pop() || '' : ''
+}
+
+const syncActiveConfigFile = () => {
+  const fromArgs = extractConfigFileFromRunArgs(config.runArgs, coreType.value)
+  if (fromArgs) {
+    activeConfigFile.value = fromArgs
+    return
+  }
+  if (config.configFileName) {
+    activeConfigFile.value = config.configFileName
+    return
+  }
+  if (availableConfigFiles.value.length > 0) {
+    activeConfigFile.value = availableConfigFiles.value[0]
+  }
+}
+
+const scanConfigFiles = async (notify = false) => {
+  if (isScanningConfigFiles.value) return
+  isScanningConfigFiles.value = true
+  try {
+    const files = await CoreService.ListConfigFiles(coreType.value)
+    availableConfigFiles.value = files || []
+    syncActiveConfigFile()
+  } catch (error) {
+    if (notify) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
+  } finally {
+    isScanningConfigFiles.value = false
+  }
+}
+
+const handleSelectConfigFile = async () => {
+  if (isSelectingConfigFile.value || !activeConfigFile.value || config.running) return
+  isSelectingConfigFile.value = true
+  const request = beginConfigRequest()
+  try {
+    const next = await CoreService.SelectConfigFile(activeConfigFile.value, request.coreType)
+    if (applyCurrentConfig(request, next)) {
+      showNotification({ content: 'coreActiveConfigSaved', type: 'alert-success' })
+    }
+  } catch (error) {
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+      syncActiveConfigFile()
+    }
+  } finally {
+    isSelectingConfigFile.value = false
+  }
+}
+
+const checkCanUndoDelete = async () => {
+  try {
+    canUndoDelete.value = await CoreService.CanUndoDeleteConfigFile(coreType.value)
+  } catch {
+    canUndoDelete.value = false
+  }
+}
+
+const deleteActiveConfigFile = async () => {
+  if (
+    isDeletingConfigFile.value ||
+    !activeConfigFile.value ||
+    config.running ||
+    availableConfigFiles.value.length === 0
+  )
+    return
+  isDeletingConfigFile.value = true
+  const request = beginConfigRequest()
+  try {
+    const next = await CoreService.DeleteConfigFile(activeConfigFile.value, request.coreType)
+    if (applyCurrentConfig(request, next)) {
+      canUndoDelete.value = true
+      showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
+      await scanConfigFiles(false)
+    }
+  } catch (error) {
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
+  } finally {
+    isDeletingConfigFile.value = false
+  }
+}
+
+const undoDeleteConfigFile = async () => {
+  if (isUndoingDelete.value || config.running || !canUndoDelete.value) return
+  isUndoingDelete.value = true
+  const request = beginConfigRequest()
+  try {
+    const next = await CoreService.UndoDeleteConfigFile(request.coreType)
+    if (applyCurrentConfig(request, next)) {
+      canUndoDelete.value = false
+      showNotification({ content: 'coreConfigFileRestored', type: 'alert-success' })
+      await scanConfigFiles(false)
+    }
+  } catch (error) {
+    if (isCurrentConfigRequest(request)) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+      await checkCanUndoDelete()
+    }
+  } finally {
+    isUndoingDelete.value = false
+  }
 }
 
 const selectDownloadSource = async () => {
@@ -844,6 +1061,7 @@ const saveRunArgs = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
+    syncActiveConfigFile()
     showNotification({ content: 'coreRunArgsSaved', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -928,6 +1146,7 @@ const downloadConfig = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('configURL', draftRevision)
     applyCurrentConfig(request, next)
+    void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -980,6 +1199,7 @@ const importConfig = async (event: Event) => {
     request = beginConfigRequest()
     const next = await CoreService.ImportConfig(await file.text(), file.name, request.coreType)
     if (!applyCurrentConfig(request, next)) return
+    void scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
   } catch (error) {
     if (!request || isCurrentConfigRequest(request)) {
@@ -1177,6 +1397,8 @@ onMounted(() => {
   void (async () => {
     if (await loadConfig(true, true)) {
       await nextTick()
+      void scanConfigFiles(false)
+      void checkCanUndoDelete()
       await checkUpdate(false)
     }
   })()
@@ -1194,6 +1416,9 @@ watch(
     checkSequence += 1
     isChecking.value = false
     isRefreshing.value = false
+    availableConfigFiles.value = []
+    activeConfigFile.value = ''
+    canUndoDelete.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
     loadDownloadSources()
     resetDraft('url')
@@ -1205,6 +1430,8 @@ watch(
     advancedOpen.value = false
     void (async () => {
       if (await loadConfig(false, true)) {
+        void scanConfigFiles(false)
+        void checkCanUndoDelete()
         await checkUpdate(false)
       }
     })()

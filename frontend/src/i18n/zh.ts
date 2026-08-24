@@ -755,6 +755,13 @@ const zh = {
   appUpToDate: '当前已是最新版本',
   appUpdating: '正在下载并应用更新...',
   appUpdateSuccess: '更新已完成，正在重启应用...',
+  coreActiveConfig: '生效配置',
+  coreActiveConfigSaved: '生效配置已更新',
+  noConfigFilesFound: '未检测到配置文件',
+  deleteConfig: '删除配置',
+  coreConfigFileDeleted: '配置文件已删除',
+  coreConfigFileRestored: '配置文件已恢复',
+  undo: '撤销',
 }
 
 export default zh

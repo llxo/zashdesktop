@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,8 +23,12 @@ func main() {
 	cleanOldUpdateFiles()
 	launch := parseLaunchConfig(os.Args[1:])
 	windowState, windowStatePath := loadWindowState()
+	coreService, err := NewCoreService()
+	if err != nil {
+		log.Fatalf("failed to initialize core service: %v", err)
+	}
 	controller := &App{
-		coreService:     &CoreService{},
+		coreService:     coreService,
 		launch:          launch,
 		windowState:     windowState,
 		windowStatePath: windowStatePath,

@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     define: {
-      __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || version),
+      __APP_VERSION__: JSON.stringify(version),
       __COMMIT_ID__: JSON.stringify(getGitCommitId()),
       __FONT__: JSON.stringify(isDesktop ? 'none' : font),
     },

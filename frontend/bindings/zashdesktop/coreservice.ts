@@ -9,12 +9,20 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function CanUndoDeleteConfigFile(rawCoreType: string): $CancellablePromise<boolean> {
+    return $Call.ByID(2860862145, rawCoreType);
+}
+
 export function CheckAppUpdate(): $CancellablePromise<$models.AppUpdateInfo> {
     return $Call.ByID(957133460);
 }
 
 export function CheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2721282167, currentVersion, rawCoreType);
+}
+
+export function DeleteConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2839170645, rawFileName, rawCoreType);
 }
 
 export function DownloadConfig(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
@@ -49,6 +57,10 @@ export function InstallAppUpdate(): $CancellablePromise<void> {
     return $Call.ByID(1482439629);
 }
 
+export function ListConfigFiles(rawCoreType: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(2883527251, rawCoreType);
+}
+
 export function RestartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
@@ -77,12 +89,20 @@ export function SaveURL(rawURL: string, rawCoreType: string): $CancellablePromis
     return $Call.ByID(3210647596, rawURL, rawCoreType);
 }
 
+export function SelectConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(1276464918, rawFileName, rawCoreType);
+}
+
 export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(879345873, rawArgs, rawCoreType);
 }
 
 export function StopCore(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1224211689);
+}
+
+export function UndoDeleteConfigFile(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(132981571, rawCoreType);
 }
 
 export function ValidateURL(rawURL: string): $CancellablePromise<string> {
