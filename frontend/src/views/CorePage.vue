@@ -11,9 +11,9 @@
           {{ $t('setup') }}
         </button>
         <SegmentedControl
-          :model-value="coreType"
-          :options="coreTypeOptions"
-          @update:model-value="changeCoreType"
+          :model-value="activeTab"
+          :options="tabOptions"
+          @update:model-value="changeTab"
         />
       </div>
     </CtrlsBar>
@@ -24,8 +24,9 @@
     >
       <div class="w-full max-w-3xl p-3 md:px-8 md:py-6">
         <CoreSettings
+          :active-tab="activeTab"
           :core-type="coreType"
-          @update:core-type="coreType = $event"
+          @update:core-type="handleCoreTypeUpdate"
         />
       </div>
     </div>
@@ -43,22 +44,41 @@ import { ROUTE_NAME } from '@/constant'
 import router from '@/router'
 import { activeBackend } from '@/store/setup'
 import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 type CoreType = 'sing-box' | 'mihomo'
+type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 
-const coreTypeOptions: SegmentOption[] = [
-  { value: 'sing-box', label: 'sing-box' },
-  { value: 'mihomo', label: 'mihomo' },
-]
+const { t } = useI18n()
 
+const activeTab = ref<CoreTab>('sing-box')
 const coreType = ref<CoreType>('sing-box')
 
-const changeCoreType = async (nextType: string) => {
-  if (nextType === coreType.value) return
+const tabOptions = computed<SegmentOption[]>(() => [
+  { value: 'sing-box', label: 'sing-box' },
+  { value: 'mihomo', label: 'mihomo' },
+  { value: 'settings', label: t('settings') },
+])
+
+const handleCoreTypeUpdate = (nextType: CoreType) => {
+  coreType.value = nextType
+  if (activeTab.value !== 'settings') {
+    activeTab.value = nextType
+  }
+}
+
+const changeTab = async (nextTab: string) => {
+  if (nextTab === activeTab.value) return
+  if (nextTab === 'settings') {
+    activeTab.value = 'settings'
+    return
+  }
+  const nextCoreType: CoreType = nextTab === 'mihomo' ? 'mihomo' : 'sing-box'
   try {
-    const config = await CoreService.SaveCoreType(nextType)
+    const config = await CoreService.SaveCoreType(nextCoreType)
     coreType.value = config.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
+    activeTab.value = coreType.value
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   }

@@ -1,413 +1,417 @@
 <template>
   <div class="flex flex-col gap-3 text-sm">
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('coreRun') }}
-      </div>
-      <div class="settings-grid">
-        <div class="setting-item">
-          <span class="setting-item-label">{{ $t('coreRunStatus') }}</span>
-          <span
-            class="badge badge-sm"
-            :class="config.running ? 'badge-success' : 'badge-ghost'"
-          >
-            {{ config.running ? $t('coreRunning') : $t('coreStopped') }}
-          </span>
+    <template v-if="props.activeTab !== 'settings'">
+      <section>
+        <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+          {{ $t('coreRun') }}
         </div>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <span class="setting-item-label">{{ $t('coreRunStatus') }}</span>
+            <span
+              class="badge badge-sm"
+              :class="config.running ? 'badge-success' : 'badge-ghost'"
+            >
+              {{ config.running ? $t('coreRunning') : $t('coreStopped') }}
+            </span>
+          </div>
 
-        <div class="setting-item flex-col !items-stretch py-3">
-          <input
-            v-model="runArgsInput"
-            class="input input-sm w-full font-mono text-xs"
-            type="text"
-            :aria-label="$t('coreRunArgs')"
-            :placeholder="defaultRunArgsPlaceholder"
-            :disabled="
-              config.running || isStarting || isStopping || isRestarting || isSavingRunArgs
-            "
-            @input="touchDraft('runArgs')"
-            @change="saveRunArgs"
-            @keydown.enter.prevent="saveRunArgs"
-          />
+          <div class="setting-item flex-col !items-stretch py-3">
+            <input
+              v-model="runArgsInput"
+              class="input input-sm w-full font-mono text-xs"
+              type="text"
+              :aria-label="$t('coreRunArgs')"
+              :placeholder="defaultRunArgsPlaceholder"
+              :disabled="
+                config.running || isStarting || isStopping || isRestarting || isSavingRunArgs
+              "
+              @input="touchDraft('runArgs')"
+              @change="saveRunArgs"
+              @keydown.enter.prevent="saveRunArgs"
+            />
 
-          <div class="flex flex-wrap gap-2 self-start">
+            <div class="flex flex-wrap gap-2 self-start">
+              <button
+                v-if="!config.running"
+                class="btn btn-primary btn-sm"
+                :disabled="isStarting || isStopping || isRestarting || !config.installed"
+                @click="startCore"
+              >
+                <span
+                  v-if="isStarting"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <PlayIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('coreStart') }}
+              </button>
+              <button
+                v-else
+                class="btn btn-error btn-sm"
+                :disabled="isStarting || isStopping || isRestarting"
+                @click="stopCore"
+              >
+                <span
+                  v-if="isStopping"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <StopIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('coreStop') }}
+              </button>
+              <button
+                class="btn btn-sm"
+                :disabled="isStarting || isStopping || isRestarting || !config.installed"
+                @click="restartCore"
+              >
+                <span
+                  v-if="isRestarting"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowPathIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('coreRestart') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="text-base-content/85 mt-1 mb-2.5 flex items-center justify-between px-1">
+          <span class="text-base font-semibold tracking-tight">{{ $t('coreMaintenance') }}</span>
+          <button
+            class="btn btn-circle btn-sm"
+            type="button"
+            :aria-label="$t('coreAdvanced')"
+            :title="$t('coreAdvanced')"
+            @click="advancedOpen = true"
+          >
+            <Cog6ToothIcon class="h-4 w-4" />
+          </button>
+        </div>
+        <div class="settings-grid">
+          <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-2">
+              <span class="setting-item-label">{{ $t('coreSettings') }}</span>
+              <span
+                class="badge badge-sm"
+                :class="config.installed ? 'badge-success' : 'badge-ghost'"
+              >
+                {{ installedVersionLabel }}
+              </span>
+              <span
+                v-if="config.latestVersion"
+                class="badge badge-sm"
+                :class="config.updateAvailable ? 'badge-warning' : 'badge-ghost'"
+              >
+                {{ config.latestVersion }}
+              </span>
+              <button
+                class="btn btn-circle btn-ghost btn-xs"
+                type="button"
+                :aria-label="$t('checkUpdate')"
+                :title="$t('checkUpdate')"
+                :disabled="isChecking || isDownloading || isSaving || !urlInput.trim()"
+                @click="checkUpdate()"
+              >
+                <span
+                  v-if="isChecking"
+                  class="loading loading-spinner h-3.5 w-3.5"
+                ></span>
+                <ArrowPathIcon
+                  v-else
+                  class="h-3.5 w-3.5"
+                />
+              </button>
+            </div>
             <button
-              v-if="!config.running"
-              class="btn btn-primary btn-sm"
-              :disabled="isStarting || isStopping || isRestarting || !config.installed"
-              @click="startCore"
+              class="btn btn-sm max-sm:self-stretch"
+              :class="{ 'btn-primary': !config.installed }"
+              :disabled="isCoreMaintenanceBusy"
+              @click="maintainCore"
             >
               <span
-                v-if="isStarting"
+                v-if="isCoreMaintenanceBusy"
                 class="loading loading-spinner h-4 w-4"
               ></span>
-              <PlayIcon
+              <ArrowDownCircleIcon
                 v-else
                 class="h-4 w-4"
               />
-              {{ $t('coreStart') }}
+              {{ config.installed ? $t('updateCore') : $t('installCore') }}
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+          {{ $t('coreConfig') }}
+        </div>
+        <div class="settings-grid">
+          <div class="setting-item grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2 py-3">
+            <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
+            <input
+              v-model="configURLInput"
+              class="input input-sm w-full min-w-0"
+              type="url"
+              :aria-label="$t('coreConfigURL')"
+              :placeholder="$t('coreConfigURLPlaceholder')"
+              :disabled="isDownloadingConfig || isImportingConfig"
+              @input="touchDraft('configURL')"
+            />
+          </div>
+
+          <div
+            class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
+          >
+            <span class="setting-item-label">{{ $t('coreConfigSaveTo') }}</span>
+            <input
+              v-model="configFileNameInput"
+              class="input input-sm w-full min-w-0 font-mono"
+              type="text"
+              :aria-label="$t('coreConfigSaveTo')"
+              :placeholder="defaultConfigFileName"
+              :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
+              @input="touchDraft('configFileName')"
+              @change="saveConfigFileName()"
+              @keydown.enter.prevent="saveConfigFileName()"
+            />
             <button
-              v-else
-              class="btn btn-error btn-sm"
-              :disabled="isStarting || isStopping || isRestarting"
-              @click="stopCore"
+              class="btn btn-sm"
+              type="button"
+              :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
+              @click="downloadConfig"
             >
               <span
-                v-if="isStopping"
+                v-if="isDownloadingConfig"
                 class="loading loading-spinner h-4 w-4"
               ></span>
-              <StopIcon
+              <ArrowDownTrayIcon
                 v-else
                 class="h-4 w-4"
               />
-              {{ $t('coreStop') }}
+              {{ $t('downloadConfig') }}
             </button>
             <button
               class="btn btn-sm"
-              :disabled="isStarting || isStopping || isRestarting || !config.installed"
-              @click="restartCore"
+              type="button"
+              :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
+              @click="openConfigFilePicker"
             >
               <span
-                v-if="isRestarting"
+                v-if="isImportingConfig"
                 class="loading loading-spinner h-4 w-4"
               ></span>
-              <ArrowPathIcon
+              <ArrowUpTrayIcon
                 v-else
                 class="h-4 w-4"
               />
-              {{ $t('coreRestart') }}
+              {{ $t('coreImportConfig') }}
             </button>
+            <input
+              ref="configFileInput"
+              class="hidden"
+              type="file"
+              :accept="configFileAccept"
+              @change="importConfig"
+            />
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 flex items-center justify-between px-1">
-        <span class="text-base font-semibold tracking-tight">{{ $t('coreMaintenance') }}</span>
-        <button
-          class="btn btn-circle btn-sm"
-          type="button"
-          :aria-label="$t('coreAdvanced')"
-          :title="$t('coreAdvanced')"
-          @click="advancedOpen = true"
-        >
-          <Cog6ToothIcon class="h-4 w-4" />
-        </button>
-      </div>
-      <div class="settings-grid">
-        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="setting-item-label">{{ $t('coreSettings') }}</span>
-            <span
-              class="badge badge-sm"
-              :class="config.installed ? 'badge-success' : 'badge-ghost'"
+      <DialogWrapper
+        v-model="advancedOpen"
+        :title="$t('coreAdvanced')"
+      >
+        <div class="settings-grid">
+          <div class="setting-item">
+            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
+            <div
+              :class="{
+                'pointer-events-none opacity-60':
+                  isSavingChannel || isSaving || isChecking || isDownloading,
+              }"
             >
-              {{ installedVersionLabel }}
-            </span>
-            <span
-              v-if="config.latestVersion"
-              class="badge badge-sm"
-              :class="config.updateAvailable ? 'badge-warning' : 'badge-ghost'"
+              <SegmentedControl
+                :model-value="currentChannel"
+                :options="channelOptions"
+                @update:model-value="saveChannel"
+              />
+            </div>
+          </div>
+
+          <label class="setting-item max-sm:flex-col max-sm:items-stretch! max-sm:py-3">
+            <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
+            <select
+              v-model="selectedSourceURL"
+              class="select select-sm min-w-44 max-sm:w-full"
+              :aria-label="$t('coreDownloadSource')"
+              :disabled="isSaving || isValidatingURL || isDownloading"
+              @change="selectDownloadSource"
             >
-              {{ config.latestVersion }}
-            </span>
+              <option
+                v-for="source in sourceOptions"
+                :key="source.url"
+                :value="sourceURL(source)"
+              >
+                {{ source.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="setting-item flex-col !items-stretch py-3">
+            <span class="setting-item-label">{{ $t('coreDownloadURL') }}</span>
+            <input
+              v-model="urlInput"
+              class="input input-sm w-full"
+              type="url"
+              :placeholder="$t('coreDownloadURLPlaceholder')"
+              :disabled="isSaving || isValidatingURL || isDownloading"
+              @input="touchDraft('url')"
+              @change="saveURL()"
+              @keydown.enter.prevent="validateAndAddURL"
+            />
+          </label>
+        </div>
+      </DialogWrapper>
+    </template>
+
+    <template v-else>
+      <section>
+        <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+          {{ $t('coreBehavior') }}
+        </div>
+        <div class="settings-grid">
+          <label class="setting-item">
+            <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
+            <input
+              v-model="behaviorDraft.runAsAdmin"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior()"
+            />
+          </label>
+          <label class="setting-item">
+            <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
+            <input
+              v-model="behaviorDraft.autoStart"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior()"
+            />
+          </label>
+          <label class="setting-item">
+            <span class="setting-item-label">{{ $t('autoStartSingBox') }}</span>
+            <input
+              v-model="behaviorDraft.autoStartSingBox"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior('sing-box')"
+            />
+          </label>
+          <label class="setting-item">
+            <span class="setting-item-label">{{ $t('autoStartMihomo') }}</span>
+            <input
+              v-model="behaviorDraft.autoStartMihomo"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior('mihomo')"
+            />
+          </label>
+          <label class="setting-item">
+            <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
+            <input
+              v-model="behaviorDraft.backendDebugLog"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior()"
+            />
+          </label>
+          <label class="setting-item flex-col !items-stretch py-3">
+            <span class="setting-item-label">{{ $t('trayAPIURL') }}</span>
+            <input
+              v-model="behaviorDraft.trayAPIURL"
+              class="input input-sm w-full"
+              type="url"
+              :placeholder="$t('trayAPIURLPlaceholder')"
+              :disabled="isSavingBehavior"
+              @input="touchDraft('behavior')"
+              @change="saveBehavior()"
+            />
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+          {{ $t('appUpdate') }}
+        </div>
+        <div class="settings-grid">
+          <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-2">
+              <span class="setting-item-label">{{ $t('desktopApp') }}</span>
+              <span class="badge badge-sm badge-ghost">
+                {{ appVersionLabel }}
+              </span>
+              <span
+                v-if="appUpdateInfo.latestVersion"
+                class="badge badge-sm"
+                :class="appUpdateInfo.updateAvailable ? 'badge-warning' : 'badge-ghost'"
+              >
+                {{ appUpdateInfo.latestVersion }}
+              </span>
+              <button
+                class="btn btn-circle btn-ghost btn-xs"
+                type="button"
+                :aria-label="$t('checkUpdate')"
+                :title="$t('checkUpdate')"
+                :disabled="isCheckingAppUpdate || isUpdatingApp"
+                @click="checkAppUpdate()"
+              >
+                <span
+                  v-if="isCheckingAppUpdate"
+                  class="loading loading-spinner h-3.5 w-3.5"
+                ></span>
+                <ArrowPathIcon
+                  v-else
+                  class="h-3.5 w-3.5"
+                />
+              </button>
+            </div>
             <button
-              class="btn btn-circle btn-ghost btn-xs"
-              type="button"
-              :aria-label="$t('checkUpdate')"
-              :title="$t('checkUpdate')"
-              :disabled="isChecking || isDownloading || isSaving || !urlInput.trim()"
-              @click="checkUpdate()"
+              class="btn btn-sm max-sm:self-stretch"
+              :class="{ 'btn-primary': appUpdateInfo.updateAvailable }"
+              :disabled="isUpdatingApp || isCheckingAppUpdate || !appUpdateInfo.updateAvailable"
+              @click="installAppUpdate()"
             >
               <span
-                v-if="isChecking"
-                class="loading loading-spinner h-3.5 w-3.5"
+                v-if="isUpdatingApp"
+                class="loading loading-spinner h-4 w-4"
               ></span>
-              <ArrowPathIcon
+              <ArrowDownCircleIcon
                 v-else
-                class="h-3.5 w-3.5"
+                class="h-4 w-4"
               />
+              {{ $t('updateApp') }}
             </button>
           </div>
-          <button
-            class="btn btn-sm max-sm:self-stretch"
-            :class="{ 'btn-primary': !config.installed }"
-            :disabled="isCoreMaintenanceBusy"
-            @click="maintainCore"
-          >
-            <span
-              v-if="isCoreMaintenanceBusy"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowDownCircleIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ config.installed ? $t('updateCore') : $t('installCore') }}
-          </button>
         </div>
-      </div>
-    </section>
-
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('coreConfig') }}
-      </div>
-      <div class="settings-grid">
-        <div class="setting-item grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2 py-3">
-          <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
-          <input
-            v-model="configURLInput"
-            class="input input-sm w-full min-w-0"
-            type="url"
-            :aria-label="$t('coreConfigURL')"
-            :placeholder="$t('coreConfigURLPlaceholder')"
-            :disabled="isDownloadingConfig || isImportingConfig"
-            @input="touchDraft('configURL')"
-          />
-        </div>
-
-        <div
-          class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
-        >
-          <span class="setting-item-label">{{ $t('coreConfigSaveTo') }}</span>
-          <input
-            v-model="configFileNameInput"
-            class="input input-sm w-full min-w-0 font-mono"
-            type="text"
-            :aria-label="$t('coreConfigSaveTo')"
-            :placeholder="defaultConfigFileName"
-            :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
-            @input="touchDraft('configFileName')"
-            @change="saveConfigFileName()"
-            @keydown.enter.prevent="saveConfigFileName()"
-          />
-          <button
-            class="btn btn-sm"
-            type="button"
-            :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
-            @click="downloadConfig"
-          >
-            <span
-              v-if="isDownloadingConfig"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowDownTrayIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('downloadConfig') }}
-          </button>
-          <button
-            class="btn btn-sm"
-            type="button"
-            :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
-            @click="openConfigFilePicker"
-          >
-            <span
-              v-if="isImportingConfig"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowUpTrayIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('coreImportConfig') }}
-          </button>
-          <input
-            ref="configFileInput"
-            class="hidden"
-            type="file"
-            :accept="configFileAccept"
-            @change="importConfig"
-          />
-        </div>
-      </div>
-    </section>
-
-    <DialogWrapper
-      v-model="advancedOpen"
-      :title="$t('coreAdvanced')"
-    >
-      <div class="settings-grid">
-        <div class="setting-item">
-          <span class="setting-item-label">{{ $t('coreChannel') }}</span>
-          <div
-            :class="{
-              'pointer-events-none opacity-60':
-                isSavingChannel || isSaving || isChecking || isDownloading,
-            }"
-          >
-            <SegmentedControl
-              :model-value="currentChannel"
-              :options="channelOptions"
-              @update:model-value="saveChannel"
-            />
-          </div>
-        </div>
-
-        <label class="setting-item max-sm:flex-col max-sm:items-stretch! max-sm:py-3">
-          <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
-          <select
-            v-model="selectedSourceURL"
-            class="select select-sm min-w-44 max-sm:w-full"
-            :aria-label="$t('coreDownloadSource')"
-            :disabled="isSaving || isValidatingURL || isDownloading"
-            @change="selectDownloadSource"
-          >
-            <option
-              v-for="source in sourceOptions"
-              :key="source.url"
-              :value="sourceURL(source)"
-            >
-              {{ source.label }}
-            </option>
-          </select>
-        </label>
-
-        <label class="setting-item flex-col !items-stretch py-3">
-          <span class="setting-item-label">{{ $t('coreDownloadURL') }}</span>
-          <input
-            v-model="urlInput"
-            class="input input-sm w-full"
-            type="url"
-            :placeholder="$t('coreDownloadURLPlaceholder')"
-            :disabled="isSaving || isValidatingURL || isDownloading"
-            @input="touchDraft('url')"
-            @change="saveURL()"
-            @keydown.enter.prevent="validateAndAddURL"
-          />
-        </label>
-      </div>
-    </DialogWrapper>
-
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('coreBehavior') }}
-      </div>
-      <div class="settings-grid">
-        <label class="setting-item">
-          <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
-          <input
-            v-model="behaviorDraft.runAsAdmin"
-            class="toggle"
-            type="checkbox"
-            :disabled="isSavingBehavior"
-            @change="saveBehavior()"
-          />
-        </label>
-        <label class="setting-item">
-          <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
-          <input
-            v-model="behaviorDraft.autoStart"
-            class="toggle"
-            type="checkbox"
-            :disabled="isSavingBehavior"
-            @change="saveBehavior()"
-          />
-        </label>
-        <label class="setting-item">
-          <span class="setting-item-label">{{ $t('autoStartSingBox') }}</span>
-          <input
-            v-model="behaviorDraft.autoStartSingBox"
-            class="toggle"
-            type="checkbox"
-            :disabled="isSavingBehavior"
-            @change="saveBehavior('sing-box')"
-          />
-        </label>
-        <label class="setting-item">
-          <span class="setting-item-label">{{ $t('autoStartMihomo') }}</span>
-          <input
-            v-model="behaviorDraft.autoStartMihomo"
-            class="toggle"
-            type="checkbox"
-            :disabled="isSavingBehavior"
-            @change="saveBehavior('mihomo')"
-          />
-        </label>
-        <label class="setting-item">
-          <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
-          <input
-            v-model="behaviorDraft.backendDebugLog"
-            class="toggle"
-            type="checkbox"
-            :disabled="isSavingBehavior"
-            @change="saveBehavior()"
-          />
-        </label>
-        <label class="setting-item flex-col !items-stretch py-3">
-          <span class="setting-item-label">{{ $t('trayAPIURL') }}</span>
-          <input
-            v-model="behaviorDraft.trayAPIURL"
-            class="input input-sm w-full"
-            type="url"
-            :placeholder="$t('trayAPIURLPlaceholder')"
-            :disabled="isSavingBehavior"
-            @input="touchDraft('behavior')"
-            @change="saveBehavior()"
-          />
-        </label>
-      </div>
-    </section>
-
-    <section>
-      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
-        {{ $t('appUpdate') }}
-      </div>
-      <div class="settings-grid">
-        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="setting-item-label">{{ $t('desktopApp') }}</span>
-            <span class="badge badge-sm badge-ghost">
-              {{ appVersionLabel }}
-            </span>
-            <span
-              v-if="appUpdateInfo.latestVersion"
-              class="badge badge-sm"
-              :class="appUpdateInfo.updateAvailable ? 'badge-warning' : 'badge-ghost'"
-            >
-              {{ appUpdateInfo.latestVersion }}
-            </span>
-            <button
-              class="btn btn-circle btn-ghost btn-xs"
-              type="button"
-              :aria-label="$t('checkUpdate')"
-              :title="$t('checkUpdate')"
-              :disabled="isCheckingAppUpdate || isUpdatingApp"
-              @click="checkAppUpdate()"
-            >
-              <span
-                v-if="isCheckingAppUpdate"
-                class="loading loading-spinner h-3.5 w-3.5"
-              ></span>
-              <ArrowPathIcon
-                v-else
-                class="h-3.5 w-3.5"
-              />
-            </button>
-          </div>
-          <button
-            class="btn btn-sm max-sm:self-stretch"
-            :class="{ 'btn-primary': appUpdateInfo.updateAvailable }"
-            :disabled="isUpdatingApp || isCheckingAppUpdate || !appUpdateInfo.updateAvailable"
-            @click="installAppUpdate()"
-          >
-            <span
-              v-if="isUpdatingApp"
-              class="loading loading-spinner h-4 w-4"
-            ></span>
-            <ArrowDownCircleIcon
-              v-else
-              class="h-4 w-4"
-            />
-            {{ $t('updateApp') }}
-          </button>
-        </div>
-      </div>
-    </section>
+      </section>
+    </template>
   </div>
 </template>
 
@@ -430,6 +434,7 @@ import { useI18n } from 'vue-i18n'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 type CoreType = 'sing-box' | 'mihomo'
+type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 type CoreChannel = 'stable' | 'test'
 type DraftKey = 'url' | 'runArgs' | 'configURL' | 'configFileName' | 'behavior'
 
@@ -480,9 +485,15 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
   ],
 }
 
-const props = defineProps<{
-  coreType: CoreType
-}>()
+const props = withDefaults(
+  defineProps<{
+    coreType: CoreType
+    activeTab?: CoreTab
+  }>(),
+  {
+    activeTab: 'sing-box',
+  },
+)
 
 const emit = defineEmits<{
   (event: 'update:coreType', value: CoreType): void
