@@ -749,6 +749,12 @@ const zh = {
   settingsVisibility: '设置项显示控制',
   settingsMenuCore: '核心',
   settingsPageTwoColumns: '双列布局',
+  appUpdate: '应用更新',
+  desktopApp: '桌面端',
+  updateApp: '更新应用',
+  appUpToDate: '当前已是最新版本',
+  appUpdating: '正在下载并应用更新...',
+  appUpdateSuccess: '更新已完成，正在重启应用...',
 }
 
 export default zh

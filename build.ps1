@@ -138,7 +138,8 @@ try {
     }
 
     Write-Host "Building Go application..."
-    Invoke-NativeCommand "go" @("build", "-tags", "production", "-trimpath", "-buildvcs=false", "-ldflags=-w -s -H windowsgui", "-o", $exePath, ".")
+    $ldflags = "-w -s -H windowsgui -X main.appVersion=$Version"
+    Invoke-NativeCommand "go" @("build", "-tags", "production", "-trimpath", "-buildvcs=false", "-ldflags=$ldflags", "-o", $exePath, ".")
     if (-not (Test-Path -LiteralPath $exePath)) {
         throw "Go build did not produce: $exePath"
     }

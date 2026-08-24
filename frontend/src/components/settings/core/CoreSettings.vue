@@ -352,12 +352,68 @@
         </label>
       </div>
     </section>
+
+    <section>
+      <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+        {{ $t('appUpdate') }}
+      </div>
+      <div class="settings-grid">
+        <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <span class="setting-item-label">{{ $t('desktopApp') }}</span>
+            <span class="badge badge-sm badge-ghost">
+              {{ appVersionLabel }}
+            </span>
+            <span
+              v-if="appUpdateInfo.latestVersion"
+              class="badge badge-sm"
+              :class="appUpdateInfo.updateAvailable ? 'badge-warning' : 'badge-ghost'"
+            >
+              {{ appUpdateInfo.latestVersion }}
+            </span>
+            <button
+              class="btn btn-circle btn-ghost btn-xs"
+              type="button"
+              :aria-label="$t('checkUpdate')"
+              :title="$t('checkUpdate')"
+              :disabled="isCheckingAppUpdate || isUpdatingApp"
+              @click="checkAppUpdate()"
+            >
+              <span
+                v-if="isCheckingAppUpdate"
+                class="loading loading-spinner h-3.5 w-3.5"
+              ></span>
+              <ArrowPathIcon
+                v-else
+                class="h-3.5 w-3.5"
+              />
+            </button>
+          </div>
+          <button
+            class="btn btn-sm max-sm:self-stretch"
+            :class="{ 'btn-primary': appUpdateInfo.updateAvailable }"
+            :disabled="isUpdatingApp || isCheckingAppUpdate || !appUpdateInfo.updateAvailable"
+            @click="installAppUpdate()"
+          >
+            <span
+              v-if="isUpdatingApp"
+              class="loading loading-spinner h-4 w-4"
+            ></span>
+            <ArrowDownCircleIcon
+              v-else
+              class="h-4 w-4"
+            />
+            {{ $t('updateApp') }}
+          </button>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
-import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
+import type { AppUpdateInfo, CoreConfig } from '../../../../bindings/zashdesktop/models'
 import DialogWrapper from '@/components/common/DialogWrapper.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
@@ -528,6 +584,19 @@ const isSavingConfigFileName = ref(false)
 const isImportingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
+const isCheckingAppUpdate = ref(false)
+const isUpdatingApp = ref(false)
+const appVersion = ref(__APP_VERSION__)
+const appUpdateInfo = reactive<AppUpdateInfo>({
+  currentVersion: __APP_VERSION__,
+  latestVersion: '',
+  updateAvailable: false,
+  releaseURL: '',
+  releaseNotes: '',
+  publishedAt: '',
+  downloadURL: '',
+  assetSize: 0,
+})
 const isConfigMutationPending = computed(
   () =>
     isSaving.value ||
@@ -542,7 +611,8 @@ const isConfigMutationPending = computed(
     isDownloadingConfig.value ||
     isSavingConfigFileName.value ||
     isImportingConfig.value ||
-    isSavingBehavior.value,
+    isSavingBehavior.value ||
+    isUpdatingApp.value,
 )
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 const installedVersionLabel = computed(() => {
@@ -1038,8 +1108,61 @@ const maintainCore = async () => {
   await downloadCore()
 }
 
+const appVersionLabel = computed(() => {
+  const v = appVersion.value || __APP_VERSION__
+  return v ? (v.startsWith('v') ? v : `v${v}`) : 'v0.0.0'
+})
+
+const checkAppUpdate = async (notify = true) => {
+  if (isCheckingAppUpdate.value || isUpdatingApp.value) return
+  isCheckingAppUpdate.value = true
+  try {
+    const info = await CoreService.CheckAppUpdate()
+    Object.assign(appUpdateInfo, info)
+    if (info.currentVersion) {
+      appVersion.value = info.currentVersion
+    }
+    if (notify) {
+      if (info.updateAvailable) {
+        showNotification({ content: 'coreUpdateAvailable', type: 'alert-info' })
+      } else {
+        showNotification({ content: 'appUpToDate', type: 'alert-success' })
+      }
+    }
+  } catch (error) {
+    if (notify) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
+  } finally {
+    isCheckingAppUpdate.value = false
+  }
+}
+
+const installAppUpdate = async () => {
+  if (isUpdatingApp.value || isCheckingAppUpdate.value) return
+  isUpdatingApp.value = true
+  try {
+    showNotification({ content: 'appUpdating', type: 'alert-info' })
+    await CoreService.InstallAppUpdate()
+    showNotification({ content: 'appUpdateSuccess', type: 'alert-success' })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    isUpdatingApp.value = false
+  }
+}
+
 onMounted(() => {
   loadDownloadSources()
+  void (async () => {
+    try {
+      const v = await CoreService.GetAppVersion()
+      if (v) appVersion.value = v
+      const info = await CoreService.GetAppUpdateInfo()
+      if (info) Object.assign(appUpdateInfo, info)
+    } catch {
+      // ignore
+    }
+  })()
   void (async () => {
     if (await loadConfig(true, true)) {
       await nextTick()

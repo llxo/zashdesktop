@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function CheckAppUpdate(): $CancellablePromise<$models.AppUpdateInfo> {
+    return $Call.ByID(957133460);
+}
+
 export function CheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2721282167, currentVersion, rawCoreType);
 }
@@ -21,6 +25,14 @@ export function DownloadCore(currentVersion: string, rawCoreType: string): $Canc
     return $Call.ByID(2731700857, currentVersion, rawCoreType);
 }
 
+export function GetAppUpdateInfo(): $CancellablePromise<$models.AppUpdateInfo> {
+    return $Call.ByID(1378356932);
+}
+
+export function GetAppVersion(): $CancellablePromise<string> {
+    return $Call.ByID(3044026275);
+}
+
 export function GetConfig(): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2439653156);
 }
@@ -31,6 +43,10 @@ export function GetConfigForType(rawCoreType: string): $CancellablePromise<$mode
 
 export function ImportConfig(rawContent: string, sourceFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(579250609, rawContent, sourceFileName, rawCoreType);
+}
+
+export function InstallAppUpdate(): $CancellablePromise<void> {
+    return $Call.ByID(1482439629);
 }
 
 export function RestartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {

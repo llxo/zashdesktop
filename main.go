@@ -16,7 +16,10 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+var appVersion = "0.0.0"
+
 func main() {
+	cleanOldUpdateFiles()
 	launch := parseLaunchConfig(os.Args[1:])
 	windowState, windowStatePath := loadWindowState()
 	controller := &App{
@@ -48,6 +51,7 @@ func main() {
 		},
 	})
 	controller.app = app
+	controller.coreService.app = app
 
 	if !launch.NoTray {
 		controller.setupTray()
@@ -237,3 +241,29 @@ func secondaryPath(path string) string {
 	}
 	return path
 }
+
+func cleanOldUpdateFiles() {
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(executable)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".old") || (strings.HasPrefix(name, ".") && strings.Contains(name, "-update-") && strings.HasSuffix(name, ".tmp")) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+}
+

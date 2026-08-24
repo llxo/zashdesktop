@@ -7,5 +7,6 @@ export {
 };
 
 export type {
+    AppUpdateInfo,
     CoreConfig
 } from "./models.js";

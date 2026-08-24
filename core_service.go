@@ -124,21 +124,30 @@ type CoreService struct {
 	keepCoreOnShutdown bool
 	onStateChange      func()
 
-	cachedProfiles     *persistedCoreProfiles
-	configModTime      time.Time
-	versionCache       map[string]coreVersionCacheItem
+	app             *application.App
+	appUpdateMu     sync.Mutex
+	cachedAppUpdate AppUpdateInfo
+	isUpdatingApp   bool
+
+	cachedProfiles *persistedCoreProfiles
+	configModTime  time.Time
+	versionCache   map[string]coreVersionCacheItem
 }
 
 type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
+	TagName     string        `json:"tag_name"`
+	HTMLURL     string        `json:"html_url"`
+	Body        string        `json:"body"`
+	PublishedAt string        `json:"published_at"`
+	Prerelease  bool          `json:"prerelease"`
+	Assets      []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Digest             string `json:"digest"`
+	Size               int64  `json:"size"`
 }
 
 func NewCoreService() (*CoreService, error) {
