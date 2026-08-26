@@ -1258,6 +1258,7 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+      await loadConfig(false, true)
     }
   } finally {
     isSavingBehavior.value = false

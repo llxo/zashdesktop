@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -57,6 +58,10 @@ func writeRunAsAdminSetting(applicationPath string, enabled bool) error {
 		return errors.New("application path is empty")
 	}
 
+	if current, err := readRunAsAdminSetting(applicationPath); err == nil && current == enabled {
+		return nil
+	}
+
 	if enabled {
 		key, _, err := registry.CreateKey(registry.CURRENT_USER, behaviorLayersKey, registry.SET_VALUE)
 		if err != nil {
@@ -96,10 +101,22 @@ func readAutoStartSetting() (bool, error) {
 	return true, nil
 }
 
+func encodeUTF16LEWithBOM(s string) []byte {
+	runes := utf16.Encode([]rune(s))
+	bytes := make([]byte, 2+len(runes)*2)
+	bytes[0] = 0xFF
+	bytes[1] = 0xFE
+	for i, r := range runes {
+		bytes[2+i*2] = byte(r)
+		bytes[3+i*2] = byte(r >> 8)
+	}
+	return bytes
+}
+
 func autoStartTaskXML(applicationPath string) []byte {
 	escapedTaskName := xmlEscape(autoStartTaskName)
 	escapedAppPath := xmlEscape(applicationPath)
-	configuration := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	configuration := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>%[1]s at startup</Description>
@@ -143,7 +160,7 @@ func autoStartTaskXML(applicationPath string) []byte {
     </Exec>
   </Actions>
 </Task>`, escapedTaskName, autoStartDelay, escapedAppPath)
-	return []byte(configuration)
+	return encodeUTF16LEWithBOM(configuration)
 }
 
 func xmlEscape(s string) string {
@@ -205,6 +222,14 @@ func runAutoStartCommand(args []string) error {
 func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	if strings.TrimSpace(applicationPath) == "" {
 		return errors.New("application path is empty")
+	}
+
+	current, err := readAutoStartSetting()
+	if err == nil && current == enabled {
+		return nil
+	}
+	if !enabled && !current {
+		return nil
 	}
 
 	var args []string
