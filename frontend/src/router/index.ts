@@ -13,7 +13,7 @@ import OverviewPage from '@/views/OverviewPage.vue'
 import ProxiesPage from '@/views/ProxiesPage.vue'
 import RulesPage from '@/views/RulesPage.vue'
 import SettingsPage from '@/views/SettingsPage.vue'
-import SetupPage from '@/views/SetupPage.vue'
+// import SetupPage from '@/views/SetupPage.vue'
 import { useTitle } from '@vueuse/core'
 import { watch } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
@@ -78,8 +78,7 @@ const router = createRouter({
     },
     {
       path: '/setup',
-      name: ROUTE_NAME.setup,
-      component: SetupPage,
+      redirect: ROUTE_NAME.proxies,
     },
     {
       path: '/:catchAll(.*)',
@@ -101,11 +100,6 @@ const setTitleByName = (name: string | symbol | undefined) => {
 
 router.beforeEach((to, from) => {
   resolvePageTransition(to, from)
-
-  if (!activeBackend.value && to.name !== ROUTE_NAME.setup) {
-    router.push({ name: ROUTE_NAME.setup })
-    return
-  }
 
   // Block navigation to a page the active backend's channels can't serve.
   const requiredCap = typeof to.name === 'string' ? ROUTE_CAPABILITY[to.name] : undefined

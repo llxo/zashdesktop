@@ -4,7 +4,6 @@
 import './assembly/session'
 import { computed, onMounted, ref, type Ref, watch } from 'vue'
 import { RouterView } from 'vue-router'
-import BackendConnectionError from './components/common/BackendConnectionError.vue'
 import BackendSwitchToast from './components/common/BackendSwitchToast.vue'
 import BackendManager from './components/settings/backend/BackendManager.vue'
 import UpdateConfigModal from './components/settings/backend/UpdateConfigModal.vue'
@@ -24,7 +23,7 @@ import { backgroundImage } from './helper/indexeddb'
 import { initNotification } from './helper/notification'
 import { getBackendFromUrl, isPreferredDark } from './helper/utils'
 import { disablePullToRefresh, emoji, font, theme } from './store/settings'
-import { backendList, setActiveBackend } from './store/setup'
+import { addBackend, backendList, setActiveBackend } from './store/setup'
 import type { Backend } from './types'
 
 const app = ref<HTMLElement>()
@@ -170,6 +169,7 @@ const autoSwitchToURLBackendIfExists = () => {
         return
       }
     }
+    addBackend(backend)
   }
 }
 
@@ -208,7 +208,6 @@ useKeyboard()
   >
     <RouterView />
     <BackendSwitchToast />
-    <BackendConnectionError />
     <BackendManager />
     <!-- 后端维护动作的弹窗:侧边栏菜单和设置页都会拉起,挂在这里两处入口才都有效。 -->
     <UpgradeCoreModal v-model="showUpgradeCoreModal" />

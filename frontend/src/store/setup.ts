@@ -50,7 +50,31 @@ if (backendList.value.some((item) => !item.type || 'singboxChannel' in item)) {
   backendList.value = migrateBackendList(backendList.value as LegacyBackend[])
 }
 
+if (backendList.value.length === 0) {
+  const defaultUuid = uuid()
+  backendList.value = [
+    {
+      uuid: defaultUuid,
+      type: 'clash',
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: '9090',
+      secondaryPath: '',
+      password: '',
+      label: 'Default',
+    },
+  ]
+}
+
 export const activeUuid = useStorage<string>('setup/active-uuid', '')
+
+if (
+  backendList.value.length > 0 &&
+  (!activeUuid.value || !backendList.value.some((b) => b.uuid === activeUuid.value))
+) {
+  activeUuid.value = backendList.value[0].uuid
+}
+
 export const activeBackend = computed(() =>
   backendList.value.find((backend) => backend.uuid === activeUuid.value),
 )
