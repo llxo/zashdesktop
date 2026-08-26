@@ -14,6 +14,8 @@ import type { Connection } from '@/types'
 import * as ipaddr from 'ipaddr.js'
 import { computed } from 'vue'
 
+const PROXY_GROUP_TYPES = new Set<string>(Object.values(PROXY_TYPE))
+
 export const isProxyGroup = (name: string) => {
   const proxyNode = proxyMap.value[name]
 
@@ -25,19 +27,7 @@ export const isProxyGroup = (name: string) => {
     return true
   }
 
-  return [
-    PROXY_TYPE.Dns,
-    PROXY_TYPE.Compatible,
-    PROXY_TYPE.Direct,
-    PROXY_TYPE.Reject,
-    PROXY_TYPE.RejectDrop,
-    PROXY_TYPE.Pass,
-    PROXY_TYPE.Fallback,
-    PROXY_TYPE.URLTest,
-    PROXY_TYPE.LoadBalance,
-    PROXY_TYPE.Selector,
-    PROXY_TYPE.Smart,
-  ].includes(proxyNode.type.toLowerCase() as PROXY_TYPE)
+  return PROXY_GROUP_TYPES.has(proxyNode.type.toLowerCase())
 }
 
 // 以下 getConnectionXxx 均委托给 assembly 层「按当前后端动态选用」的访问器,
@@ -129,7 +119,7 @@ export const renderRoutes = computed(() => {
     [ROUTE_NAME.tools]: can('tools'),
   }
   return Object.values(ROUTE_NAME).filter((r) => {
-    if (r === ROUTE_NAME.setup || r === ROUTE_NAME.coreEntry) return false
+    if (r === ROUTE_NAME.setup) return false
     if (!splitOverviewPage.value && r === ROUTE_NAME.overview) return false
     if (r in routeCapable && routeCapable[r] === false) return false
     return true

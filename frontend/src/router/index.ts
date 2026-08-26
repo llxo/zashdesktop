@@ -82,11 +82,6 @@ const router = createRouter({
       component: SetupPage,
     },
     {
-      path: '/core-entry',
-      name: ROUTE_NAME.coreEntry,
-      component: CorePage,
-    },
-    {
       path: '/:catchAll(.*)',
       redirect: ROUTE_NAME.proxies,
     },
@@ -107,7 +102,7 @@ const setTitleByName = (name: string | symbol | undefined) => {
 router.beforeEach((to, from) => {
   resolvePageTransition(to, from)
 
-  if (!activeBackend.value && to.name !== ROUTE_NAME.setup && to.name !== ROUTE_NAME.coreEntry) {
+  if (!activeBackend.value && to.name !== ROUTE_NAME.setup) {
     router.push({ name: ROUTE_NAME.setup })
     return
   }

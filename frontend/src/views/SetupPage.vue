@@ -36,14 +36,6 @@
         {{ isSubmitting ? $t('backendConnecting') : $t('submit') }}
       </button>
 
-      <button
-        class="btn btn-sm w-full"
-        @click="router.push({ name: ROUTE_NAME.coreEntry })"
-      >
-        <CpuChipIcon class="h-4 w-4" />
-        {{ $t('coreSettings') }}
-      </button>
-
       <!-- 已经存过后端却落到这里(当前后端被删、或存档里的 uuid 失效),
            给一条回到管理面板的路,而不是逼他把地址重填一遍。 -->
       <button
@@ -79,7 +71,6 @@ import { getBackendFromUrl, getBackendProbeUrl } from '@/helper/utils'
 import router from '@/router'
 import { addBackend, backendList, openBackendManager } from '@/store/setup'
 import type { Backend, BackendType } from '@/types'
-import { CpuChipIcon } from '@heroicons/vue/24/outline'
 import { computed, ref, watch } from 'vue'
 
 const form = ref<Omit<Backend, 'uuid'>>({
@@ -97,20 +88,6 @@ const reachability = useBackendReachability(form)
 
 const isSubmitting = ref(false)
 const canSubmit = computed(() => reachability.status.value === 'online' && !isSubmitting.value)
-
-const isManualSetupRoute = () => router.currentRoute.value.query.setupMode === 'manual'
-const isEditBackendRoute = () => typeof router.currentRoute.value.query.editBackend === 'string'
-
-watch(
-  () => router.currentRoute.value.query.editBackend,
-  (backendUuid) => {
-    if (backendUuid && typeof backendUuid === 'string') {
-      openBackendManager({ mode: 'edit', uuid: backendUuid })
-      router.replace({ query: {} })
-    }
-  },
-  { immediate: true },
-)
 
 type SetupForm = Omit<Backend, 'uuid'>
 
@@ -167,7 +144,7 @@ const handleSubmit = async (setupForm: SetupForm, quiet = false) => {
   }
 }
 
-const backend = isManualSetupRoute() || isEditBackendRoute() ? null : getBackendFromUrl()
+const backend = getBackendFromUrl()
 
 if (backend) {
   handleSubmit(backend)
