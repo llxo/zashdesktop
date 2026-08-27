@@ -78,6 +78,7 @@ type CoreConfig struct {
 	ConfigPath        string `json:"configPath"`
 	ConfigAvailable   bool   `json:"configAvailable"`
 	RunAsAdmin        bool   `json:"runAsAdmin"`
+	IsAdmin           bool   `json:"isAdmin"`
 	AutoStart         bool   `json:"autoStart"`
 	AutoStartSingBox  bool   `json:"autoStartSingBox"`
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
@@ -1503,6 +1504,11 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.LogPath = s.logFilePath(config.CoreType)
 	config.ConfigPath = s.configFilePath(*config)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
+	if isAdmin, err := isPrivileged(); err == nil {
+		config.IsAdmin = isAdmin
+	} else {
+		config.IsAdmin = false
+	}
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
@@ -1820,6 +1826,7 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 	}
 	for _, profile := range document.Profiles {
 		delete(profile, "runAsAdmin")
+		delete(profile, "isAdmin")
 		delete(profile, "autoStart")
 		delete(profile, "autoStartSingBox")
 		delete(profile, "autoStartMihomo")

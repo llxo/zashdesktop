@@ -396,7 +396,7 @@
               v-model="behaviorDraft.autoStart"
               class="toggle"
               type="checkbox"
-              :disabled="isSavingBehavior"
+              :disabled="isSavingBehavior || !config.isAdmin"
               @change="saveBehavior()"
             />
           </label>
@@ -621,6 +621,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   configPath: '',
   configAvailable: false,
   runAsAdmin: false,
+  isAdmin: false,
   autoStart: false,
   autoStartSingBox: false,
   autoStartMihomo: false,

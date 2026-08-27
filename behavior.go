@@ -200,22 +200,7 @@ func isPrivileged() (bool, error) {
 }
 
 func runAutoStartCommand(args []string) error {
-	privileged, err := isPrivileged()
-	if err != nil {
-		return err
-	}
-
-	var command *exec.Cmd
-	if privileged {
-		command = exec.Command("SchTasks", args...)
-	} else {
-		quotedArgs := make([]string, len(args))
-		for index, arg := range args {
-			quotedArgs[index] = `"` + strings.ReplaceAll(arg, `"`, `""`) + `"`
-		}
-		powershellCommand := `Start-Process -FilePath "SchTasks" -ArgumentList ` + strings.Join(quotedArgs, ",") + ` -Verb RunAs -WindowStyle Hidden -Wait`
-		command = exec.Command("powershell", "-NoProfile", "-Command", powershellCommand)
-	}
+	command := exec.Command("SchTasks", args...)
 	configureCoreCommand(command)
 	return command.Run()
 }
@@ -231,6 +216,11 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	}
 	if !enabled && !current {
 		return nil
+	}
+
+	privileged, err := isPrivileged()
+	if err != nil || !privileged {
+		return errors.New("需要管理员权限才能配置自启动任务")
 	}
 
 	var args []string

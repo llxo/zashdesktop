@@ -33,6 +33,7 @@ export interface CoreConfig {
     "configPath": string;
     "configAvailable": boolean;
     "runAsAdmin": boolean;
+    "isAdmin": boolean;
     "autoStart": boolean;
     "autoStartSingBox": boolean;
     "autoStartMihomo": boolean;
