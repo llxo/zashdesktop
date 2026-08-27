@@ -1235,6 +1235,12 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	s.processCoreType = coreType
 	go s.waitForCore(command, logFile, done)
 
+	go func(appPath string) {
+		if err := ensureProgramDataShortcut(appPath); err != nil {
+			coreDebugf("ensure start menu shortcut failed: %v", err)
+		}
+	}(s.applicationPath)
+
 	s.applyRuntimeState(&config)
 	s.notifyStateChangeLocked()
 	return config, nil

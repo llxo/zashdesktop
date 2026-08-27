@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode/utf16"
 	"unsafe"
@@ -267,3 +268,50 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	}
 	return nil
 }
+
+func ensureProgramDataShortcut(applicationPath string) error {
+	if strings.TrimSpace(applicationPath) == "" {
+		return errors.New("application path is empty")
+	}
+
+	privileged, err := isPrivileged()
+	if err != nil || !privileged {
+		return nil
+	}
+
+	programData := os.Getenv("ProgramData")
+	if programData == "" {
+		programData = `C:\ProgramData`
+	}
+	startMenuDir := filepath.Join(programData, `Microsoft\Windows\Start Menu\Programs`)
+	if err := os.MkdirAll(startMenuDir, 0o755); err != nil {
+		return fmt.Errorf("create start menu directory: %w", err)
+	}
+
+	shortcutBase := strings.TrimSuffix(filepath.Base(applicationPath), filepath.Ext(applicationPath))
+	if shortcutBase == "" {
+		shortcutBase = "zashdesktop"
+	}
+	shortcutPath := filepath.Join(startMenuDir, shortcutBase+".lnk")
+
+	// 若快捷方式已存在则跳过，避免重复拉起 PowerShell 进程
+	if _, err := os.Stat(shortcutPath); err == nil {
+		return nil
+	}
+
+	workDir := filepath.Dir(applicationPath)
+
+	psScript := fmt.Sprintf(
+		`$wsh = New-Object -ComObject WScript.Shell; $s = $wsh.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.WorkingDirectory = '%s'; $s.IconLocation = '%s,0'; $s.Description = '%s'; $s.Save()`,
+		strings.ReplaceAll(shortcutPath, `'`, `''`),
+		strings.ReplaceAll(applicationPath, `'`, `''`),
+		strings.ReplaceAll(workDir, `'`, `''`),
+		strings.ReplaceAll(applicationPath, `'`, `''`),
+		strings.ReplaceAll(shortcutBase, `'`, `''`),
+	)
+
+	command := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	configureCoreCommand(command)
+	return command.Run()
+}
+
