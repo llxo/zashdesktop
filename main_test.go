@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLaunchURL(t *testing.T) {
 	tests := []struct {
@@ -59,3 +62,53 @@ func TestSecondaryPath(t *testing.T) {
 		}
 	}
 }
+
+func TestMarshalPersistedCoreProfiles(t *testing.T) {
+	profiles := persistedCoreProfiles{
+		ActiveCore: "sing-box",
+		Behavior: sharedBehaviorConfig{
+			RunAsAdmin: true,
+			AutoStart:  false,
+		},
+		Profiles: map[string]CoreConfig{
+			"sing-box": {
+				CoreType:        "sing-box",
+				Version:         "1.11.0",
+				Running:         true,
+				PID:             1234,
+				LogPath:         "C:\\path\\core.log",
+				ConfigPath:      "C:\\path\\config.json",
+				ConfigAvailable: true,
+				CorePath:        "C:\\path\\sing-box.exe",
+				RunAsAdmin:      true,
+				AutoStart:       false,
+			},
+		},
+	}
+
+	data, err := marshalPersistedCoreProfiles(profiles)
+	if err != nil {
+		t.Fatalf("marshalPersistedCoreProfiles failed: %v", err)
+	}
+
+	jsonStr := string(data)
+	forbiddenKeys := []string{
+		`"running"`,
+		`"pid"`,
+		`"logPath"`,
+		`"configPath"`,
+		`"configAvailable"`,
+		`"corePath"`,
+		`"configuredVersion"`,
+		`"updateAvailable"`,
+		`"installedVersion"`,
+		`"installed"`,
+	}
+
+	for _, key := range forbiddenKeys {
+		if strings.Contains(jsonStr, key) {
+			t.Errorf("persisted JSON should not contain runtime key %s, got: %s", key, jsonStr)
+		}
+	}
+}
+

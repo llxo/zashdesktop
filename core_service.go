@@ -1511,6 +1511,13 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	if config.Running && s.process != nil && s.processCoreType == config.CoreType {
 		config.PID = s.process.Process.Pid
 	}
+	if config.LatestVersion != "" && config.Version != "" {
+		config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(config.Version)) > 0
+	} else if config.LatestVersion != "" && config.Version == "" {
+		config.UpdateAvailable = true
+	} else {
+		config.UpdateAvailable = false
+	}
 	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
 		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
 		s.stateLogged = true
@@ -1739,10 +1746,6 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
 	config.CorePath = s.corePathFor(config.CoreType)
-	config.Running = false
-	config.PID = 0
-	config.LogPath = ""
-	config.ConfigPath = ""
 	if activate {
 		profiles.ActiveCore = config.CoreType
 	}
@@ -1757,10 +1760,6 @@ func (s *CoreService) saveBehaviorLocked(config CoreConfig, behavior sharedBehav
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
 	config.CorePath = s.corePathFor(config.CoreType)
-	config.Running = false
-	config.PID = 0
-	config.LogPath = ""
-	config.ConfigPath = ""
 	profiles.Behavior = behavior
 	profiles.Profiles[config.CoreType] = config
 	return s.writeProfilesLocked(profiles)
@@ -1803,6 +1802,16 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 		delete(profile, "autoStartSingBox")
 		delete(profile, "autoStartMihomo")
 		delete(profile, "backendDebugLog")
+		delete(profile, "running")
+		delete(profile, "pid")
+		delete(profile, "logPath")
+		delete(profile, "configPath")
+		delete(profile, "configAvailable")
+		delete(profile, "corePath")
+		delete(profile, "configuredVersion")
+		delete(profile, "updateAvailable")
+		delete(profile, "installedVersion")
+		delete(profile, "installed")
 	}
 	return json.MarshalIndent(document, "", "  ")
 }
