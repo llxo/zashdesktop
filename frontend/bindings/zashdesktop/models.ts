@@ -37,5 +37,6 @@ export interface CoreConfig {
     "autoStartSingBox": boolean;
     "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
+    "stopCoreOnExit": boolean;
     "trayAPIURL": string;
 }

@@ -153,13 +153,6 @@ func (a *App) quit() {
 	a.app.Quit()
 }
 
-func (a *App) quitWithoutStoppingCore() {
-	if a.coreService != nil {
-		a.coreService.keepCoreRunningOnShutdown()
-	}
-	a.quit()
-}
-
 func (a *App) clearFrontendCache() {
 	if !a.clearCacheMu.TryLock() {
 		return

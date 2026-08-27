@@ -82,15 +82,24 @@ type CoreConfig struct {
 	AutoStartSingBox  bool   `json:"autoStartSingBox"`
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
+	StopCoreOnExit    bool   `json:"stopCoreOnExit"`
 	TrayAPIURL        string `json:"trayAPIURL"`
 }
 
 type sharedBehaviorConfig struct {
-	RunAsAdmin       bool `json:"runAsAdmin"`
-	AutoStart        bool `json:"autoStart"`
-	AutoStartSingBox bool `json:"autoStartSingBox"`
-	AutoStartMihomo  bool `json:"autoStartMihomo"`
-	BackendDebugLog  bool `json:"backendDebugLog"`
+	RunAsAdmin       bool  `json:"runAsAdmin"`
+	AutoStart        bool  `json:"autoStart"`
+	AutoStartSingBox bool  `json:"autoStartSingBox"`
+	AutoStartMihomo  bool  `json:"autoStartMihomo"`
+	BackendDebugLog  bool  `json:"backendDebugLog"`
+	StopCoreOnExit   *bool `json:"stopCoreOnExit,omitempty"`
+}
+
+func (b sharedBehaviorConfig) shouldStopCoreOnExit() bool {
+	if b.StopCoreOnExit != nil {
+		return *b.StopCoreOnExit
+	}
+	return true
 }
 
 type persistedCoreProfiles struct {
@@ -264,7 +273,13 @@ func (s *CoreService) ServiceShutdown() error {
 	s.shuttingDown = true
 	cancelStartup := s.startupCancel
 	startupDone := s.startupDone
-	keepCore := s.keepCoreOnShutdown
+	stopCoreOnExit := true
+	if s.cachedProfiles != nil {
+		stopCoreOnExit = s.cachedProfiles.Behavior.shouldStopCoreOnExit()
+	} else if profiles, err := s.loadProfilesLocked(); err == nil {
+		stopCoreOnExit = profiles.Behavior.shouldStopCoreOnExit()
+	}
+	keepCore := !stopCoreOnExit || s.keepCoreOnShutdown
 	s.mu.Unlock()
 	if cancelStartup != nil {
 		cancelStartup()
@@ -279,7 +294,7 @@ func (s *CoreService) ServiceShutdown() error {
 	}
 	s.mu.Unlock()
 	if keepCore {
-		coreDebugf("service shutdown: keeping managed core running")
+		coreDebugf("service shutdown: keeping managed core running (stopCoreOnExit=%t, keepCoreOnShutdown=%t)", stopCoreOnExit, s.keepCoreOnShutdown)
 		_ = configureCoreDebugLog("", false)
 		return nil
 	}
@@ -384,6 +399,7 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	config.RunAsAdmin = existing.RunAsAdmin
 	config.AutoStart = existing.AutoStart
 	config.BackendDebugLog = existing.BackendDebugLog
+	config.StopCoreOnExit = existing.StopCoreOnExit
 	config.TrayAPIURL = existing.TrayAPIURL
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1087,7 +1103,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -1114,6 +1130,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		AutoStartSingBox: autoStartSingBox,
 		AutoStartMihomo:  autoStartMihomo,
 		BackendDebugLog:  backendDebugLog,
+		StopCoreOnExit:   &stopCoreOnExit,
 	}
 	if behavior.AutoStartSingBox && behavior.AutoStartMihomo {
 		if coreType == coreTypeMihomo {
@@ -1677,8 +1694,12 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
+		stopCoreOnExit := true
 		profiles := persistedCoreProfiles{
 			ActiveCore: coreTypeSingBox,
+			Behavior: sharedBehaviorConfig{
+				StopCoreOnExit: &stopCoreOnExit,
+			},
 			Profiles:   make(map[string]CoreConfig),
 		}
 		s.cachedProfiles = &profiles
@@ -1729,6 +1750,7 @@ func applySharedBehavior(config *CoreConfig, behavior sharedBehaviorConfig) {
 	config.AutoStartSingBox = behavior.AutoStartSingBox
 	config.AutoStartMihomo = behavior.AutoStartMihomo
 	config.BackendDebugLog = behavior.BackendDebugLog
+	config.StopCoreOnExit = behavior.shouldStopCoreOnExit()
 }
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {
@@ -1802,6 +1824,7 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 		delete(profile, "autoStartSingBox")
 		delete(profile, "autoStartMihomo")
 		delete(profile, "backendDebugLog")
+		delete(profile, "stopCoreOnExit")
 		delete(profile, "running")
 		delete(profile, "pid")
 		delete(profile, "logPath")

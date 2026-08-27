@@ -737,6 +737,7 @@ const zh = {
   coreAutoStart: '自启动(需要管理员)',
   autoStartSingBox: '程序启动时开启 sing-box',
   autoStartMihomo: '程序启动时开启 mihomo',
+  stopCoreOnExit: '退出程序时关闭核心',
   backendDebugLog: '后端调试日志',
   trayAPIURL: '托盘使用 API',
   trayAPIURLPlaceholder: 'http://127.0.0.1:9090',

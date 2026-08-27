@@ -421,6 +421,16 @@
             />
           </label>
           <label class="setting-item">
+            <span class="setting-item-label">{{ $t('stopCoreOnExit') }}</span>
+            <input
+              v-model="behaviorDraft.stopCoreOnExit"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="saveBehavior()"
+            />
+          </label>
+          <label class="setting-item">
             <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
             <input
               v-model="behaviorDraft.backendDebugLog"
@@ -615,6 +625,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   autoStartSingBox: false,
   autoStartMihomo: false,
   backendDebugLog: false,
+  stopCoreOnExit: true,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
@@ -625,6 +636,7 @@ const behaviorDraft = reactive({
   autoStartSingBox: false,
   autoStartMihomo: false,
   backendDebugLog: false,
+  stopCoreOnExit: true,
   trayAPIURL: 'http://127.0.0.1:9090',
 })
 const coreType = computed(() => props.coreType)
@@ -852,6 +864,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
       behaviorDraft.autoStart !== next.autoStart ||
       behaviorDraft.autoStartSingBox !== next.autoStartSingBox ||
       behaviorDraft.autoStartMihomo !== next.autoStartMihomo ||
+      behaviorDraft.stopCoreOnExit !== next.stopCoreOnExit ||
       behaviorDraft.backendDebugLog !== next.backendDebugLog ||
       behaviorDraft.trayAPIURL !== next.trayAPIURL
     ) {
@@ -860,6 +873,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
         autoStart: next.autoStart,
         autoStartSingBox: next.autoStartSingBox,
         autoStartMihomo: next.autoStartMihomo,
+        stopCoreOnExit: next.stopCoreOnExit,
         backendDebugLog: next.backendDebugLog,
         trayAPIURL: next.trayAPIURL,
       })
@@ -1247,6 +1261,7 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
       behaviorDraft.autoStart,
       behaviorDraft.autoStartSingBox,
       behaviorDraft.autoStartMihomo,
+      behaviorDraft.stopCoreOnExit,
       behaviorDraft.backendDebugLog,
       behaviorDraft.trayAPIURL,
       coreType.value,
