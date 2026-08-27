@@ -33,6 +33,10 @@ export function DownloadCore(currentVersion: string, rawCoreType: string): $Canc
     return $Call.ByID(2731700857, currentVersion, rawCoreType);
 }
 
+export function ForceCheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(1671274230, currentVersion, rawCoreType);
+}
+
 export function GetAppUpdateInfo(): $CancellablePromise<$models.AppUpdateInfo> {
     return $Call.ByID(1378356932);
 }

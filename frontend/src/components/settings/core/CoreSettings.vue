@@ -120,7 +120,7 @@
                 :aria-label="$t('checkUpdate')"
                 :title="$t('checkUpdate')"
                 :disabled="isChecking || isDownloading || isSaving || !urlInput.trim()"
-                @click="checkUpdate()"
+                @click="checkUpdate(true, true)"
               >
                 <span
                   v-if="isChecking"
@@ -1309,13 +1309,15 @@ const saveURL = async (notify = true, refreshRemote = true) => {
   }
 }
 
-const checkUpdate = async (notifyError = true) => {
+const checkUpdate = async (notifyError = true, force = false) => {
   if (isChecking.value || !urlInput.value.trim()) return null
   const sequence = ++checkSequence
   isChecking.value = true
   const request = beginConfigRequest()
   try {
-    const next = await CoreService.CheckUpdate('', request.coreType)
+    const next = force
+      ? await CoreService.ForceCheckUpdate('', request.coreType)
+      : await CoreService.CheckUpdate('', request.coreType)
     return applyCurrentConfig(request, next) ? next : null
   } catch (error) {
     if (notifyError && isCurrentConfigRequest(request)) {

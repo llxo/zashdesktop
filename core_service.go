@@ -37,6 +37,7 @@ const (
 	defaultMihomoConfigFile = "config.yaml"
 	defaultCoreRunArgs      = "run -c config.json -D ."
 	defaultMihomoRunArgs    = "-d . -f config.yaml"
+	remoteReleaseCacheTTL   = 30 * time.Minute
 )
 
 var (
@@ -116,6 +117,11 @@ type coreVersionCacheItem struct {
 	detail  string
 }
 
+type remoteReleaseCacheItem struct {
+	version   string
+	fetchedAt time.Time
+}
+
 type CoreService struct {
 	executableDir      string
 	applicationPath    string
@@ -144,9 +150,11 @@ type CoreService struct {
 
 	lastDeletedFiles map[string]deletedConfigFile
 
-	cachedProfiles *persistedCoreProfiles
-	configModTime  time.Time
-	versionCache   map[string]coreVersionCacheItem
+	cachedProfiles     *persistedCoreProfiles
+	configModTime      time.Time
+	versionCache       map[string]coreVersionCacheItem
+	remoteReleaseMu    sync.Mutex
+	remoteReleaseCache map[string]remoteReleaseCacheItem
 }
 
 type deletedConfigFile struct {
@@ -177,10 +185,11 @@ func NewCoreService() (*CoreService, error) {
 		return nil, fmt.Errorf("locate executable: %w", err)
 	}
 	return &CoreService{
-		executableDir:    filepath.Dir(executable),
-		applicationPath:  executable,
-		lastDeletedFiles: make(map[string]deletedConfigFile),
-		versionCache:     make(map[string]coreVersionCacheItem),
+		executableDir:      filepath.Dir(executable),
+		applicationPath:    executable,
+		lastDeletedFiles:   make(map[string]deletedConfigFile),
+		versionCache:       make(map[string]coreVersionCacheItem),
+		remoteReleaseCache: make(map[string]remoteReleaseCacheItem),
 	}, nil
 }
 
@@ -410,6 +419,9 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
+	if owner, repository, repoErr := githubRepository(config.URLTemplate); repoErr == nil {
+		s.clearCachedLatestRelease(owner, repository, config.Channel)
+	}
 	s.applyRuntimeState(&config)
 	return config, nil
 }
@@ -437,6 +449,9 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
+	}
+	if owner, repository, repoErr := githubRepository(config.URLTemplate); repoErr == nil {
+		s.clearCachedLatestRelease(owner, repository, channel)
 	}
 	s.applyRuntimeState(&config)
 	return config, nil
@@ -740,7 +755,52 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 	return config, nil
 }
 
+func (s *CoreService) getCachedLatestRelease(owner, repository, channel string) (string, bool) {
+	s.remoteReleaseMu.Lock()
+	defer s.remoteReleaseMu.Unlock()
+	if s.remoteReleaseCache == nil {
+		return "", false
+	}
+	key := fmt.Sprintf("%s/%s:%s", strings.ToLower(owner), strings.ToLower(repository), strings.ToLower(channel))
+	item, ok := s.remoteReleaseCache[key]
+	if !ok || time.Since(item.fetchedAt) >= remoteReleaseCacheTTL {
+		return "", false
+	}
+	return item.version, true
+}
+
+func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version string) {
+	s.remoteReleaseMu.Lock()
+	defer s.remoteReleaseMu.Unlock()
+	if s.remoteReleaseCache == nil {
+		s.remoteReleaseCache = make(map[string]remoteReleaseCacheItem)
+	}
+	key := fmt.Sprintf("%s/%s:%s", strings.ToLower(owner), strings.ToLower(repository), strings.ToLower(channel))
+	s.remoteReleaseCache[key] = remoteReleaseCacheItem{
+		version:   version,
+		fetchedAt: time.Now(),
+	}
+}
+
+func (s *CoreService) clearCachedLatestRelease(owner, repository, channel string) {
+	s.remoteReleaseMu.Lock()
+	defer s.remoteReleaseMu.Unlock()
+	if s.remoteReleaseCache == nil {
+		return
+	}
+	key := fmt.Sprintf("%s/%s:%s", strings.ToLower(owner), strings.ToLower(repository), strings.ToLower(channel))
+	delete(s.remoteReleaseCache, key)
+}
+
 func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfig, error) {
+	return s.checkUpdateInternal(currentVersion, rawCoreType, false)
+}
+
+func (s *CoreService) ForceCheckUpdate(currentVersion, rawCoreType string) (CoreConfig, error) {
+	return s.checkUpdateInternal(currentVersion, rawCoreType, true)
+}
+
+func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, force bool) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -763,10 +823,21 @@ func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfi
 		config.UpdateAvailable = config.Version == "" || compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(config.Version)) > 0
 		return s.saveCheckedConfig(config, generation)
 	}
-	latest, err := findLatestRelease(owner, repository, config.Channel)
-	if err != nil {
-		return CoreConfig{}, err
+
+	var latest string
+	if !force {
+		if cached, ok := s.getCachedLatestRelease(owner, repository, config.Channel); ok {
+			latest = cached
+		}
 	}
+	if latest == "" {
+		latest, err = findLatestRelease(owner, repository, config.Channel)
+		if err != nil {
+			return CoreConfig{}, err
+		}
+		s.setCachedLatestRelease(owner, repository, config.Channel, latest)
+	}
+
 	config.LatestVersion = latest
 	if config.Version == "" {
 		config.UpdateAvailable = true
@@ -2065,8 +2136,11 @@ func githubRepository(template string) (string, string, error) {
 func findLatestRelease(owner, repository, channel string) (string, error) {
 	client := newCoreHTTPClient(30 * time.Second)
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
-	if channel == coreChannelTest {
-		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100", url.PathEscape(owner), url.PathEscape(repository))
+	isMihomoPrerelease := strings.EqualFold(owner, "MetaCubeX") && strings.EqualFold(repository, "mihomo") && channel == coreChannelTest
+	if isMihomoPrerelease {
+		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), mihomoPrereleaseTag)
+	} else if channel == coreChannelTest {
+		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=3", url.PathEscape(owner), url.PathEscape(repository))
 	}
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -2081,6 +2155,17 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return "", fmt.Errorf("check core update: GitHub returned %s", response.Status)
+	}
+	if isMihomoPrerelease {
+		var release githubRelease
+		if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
+			return "", fmt.Errorf("parse GitHub release: %w", err)
+		}
+		version := releaseVersion(release)
+		if version == "" {
+			return "", errors.New("Mihomo prerelease has no valid alpha build version")
+		}
+		return version, nil
 	}
 	if channel == coreChannelTest {
 		var releases []githubRelease
