@@ -577,10 +577,21 @@ const builtInDownloadSources: Record<CoreType, DownloadSource[]> = {
   ],
   mihomo: [
     {
-      label: 'MetaCubeX/mihomo',
-      url: 'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-v{version}.zip',
+      label: 'MetaCubeX/mihomo (官方)',
+      url: 'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-compatible-v{version}.zip',
       channelURLs: {
-        test: 'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-{version}.zip',
+        stable:
+          'https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-compatible-v{version}.zip',
+        test: 'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-compatible-{version}.zip',
+      },
+    },
+    {
+      label: 'vernesong/mihomo (Smart)',
+      url: 'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-v2-go120-{version}.zip',
+      channelURLs: {
+        stable:
+          'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-v2-go120-{version}.zip',
+        test: 'https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-v2-go120-{version}.zip',
       },
     },
   ],
@@ -781,21 +792,54 @@ const sourceLabel = (rawURL: string) => {
   }
 }
 
+const isBuiltInOrLegacySource = (url: string) => {
+  const normalized = url.trim().toLowerCase()
+  if (!normalized) return true
+  for (const source of builtInDownloadSources[coreType.value]) {
+    if (source.url.toLowerCase() === normalized) return true
+    for (const channelURL of Object.values(source.channelURLs ?? {})) {
+      if (channelURL.toLowerCase() === normalized) return true
+    }
+  }
+  if (coreType.value === 'mihomo') {
+    if (normalized.includes('metacubex/mihomo') || normalized.includes('vernesong/mihomo')) {
+      return true
+    }
+  }
+  return false
+}
+
+const findMatchingDownloadSource = (url: string) => {
+  if (!url) return undefined
+  const normalized = url.trim().toLowerCase()
+  for (const source of sourceOptions.value) {
+    if (sourceURL(source).toLowerCase() === normalized || source.url.toLowerCase() === normalized) {
+      return source
+    }
+    for (const channelURL of Object.values(source.channelURLs ?? {})) {
+      if (channelURL.toLowerCase() === normalized) return source
+    }
+  }
+  if (coreType.value === 'mihomo') {
+    if (normalized.includes('vernesong')) {
+      return builtInDownloadSources.mihomo.find((s) => s.label.includes('Smart'))
+    }
+    if (normalized.includes('metacubex')) {
+      return builtInDownloadSources.mihomo.find((s) => s.label.includes('官方'))
+    }
+  }
+  return undefined
+}
+
 const loadDownloadSources = () => {
   customDownloadSources.value = []
   try {
     const stored = JSON.parse(localStorage.getItem(sourceStorageKey.value) || '[]')
     if (!Array.isArray(stored)) return
-    const builtInURLs = new Set(
-      builtInDownloadSources[coreType.value].flatMap((source) => [
-        source.url,
-        ...Object.values(source.channelURLs ?? {}),
-      ]),
-    )
     customDownloadSources.value = stored
       .filter((url): url is string => typeof url === 'string' && url.trim() !== '')
       .map((url) => url.trim())
-      .filter((url, index, urls) => !builtInURLs.has(url) && urls.indexOf(url) === index)
+      .filter((url, index, urls) => !isBuiltInOrLegacySource(url) && urls.indexOf(url) === index)
       .map((url) => ({ label: sourceLabel(url), url }))
   } catch {
     customDownloadSources.value = []
@@ -815,7 +859,7 @@ const persistDownloadSources = () => {
 
 const rememberDownloadSource = (rawURL: string) => {
   const normalizedURL = rawURL.trim()
-  if (!normalizedURL || sourceOptions.value.some((source) => source.url === normalizedURL)) return
+  if (!normalizedURL || isBuiltInOrLegacySource(normalizedURL) || sourceOptions.value.some((source) => source.url === normalizedURL)) return
   customDownloadSources.value.push({ label: sourceLabel(normalizedURL), url: normalizedURL })
   persistDownloadSources()
 }
@@ -831,11 +875,8 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
       urlInput.value = next.urlTemplate
     }
     resetDraft('url')
-    const matchURL = sourceOptions.value.some(
-      (source) => sourceURL(source) === next.urlTemplate,
-    )
-      ? next.urlTemplate
-      : ''
+    const matchSource = findMatchingDownloadSource(next.urlTemplate)
+    const matchURL = matchSource ? sourceURL(matchSource) : ''
     if (selectedSourceURL.value !== matchURL) {
       selectedSourceURL.value = matchURL
     }
@@ -1014,20 +1055,14 @@ const saveChannel = async (rawChannel: string) => {
   try {
     let next = await CoreService.SaveChannel(rawChannel, coreType.value)
     if (!isCurrentConfigRequest(request)) return
-    const selectedBuiltInSource = builtInDownloadSources[coreType.value].some(
-      (source) =>
-        source.url === next.urlTemplate ||
-        Object.values(source.channelURLs ?? {}).includes(next.urlTemplate),
-    )
-    const channelSource = builtInDownloadSources[coreType.value].find(
-      (source) => sourceURL(source, rawChannel) !== '',
-    )
-    if (
-      coreType.value === 'mihomo' &&
-      channelSource &&
-      (selectedBuiltInSource || !next.urlTemplate)
-    ) {
-      next = await CoreService.SaveURL(sourceURL(channelSource, rawChannel), coreType.value)
+    const currentSource =
+      findMatchingDownloadSource(config.urlTemplate) ||
+      builtInDownloadSources[coreType.value][0]
+    if (currentSource) {
+      const newURL = sourceURL(currentSource, rawChannel as CoreChannel)
+      if (newURL && newURL !== next.urlTemplate) {
+        next = await CoreService.SaveURL(newURL, coreType.value)
+      }
     }
     if (applyCurrentConfig(request, next)) {
       await checkUpdate()

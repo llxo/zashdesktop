@@ -122,6 +122,7 @@ type CoreService struct {
 
 	cachedProfiles     *persistedCoreProfiles
 	configModTime      time.Time
+	versionCacheMu     sync.RWMutex
 	versionCache       map[string]coreVersionCacheItem
 	remoteReleaseMu    sync.Mutex
 	remoteReleaseCache map[string]remoteReleaseCacheItem
@@ -885,13 +886,7 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	if config.Running && s.process != nil && s.processCoreType == config.CoreType {
 		config.PID = s.process.Process.Pid
 	}
-	if config.LatestVersion != "" && config.Version != "" {
-		config.UpdateAvailable = compareCoreVersions(mustParseCoreVersion(config.LatestVersion), mustParseCoreVersion(config.Version)) > 0
-	} else if config.LatestVersion != "" && config.Version == "" {
-		config.UpdateAvailable = true
-	} else {
-		config.UpdateAvailable = false
-	}
+	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
 	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
 		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
 		s.stateLogged = true
