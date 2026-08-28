@@ -58,10 +58,14 @@ func buildGitHubCandidateURLs(rawURL string) []string {
 	return urls
 }
 
+var sharedCoreTransport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = systemProxy
+	return t
+}()
+
 func newCoreHTTPClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = systemProxy
-	return &http.Client{Timeout: timeout, Transport: transport}
+	return &http.Client{Timeout: timeout, Transport: sharedCoreTransport}
 }
 
 // -----------------------------------------------------------------------------

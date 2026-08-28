@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -151,22 +152,27 @@ func NewCoreService() (*CoreService, error) {
 
 var coreDebugLogState struct {
 	sync.Mutex
-	enabled bool
+	enabled atomic.Bool
 	file    *os.File
 	logger  *log.Logger
 }
 
 func debugLogf(module, format string, args ...any) {
-	coreDebugLogState.Lock()
-	defer coreDebugLogState.Unlock()
-	if coreDebugLogState.enabled && coreDebugLogState.logger != nil {
-		msg := fmt.Sprintf(format, args...)
-		if module != "" {
-			coreDebugLogState.logger.Printf("zashdesktop: [%s] %s", module, msg)
-		} else {
-			coreDebugLogState.logger.Printf("zashdesktop: %s", msg)
-		}
+	if !coreDebugLogState.enabled.Load() {
+		return
 	}
+	msg := fmt.Sprintf(format, args...)
+	var line string
+	if module != "" {
+		line = fmt.Sprintf("zashdesktop: [%s] %s", module, msg)
+	} else {
+		line = fmt.Sprintf("zashdesktop: %s", msg)
+	}
+	coreDebugLogState.Lock()
+	if coreDebugLogState.logger != nil {
+		_ = coreDebugLogState.logger.Output(2, line)
+	}
+	coreDebugLogState.Unlock()
 }
 
 func coreDebugf(format string, args ...any) {
@@ -181,12 +187,12 @@ func configureCoreDebugLog(path string, enabled bool) error {
 		if coreDebugLogState.file != nil {
 			_ = coreDebugLogState.file.Close()
 		}
-		coreDebugLogState.enabled = false
+		coreDebugLogState.enabled.Store(false)
 		coreDebugLogState.file = nil
 		coreDebugLogState.logger = nil
 		return nil
 	}
-	if coreDebugLogState.enabled && coreDebugLogState.file != nil {
+	if coreDebugLogState.enabled.Load() && coreDebugLogState.file != nil {
 		return nil
 	}
 
@@ -196,7 +202,7 @@ func configureCoreDebugLog(path string, enabled bool) error {
 	}
 	coreDebugLogState.file = file
 	coreDebugLogState.logger = log.New(file, "", log.LstdFlags)
-	coreDebugLogState.enabled = true
+	coreDebugLogState.enabled.Store(true)
 	return nil
 }
 
@@ -901,12 +907,8 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.PID = 0
 	config.LogPath = s.logFilePath(config.CoreType)
 	config.ConfigPath = s.configFilePath(*config)
-	config.ConfigAvailable = fileExists(config.ConfigPath)
-	if isAdmin, err := isPrivileged(); err == nil {
-		config.IsAdmin = isAdmin
-	} else {
-		config.IsAdmin = false
-	}
+	config.ConfigAvailable = fileExistsCached(config.ConfigPath)
+	config.IsAdmin = isPrivilegedCached()
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
@@ -1078,7 +1080,7 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	applySharedBehavior(&config, profiles.Behavior)
 	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType)
-	config.Installed = fileExists(config.CorePath)
+	config.Installed = fileExistsCached(config.CorePath)
 	s.applyCurrentVersion(&config, "")
 	return config, nil
 }
@@ -1208,39 +1210,44 @@ func (s *CoreService) writeProfilesLocked(profiles persistedCoreProfiles) error 
 	return nil
 }
 
+type persistedProfileClean struct {
+	CoreType       string `json:"coreType,omitempty"`
+	URLTemplate    string `json:"urlTemplate,omitempty"`
+	Version        string `json:"version,omitempty"`
+	VersionDetail  string `json:"versionDetail,omitempty"`
+	Channel        string `json:"channel,omitempty"`
+	LatestVersion  string `json:"latestVersion,omitempty"`
+	RunArgs        string `json:"runArgs,omitempty"`
+	ConfigURL      string `json:"configURL,omitempty"`
+	ConfigFileName string `json:"configFileName,omitempty"`
+	TrayAPIURL     string `json:"trayAPIURL,omitempty"`
+}
+
 func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error) {
-	data, err := json.Marshal(profiles)
-	if err != nil {
-		return nil, err
+	clean := struct {
+		ActiveCore string                             `json:"activeCore"`
+		Behavior   sharedBehaviorConfig               `json:"behavior"`
+		Profiles   map[string]persistedProfileClean   `json:"profiles"`
+	}{
+		ActiveCore: profiles.ActiveCore,
+		Behavior:   profiles.Behavior,
+		Profiles:   make(map[string]persistedProfileClean, len(profiles.Profiles)),
 	}
-	var document struct {
-		ActiveCore string                                `json:"activeCore"`
-		Behavior   sharedBehaviorConfig                  `json:"behavior"`
-		Profiles   map[string]map[string]json.RawMessage `json:"profiles"`
+	for key, p := range profiles.Profiles {
+		clean.Profiles[key] = persistedProfileClean{
+			CoreType:       p.CoreType,
+			URLTemplate:    p.URLTemplate,
+			Version:        p.Version,
+			VersionDetail:  p.VersionDetail,
+			Channel:        p.Channel,
+			LatestVersion:  p.LatestVersion,
+			RunArgs:        p.RunArgs,
+			ConfigURL:      p.ConfigURL,
+			ConfigFileName: p.ConfigFileName,
+			TrayAPIURL:     p.TrayAPIURL,
+		}
 	}
-	if err := json.Unmarshal(data, &document); err != nil {
-		return nil, err
-	}
-	for _, profile := range document.Profiles {
-		delete(profile, "runAsAdmin")
-		delete(profile, "isAdmin")
-		delete(profile, "autoStart")
-		delete(profile, "autoStartSingBox")
-		delete(profile, "autoStartMihomo")
-		delete(profile, "backendDebugLog")
-		delete(profile, "stopCoreOnExit")
-		delete(profile, "running")
-		delete(profile, "pid")
-		delete(profile, "logPath")
-		delete(profile, "configPath")
-		delete(profile, "configAvailable")
-		delete(profile, "corePath")
-		delete(profile, "configuredVersion")
-		delete(profile, "updateAvailable")
-		delete(profile, "installedVersion")
-		delete(profile, "installed")
-	}
-	return json.MarshalIndent(document, "", "  ")
+	return json.MarshalIndent(clean, "", "  ")
 }
 
 func normalizeCoreType(raw string) (string, error) {
@@ -1362,6 +1369,53 @@ func parseCoreCommandLine(input string) ([]string, error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+const fileExistsCacheTTL = 5 * time.Second
+
+type fileExistsCacheEntry struct {
+	exists    bool
+	checkedAt time.Time
+}
+
+var fileExistsCacheState struct {
+	sync.Mutex
+	entries map[string]fileExistsCacheEntry
+}
+
+func fileExistsCached(path string) bool {
+	fileExistsCacheState.Lock()
+	if fileExistsCacheState.entries != nil {
+		if entry, ok := fileExistsCacheState.entries[path]; ok && time.Since(entry.checkedAt) < fileExistsCacheTTL {
+			fileExistsCacheState.Unlock()
+			return entry.exists
+		}
+	}
+	fileExistsCacheState.Unlock()
+
+	exists := fileExists(path)
+
+	fileExistsCacheState.Lock()
+	if fileExistsCacheState.entries == nil {
+		fileExistsCacheState.entries = make(map[string]fileExistsCacheEntry)
+	}
+	fileExistsCacheState.entries[path] = fileExistsCacheEntry{exists: exists, checkedAt: time.Now()}
+	fileExistsCacheState.Unlock()
+	return exists
+}
+
+var privilegedCacheState struct {
+	sync.Once
+	isAdmin bool
+}
+
+func isPrivilegedCached() bool {
+	privilegedCacheState.Once.Do(func() {
+		if admin, err := isPrivileged(); err == nil {
+			privilegedCacheState.isAdmin = admin
+		}
+	})
+	return privilegedCacheState.isAdmin
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {

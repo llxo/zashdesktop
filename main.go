@@ -340,21 +340,23 @@ func cleanExpiredDebugLog() {
 // -----------------------------------------------------------------------------
 
 type App struct {
-	app                  *application.App
-	coreService          *CoreService
-	window               *application.WebviewWindow
-	tray                 *application.SystemTray
-	launch               LaunchConfig
-	windowState          windowState
-	windowStatePath      string
-	saveTimer            *time.Timer
-	saveMu               sync.Mutex
-	trayProxyCancel      context.CancelFunc
-	trayProxyFingerprint string
-	trayProxyRefreshMu   sync.Mutex
-	clearCacheMu         sync.Mutex
-	quitting             bool
-	mu                   sync.Mutex
+	app                      *application.App
+	coreService              *CoreService
+	window                   *application.WebviewWindow
+	tray                     *application.SystemTray
+	launch                   LaunchConfig
+	windowState              windowState
+	windowStatePath          string
+	saveTimer                *time.Timer
+	saveMu                   sync.Mutex
+	trayProxyCancel           context.CancelFunc
+	trayProxyFingerprint      string
+	trayProxyCachedGroups     []trayProxy
+	trayProxyResponseHash     string
+	trayProxyRefreshMu        sync.Mutex
+	clearCacheMu              sync.Mutex
+	quitting                  bool
+	mu                        sync.Mutex
 }
 
 func (a *App) showWindow() {
@@ -396,11 +398,12 @@ func (a *App) createWindowLocked() *application.WebviewWindow {
 func (a *App) scheduleWindowStateSave(*application.WindowEvent) {
 	a.mu.Lock()
 	if a.saveTimer != nil {
-		a.saveTimer.Stop()
+		a.saveTimer.Reset(250 * time.Millisecond)
+	} else {
+		a.saveTimer = time.AfterFunc(250*time.Millisecond, func() {
+			a.saveWindowState()
+		})
 	}
-	a.saveTimer = time.AfterFunc(250*time.Millisecond, func() {
-		a.saveWindowState()
-	})
 	a.mu.Unlock()
 }
 

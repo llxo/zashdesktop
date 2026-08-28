@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,25 +86,21 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 		}
 	}
 
+	coreFingerprint := fmt.Sprintf("%t:%t:%s", coreConfig.Running, coreConfig.Installed, coreConfig.CoreType)
+
 	var groups []trayProxy
+	var responseHash string
 	if coreConfig.Running {
 		var err error
-		groups, err = fetchTrayProxyGroups(ctx, a.trayAPIURL(), a.launch.APISecret)
+		groups, responseHash, err = a.fetchTrayProxyGroupsCached(ctx)
 		if err != nil {
 			debugLogf("tray", "refresh tray proxy groups: %v", err)
 			groups = nil
+			responseHash = ""
 		}
 	}
 
-	state := trayMenuState{
-		CoreRunning:   coreConfig.Running,
-		CoreInstalled: coreConfig.Installed,
-		CoreType:      coreConfig.CoreType,
-		Groups:        groups,
-	}
-
-	fingerprintData, _ := json.Marshal(state)
-	fingerprint := string(fingerprintData)
+	fingerprint := coreFingerprint + "|" + responseHash
 
 	a.mu.Lock()
 	if a.quitting || fingerprint == a.trayProxyFingerprint {
@@ -231,7 +229,36 @@ func (a *App) selectTrayProxy(group, proxy string) {
 	a.refreshTrayProxyGroups(context.Background())
 }
 
-func fetchTrayProxyGroups(ctx context.Context, apiURL, secret string) ([]trayProxy, error) {
+func (a *App) fetchTrayProxyGroupsCached(ctx context.Context) ([]trayProxy, string, error) {
+	body, err := fetchTrayProxyRawBody(ctx, a.trayAPIURL(), a.launch.APISecret)
+	if err != nil {
+		return nil, "", err
+	}
+	h := sha256.Sum256(body)
+	hash := hex.EncodeToString(h[:])
+
+	a.mu.Lock()
+	if hash == a.trayProxyResponseHash && a.trayProxyCachedGroups != nil {
+		cached := a.trayProxyCachedGroups
+		a.mu.Unlock()
+		return cached, hash, nil
+	}
+	a.mu.Unlock()
+
+	groups, err := parseTrayProxyGroups(body)
+	if err != nil {
+		return nil, "", err
+	}
+
+	a.mu.Lock()
+	a.trayProxyResponseHash = hash
+	a.trayProxyCachedGroups = groups
+	a.mu.Unlock()
+
+	return groups, hash, nil
+}
+
+func fetchTrayProxyRawBody(ctx context.Context, apiURL, secret string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(apiURL, "/")+"/proxies", nil)
 	if err != nil {
 		return nil, err
@@ -246,10 +273,12 @@ func fetchTrayProxyGroups(ctx context.Context, apiURL, secret string) ([]trayPro
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Clash API returned %s", response.Status)
 	}
+	return io.ReadAll(io.LimitReader(response.Body, maxTrayProxyResponse))
+}
 
+func parseTrayProxyGroups(data []byte) ([]trayProxy, error) {
 	var payload trayProxyResponse
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxTrayProxyResponse))
-	if err := decoder.Decode(&payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("decode Clash proxies: %w", err)
 	}
 
@@ -291,6 +320,7 @@ func fetchTrayProxyGroups(ctx context.Context, apiURL, secret string) ([]trayPro
 	}
 	return groups, nil
 }
+
 
 func selectClashProxy(ctx context.Context, apiURL, secret, group, proxy string) error {
 	body, err := json.Marshal(map[string]string{"name": proxy})

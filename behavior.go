@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -23,8 +25,12 @@ const (
 )
 
 var (
-	behaviorAdvapi32             = windows.NewLazySystemDLL("advapi32.dll")
-	behaviorCheckTokenMembership = behaviorAdvapi32.NewProc("CheckTokenMembership")
+	behaviorAdvapi32                              = windows.NewLazySystemDLL("advapi32.dll")
+	behaviorCheckTokenMembership                  = behaviorAdvapi32.NewProc("CheckTokenMembership")
+	behaviorWinHTTP                               = windows.NewLazySystemDLL("winhttp.dll")
+	behaviorWinHttpGetIEProxyConfigForCurrentUser = behaviorWinHTTP.NewProc("WinHttpGetIEProxyConfigForCurrentUser")
+	behaviorKernel32                              = windows.NewLazySystemDLL("kernel32.dll")
+	behaviorGlobalFree                            = behaviorKernel32.NewProc("GlobalFree")
 )
 
 func readRunAsAdminSetting(applicationPath string) (bool, error) {
@@ -224,7 +230,7 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	if err == nil && current == enabled {
 		return nil
 	}
-	if !enabled && !current {
+	if !enabled && (err != nil || !current) {
 		return nil
 	}
 
@@ -328,32 +334,85 @@ func ensureProgramDataShortcut(applicationPath string) error {
 }
 
 // -----------------------------------------------------------------------------
-// Windows System Proxy Settings
+// Windows System Proxy Settings (WinHTTP Native API)
 // -----------------------------------------------------------------------------
 
-const internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+type winHTTPCurrentUserIEProxyConfig struct {
+	fAutoDetect       int32
+	lpszAutoConfigURL *uint16
+	lpszProxy         *uint16
+	lpszProxyBypass   *uint16
+}
+
+const proxySettingsCacheTTL = 60 * time.Second
+
+type cachedProxySettings struct {
+	enabled   bool
+	server    string
+	override  string
+	fetchedAt time.Time
+}
+
+var proxySettingsCache struct {
+	sync.Mutex
+	settings cachedProxySettings
+}
+
+func readCachedProxySettings() (enabled bool, server, override string) {
+	proxySettingsCache.Lock()
+	defer proxySettingsCache.Unlock()
+	if !proxySettingsCache.settings.fetchedAt.IsZero() && time.Since(proxySettingsCache.settings.fetchedAt) < proxySettingsCacheTTL {
+		s := proxySettingsCache.settings
+		return s.enabled, s.server, s.override
+	}
+
+	var config winHTTPCurrentUserIEProxyConfig
+	r1, _, err := behaviorWinHttpGetIEProxyConfigForCurrentUser.Call(uintptr(unsafe.Pointer(&config)))
+	if r1 == 0 {
+		debugLogf("system", "WinHttpGetIEProxyConfigForCurrentUser query failed: %v", err)
+		proxySettingsCache.settings = cachedProxySettings{fetchedAt: time.Now()}
+		return false, "", ""
+	}
+	defer func() {
+		if config.lpszAutoConfigURL != nil {
+			_, _, _ = behaviorGlobalFree.Call(uintptr(unsafe.Pointer(config.lpszAutoConfigURL)))
+		}
+		if config.lpszProxy != nil {
+			_, _, _ = behaviorGlobalFree.Call(uintptr(unsafe.Pointer(config.lpszProxy)))
+		}
+		if config.lpszProxyBypass != nil {
+			_, _, _ = behaviorGlobalFree.Call(uintptr(unsafe.Pointer(config.lpszProxyBypass)))
+		}
+	}()
+
+	var serverStr, overrideStr string
+	if config.lpszProxy != nil {
+		serverStr = strings.TrimSpace(windows.UTF16PtrToString(config.lpszProxy))
+	}
+	if config.lpszProxyBypass != nil {
+		overrideStr = strings.TrimSpace(windows.UTF16PtrToString(config.lpszProxyBypass))
+	}
+
+	settings := cachedProxySettings{
+		enabled:   serverStr != "",
+		server:    serverStr,
+		override:  overrideStr,
+		fetchedAt: time.Now(),
+	}
+	proxySettingsCache.settings = settings
+	return settings.enabled, settings.server, settings.override
+}
 
 func systemProxy(request *http.Request) (*url.URL, error) {
-	key, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsKey, registry.QUERY_VALUE)
-	if err != nil {
+	enabled, server, override := readCachedProxySettings()
+	if !enabled || server == "" {
 		return http.ProxyFromEnvironment(request)
 	}
-	defer key.Close()
-
-	enabled, _, err := key.GetIntegerValue("ProxyEnable")
-	if err != nil || enabled == 0 {
-		return http.ProxyFromEnvironment(request)
-	}
-	proxyServer, _, err := key.GetStringValue("ProxyServer")
-	if err != nil || strings.TrimSpace(proxyServer) == "" {
-		return http.ProxyFromEnvironment(request)
-	}
-	override, _, _ := key.GetStringValue("ProxyOverride")
 	if proxyBypassed(request.URL, override) {
 		return nil, nil
 	}
 
-	address := proxyAddressForScheme(proxyServer, request.URL.Scheme)
+	address := proxyAddressForScheme(server, request.URL.Scheme)
 	if address == "" {
 		return http.ProxyFromEnvironment(request)
 	}
@@ -405,5 +464,3 @@ func proxyBypassed(target *url.URL, override string) bool {
 	}
 	return false
 }
-
-
