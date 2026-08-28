@@ -133,13 +133,20 @@ func NewCoreService() (*CoreService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate executable: %w", err)
 	}
-	return &CoreService{
-		executableDir:      filepath.Dir(executable),
+	execDir := filepath.Dir(executable)
+	service := &CoreService{
+		executableDir:      execDir,
 		applicationPath:    executable,
 		lastDeletedFiles:   make(map[string]deletedConfigFile),
 		versionCache:       make(map[string]coreVersionCacheItem),
 		remoteReleaseCache: make(map[string]remoteReleaseCacheItem),
-	}, nil
+	}
+	if profiles, err := service.loadProfilesLocked(); err == nil {
+		if profiles.Behavior.BackendDebugLog {
+			_ = configureCoreDebugLog(service.backendDebugLogPath(), true)
+		}
+	}
+	return service, nil
 }
 
 var coreDebugLogState struct {
@@ -149,12 +156,21 @@ var coreDebugLogState struct {
 	logger  *log.Logger
 }
 
-func coreDebugf(format string, args ...any) {
+func debugLogf(module, format string, args ...any) {
 	coreDebugLogState.Lock()
 	defer coreDebugLogState.Unlock()
 	if coreDebugLogState.enabled && coreDebugLogState.logger != nil {
-		coreDebugLogState.logger.Printf("zashdesktop: core: "+format, args...)
+		msg := fmt.Sprintf(format, args...)
+		if module != "" {
+			coreDebugLogState.logger.Printf("zashdesktop: [%s] %s", module, msg)
+		} else {
+			coreDebugLogState.logger.Printf("zashdesktop: %s", msg)
+		}
 	}
+}
+
+func coreDebugf(format string, args ...any) {
+	debugLogf("core", format, args...)
 }
 
 func configureCoreDebugLog(path string, enabled bool) error {
@@ -328,14 +344,17 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("core", "save URL failed: %v", err)
 		return CoreConfig{}, err
 	}
 	existing, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("core", "save URL failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	config, err := parseCoreURL(rawURL)
 	if err != nil {
+		debugLogf("core", "save URL failed to parse %q: %v", rawURL, err)
 		return CoreConfig{}, err
 	}
 	if config.Channel == "" {
@@ -363,29 +382,35 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
+		debugLogf("core", "save URL failed: config generation mismatch (current=%d, expected=%d)", s.configGeneration, generation)
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
 	if err := s.saveConfigLocked(config); err != nil {
+		debugLogf("core", "save URL failed to write config: %v", err)
 		return CoreConfig{}, err
 	}
 	if owner, repository, repoErr := githubRepository(config.URLTemplate); repoErr == nil {
 		s.clearCachedLatestRelease(owner, repository, config.Channel)
 	}
 	s.applyRuntimeState(&config)
+	debugLogf("core", "save URL success: type=%s urlTemplate=%q", config.CoreType, config.URLTemplate)
 	return config, nil
 }
 
 func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, error) {
 	channel, err := normalizeCoreChannel(rawChannel)
 	if err != nil {
+		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
 	}
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("core", "save channel failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	config.Channel = channel
@@ -394,37 +419,45 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
+		debugLogf("core", "save channel failed: config generation mismatch")
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
 	if err := s.saveConfigLocked(config); err != nil {
+		debugLogf("core", "save channel failed to write config: %v", err)
 		return CoreConfig{}, err
 	}
 	if owner, repository, repoErr := githubRepository(config.URLTemplate); repoErr == nil {
 		s.clearCachedLatestRelease(owner, repository, channel)
 	}
 	s.applyRuntimeState(&config)
+	debugLogf("core", "save channel success: type=%s channel=%s", config.CoreType, config.Channel)
 	return config, nil
 }
 
 func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("core", "save run args failed: %v", err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("core", "save run args failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	config.RunArgs = strings.TrimSpace(rawArgs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
+		debugLogf("core", "save run args failed: config generation mismatch")
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
 	if err := s.saveConfigLocked(config); err != nil {
+		debugLogf("core", "save run args failed to write config: %v", err)
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	debugLogf("core", "save run args success: type=%s runArgs=%q", config.CoreType, config.RunArgs)
 	return config, nil
 }
 
@@ -434,10 +467,12 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("core", "save core type failed: %v", err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("core", "save core type failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	if strings.TrimSpace(config.RunArgs) == "" || isDefaultCoreRunArgs(config.RunArgs) {
@@ -447,33 +482,41 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
+		debugLogf("core", "save core type failed: config generation mismatch")
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
 	if err := s.saveConfigLocked(config); err != nil {
+		debugLogf("core", "save core type failed to write config: %v", err)
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	debugLogf("core", "save core type success: activeCore=%s", config.CoreType)
 	return config, nil
 }
 
 func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("system", "save behavior failed to normalize core type: %v", err)
 		return CoreConfig{}, err
 	}
 	trayAPIURL, err := normalizeTrayAPIURL(rawTrayAPIURL)
 	if err != nil {
+		debugLogf("system", "save behavior invalid tray API URL %q: %v", rawTrayAPIURL, err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("system", "save behavior failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 
 	if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
+		debugLogf("system", "save behavior write RunAsAdmin failed: %v", err)
 		return CoreConfig{}, err
 	}
 	if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
+		debugLogf("system", "save behavior write auto start failed: %v", err)
 		return CoreConfig{}, err
 	}
 
@@ -497,9 +540,11 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
+		debugLogf("system", "save behavior failed: config generation mismatch")
 		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
 	}
 	if err := s.saveBehaviorLocked(config, behavior); err != nil {
+		debugLogf("system", "save behavior failed to write profiles: %v", err)
 		return CoreConfig{}, err
 	}
 	s.trayAPIURL = trayAPIURL
@@ -507,6 +552,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t debugLog=%t trayURL=%s", runAsAdmin, autoStart, backendDebugLog, trayAPIURL)
 	return config, nil
 }
 
@@ -1067,6 +1113,7 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 
 	var profiles persistedCoreProfiles
 	if err := json.Unmarshal(data, &profiles); err != nil {
+		debugLogf("core", "parse profiles.json failed: %v", err)
 		if s.cachedProfiles != nil {
 			return *s.cachedProfiles, nil
 		}
@@ -1116,6 +1163,7 @@ func (s *CoreService) saveConfigAndActivateLocked(config CoreConfig) error {
 func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate bool) error {
 	profiles, err := s.loadProfilesLocked()
 	if err != nil {
+		debugLogf("core", "save config failed to load profiles: %v", err)
 		return err
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
@@ -1130,6 +1178,7 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 func (s *CoreService) saveBehaviorLocked(config CoreConfig, behavior sharedBehaviorConfig) error {
 	profiles, err := s.loadProfilesLocked()
 	if err != nil {
+		debugLogf("core", "save behavior failed to load profiles: %v", err)
 		return err
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
@@ -1142,11 +1191,13 @@ func (s *CoreService) saveBehaviorLocked(config CoreConfig, behavior sharedBehav
 func (s *CoreService) writeProfilesLocked(profiles persistedCoreProfiles) error {
 	data, err := marshalPersistedCoreProfiles(profiles)
 	if err != nil {
+		debugLogf("core", "marshal profiles failed: %v", err)
 		return err
 	}
 	data = append(data, '\n')
 	configPath := s.configPath()
 	if err := writeFileAtomically(configPath, data, 0o600); err != nil {
+		debugLogf("core", "write profiles atomically to %q failed: %v", configPath, err)
 		return err
 	}
 	if stat, err := os.Stat(configPath); err == nil {

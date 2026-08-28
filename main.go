@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
@@ -25,6 +26,7 @@ var appVersion = "0.0.0"
 
 func main() {
 	cleanOldUpdateFiles()
+	cleanExpiredDebugLog()
 	launch := parseLaunchConfig(os.Args[1:])
 	windowState, windowStatePath := loadWindowState()
 	coreService, err := NewCoreService()
@@ -142,17 +144,20 @@ func saveWindowState(path string, state windowState) error {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		debugLogf("app", "create window state directory %q failed: %v", filepath.Dir(path), err)
 		return err
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
+		debugLogf("app", "marshal window state failed: %v", err)
 		return err
 	}
 	data = append(data, '\n')
 
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".window-*.json")
 	if err != nil {
+		debugLogf("app", "create temp window state file failed: %v", err)
 		return err
 	}
 	temporaryPath := temporary.Name()
@@ -160,17 +165,24 @@ func saveWindowState(path string, state windowState) error {
 
 	if err := temporary.Chmod(0o600); err != nil {
 		temporary.Close()
+		debugLogf("app", "chmod temp window state file failed: %v", err)
 		return err
 	}
 	if _, err := temporary.Write(data); err != nil {
 		temporary.Close()
+		debugLogf("app", "write temp window state file failed: %v", err)
 		return err
 	}
 	if err := temporary.Close(); err != nil {
+		debugLogf("app", "close temp window state file failed: %v", err)
 		return err
 	}
 
-	return os.Rename(temporaryPath, path)
+	if err := os.Rename(temporaryPath, path); err != nil {
+		debugLogf("app", "rename temp window state file to %q failed: %v", path, err)
+		return err
+	}
+	return nil
 }
 
 type LaunchConfig struct {
@@ -261,15 +273,18 @@ func secondaryPath(path string) string {
 func cleanOldUpdateFiles() {
 	executable, err := os.Executable()
 	if err != nil {
+		debugLogf("app", "locate executable for cleanup failed: %v", err)
 		return
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
+		debugLogf("app", "eval symlinks for cleanup failed: %v", err)
 		return
 	}
 	dir := filepath.Dir(executable)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		debugLogf("app", "read directory for cleanup %q failed: %v", dir, err)
 		return
 	}
 	for _, entry := range entries {
@@ -278,7 +293,44 @@ func cleanOldUpdateFiles() {
 		}
 		name := entry.Name()
 		if strings.HasSuffix(name, ".old") || (strings.HasPrefix(name, ".") && strings.Contains(name, "-update-") && strings.HasSuffix(name, ".tmp")) {
-			_ = os.Remove(filepath.Join(dir, name))
+			removePath := filepath.Join(dir, name)
+			if rmErr := os.Remove(removePath); rmErr == nil {
+				debugLogf("app", "cleaned old update file: %q", removePath)
+			}
+		}
+	}
+}
+
+func cleanExpiredDebugLog() {
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return
+	}
+	debugLogPath := filepath.Join(filepath.Dir(executable), "debug.log")
+	file, err := os.Open(debugLogPath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		return
+	}
+	firstLine := strings.TrimSpace(scanner.Text())
+	_ = file.Close()
+
+	const logTimeLayout = "2006/01/02 15:04:05"
+	if len(firstLine) >= len(logTimeLayout) {
+		timeStr := firstLine[:len(logTimeLayout)]
+		if logTime, err := time.ParseInLocation(logTimeLayout, timeStr, time.Local); err == nil {
+			if time.Since(logTime) >= 3*24*time.Hour {
+				_ = os.Remove(debugLogPath)
+			}
 		}
 	}
 }
@@ -371,7 +423,7 @@ func (a *App) saveWindowState() {
 	width, height := window.Size()
 	state := windowState{X: x, Y: y, Width: width, Height: height}
 	if err := saveWindowState(a.windowStatePath, state); err != nil {
-		fmt.Printf("zashdesktop: save window state: %v\n", err)
+		debugLogf("app", "save window state failed: %v", err)
 		return
 	}
 
@@ -418,6 +470,7 @@ func (a *App) setupTray() {
 }
 
 func (a *App) quit() {
+	debugLogf("app", "quitting application")
 	a.mu.Lock()
 	a.quitting = true
 	cancelTrayProxy := a.trayProxyCancel
@@ -434,6 +487,7 @@ func (a *App) clearFrontendCache() {
 	}
 	defer a.clearCacheMu.Unlock()
 
+	debugLogf("app", "clearing frontend WebView2 cache")
 	a.mu.Lock()
 	if a.quitting {
 		a.mu.Unlock()
@@ -458,7 +512,11 @@ func (a *App) clearFrontendCache() {
 	}
 
 	for _, dir := range getWebviewCacheDirs() {
-		_ = removeDirectoryWithRetry(dir, 5, 100*time.Millisecond)
+		if err := removeDirectoryWithRetry(dir, 5, 100*time.Millisecond); err != nil {
+			debugLogf("app", "remove webview cache dir %q failed: %v", dir, err)
+		} else {
+			debugLogf("app", "removed webview cache dir %q", dir)
+		}
 	}
 
 	if wasOpen {

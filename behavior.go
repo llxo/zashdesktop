@@ -58,6 +58,7 @@ func readRunAsAdminSetting(applicationPath string) (bool, error) {
 
 func writeRunAsAdminSetting(applicationPath string, enabled bool) error {
 	if strings.TrimSpace(applicationPath) == "" {
+		debugLogf("system", "write RunAsAdmin setting failed: empty application path")
 		return errors.New("application path is empty")
 	}
 
@@ -68,12 +69,15 @@ func writeRunAsAdminSetting(applicationPath string, enabled bool) error {
 	if enabled {
 		key, _, err := registry.CreateKey(registry.CURRENT_USER, behaviorLayersKey, registry.SET_VALUE)
 		if err != nil {
+			debugLogf("system", "create registry key %q failed: %v", behaviorLayersKey, err)
 			return fmt.Errorf("create administrator compatibility settings: %w", err)
 		}
 		defer key.Close()
 		if err := key.SetStringValue(applicationPath, "RunAsAdmin"); err != nil {
+			debugLogf("system", "set RunAsAdmin registry value for %q failed: %v", applicationPath, err)
 			return fmt.Errorf("enable administrator mode: %w", err)
 		}
+		debugLogf("system", "enabled RunAsAdmin registry setting for %q", applicationPath)
 		return nil
 	}
 
@@ -82,12 +86,15 @@ func writeRunAsAdminSetting(applicationPath string, enabled bool) error {
 		return nil
 	}
 	if err != nil {
+		debugLogf("system", "open registry key %q failed: %v", behaviorLayersKey, err)
 		return fmt.Errorf("open administrator compatibility settings: %w", err)
 	}
 	defer key.Close()
 	if err := key.DeleteValue(applicationPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		debugLogf("system", "delete RunAsAdmin registry value for %q failed: %v", applicationPath, err)
 		return fmt.Errorf("disable administrator mode: %w", err)
 	}
+	debugLogf("system", "disabled RunAsAdmin registry setting for %q", applicationPath)
 	return nil
 }
 
@@ -209,6 +216,7 @@ func runAutoStartCommand(args []string) error {
 
 func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	if strings.TrimSpace(applicationPath) == "" {
+		debugLogf("system", "write auto start setting failed: empty application path")
 		return errors.New("application path is empty")
 	}
 
@@ -222,6 +230,7 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 
 	privileged, err := isPrivileged()
 	if err != nil || !privileged {
+		debugLogf("system", "write auto start setting failed: administrator privilege required (err=%v)", err)
 		return errors.New("需要管理员权限才能配置自启动任务")
 	}
 
@@ -229,15 +238,18 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	if enabled {
 		temporary, err := os.CreateTemp("", "zashdesktop-autostart-*.xml")
 		if err != nil {
+			debugLogf("system", "create autostart temp xml failed: %v", err)
 			return fmt.Errorf("create startup task file: %w", err)
 		}
 		temporaryPath := temporary.Name()
 		defer os.Remove(temporaryPath)
 		if _, err := temporary.Write(autoStartTaskXML(applicationPath)); err != nil {
 			_ = temporary.Close()
+			debugLogf("system", "write autostart temp xml failed: %v", err)
 			return fmt.Errorf("write startup task file: %w", err)
 		}
 		if err := temporary.Close(); err != nil {
+			debugLogf("system", "close autostart temp xml failed: %v", err)
 			return fmt.Errorf("close startup task file: %w", err)
 		}
 
@@ -256,8 +268,10 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 		if !enabled && errors.As(err, &exitError) {
 			return nil
 		}
+		debugLogf("system", "execute schtasks command %v failed: %v", args, err)
 		return fmt.Errorf("%s startup task: %w", map[bool]string{true: "enable", false: "disable"}[enabled], err)
 	}
+	debugLogf("system", "write auto start setting success: enabled=%t", enabled)
 	return nil
 }
 
@@ -277,6 +291,7 @@ func ensureProgramDataShortcut(applicationPath string) error {
 	}
 	startMenuDir := filepath.Join(programData, `Microsoft\Windows\Start Menu\Programs`)
 	if err := os.MkdirAll(startMenuDir, 0o755); err != nil {
+		debugLogf("system", "create start menu directory %q failed: %v", startMenuDir, err)
 		return fmt.Errorf("create start menu directory: %w", err)
 	}
 
@@ -304,7 +319,12 @@ func ensureProgramDataShortcut(applicationPath string) error {
 
 	command := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	configureCoreCommand(command)
-	return command.Run()
+	if err := command.Run(); err != nil {
+		debugLogf("system", "create start menu shortcut via PowerShell failed: %v", err)
+		return err
+	}
+	debugLogf("system", "created start menu shortcut at %q", shortcutPath)
+	return nil
 }
 
 // -----------------------------------------------------------------------------

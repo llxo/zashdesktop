@@ -67,10 +67,12 @@ func (s *CoreService) GetAppUpdateInfo() (AppUpdateInfo, error) {
 }
 
 func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
+	debugLogf("update", "checking app update from GitHub: owner=%s repo=%s currentVersion=%s", appGithubOwner, appGithubRepo, appVersion)
 	client := newCoreHTTPClient(30 * time.Second)
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", appGithubOwner, appGithubRepo)
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
+		debugLogf("update", "create app update request failed: %v", err)
 		return AppUpdateInfo{}, fmt.Errorf("check app update: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
@@ -78,16 +80,19 @@ func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
 
 	response, err := client.Do(request)
 	if err != nil {
+		debugLogf("update", "check app update HTTP request failed: %v", err)
 		return AppUpdateInfo{}, fmt.Errorf("check app update: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		debugLogf("update", "check app update server returned status %s", response.Status)
 		return AppUpdateInfo{}, fmt.Errorf("check app update: GitHub returned %s", response.Status)
 	}
 
 	var release githubRelease
 	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
+		debugLogf("update", "decode app release JSON failed: %v", err)
 		return AppUpdateInfo{}, fmt.Errorf("parse GitHub release: %w", err)
 	}
 
@@ -102,6 +107,7 @@ func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
 	}
 
 	if binaryAsset == nil {
+		debugLogf("update", "no windows amd64 binary asset found in release %s", release.TagName)
 		return AppUpdateInfo{}, errors.New("GitHub release 中未找到 Windows x64 可执行文件")
 	}
 
@@ -120,6 +126,7 @@ func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
 	s.cachedAppUpdate = info
 	s.mu.Unlock()
 
+	debugLogf("update", "check app update success: current=%s latest=%s available=%t downloadURL=%s", info.CurrentVersion, info.LatestVersion, info.UpdateAvailable, info.DownloadURL)
 	return info, nil
 }
 
@@ -127,6 +134,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	s.appUpdateMu.Lock()
 	if s.isUpdatingApp {
 		s.appUpdateMu.Unlock()
+		debugLogf("update", "install app update skipped: update already in progress")
 		return errors.New("更新正在进行中，请稍候")
 	}
 	s.isUpdatingApp = true
@@ -138,10 +146,12 @@ func (s *CoreService) InstallAppUpdate() error {
 		s.appUpdateMu.Unlock()
 	}()
 
+	debugLogf("update", "starting app update installation")
 	client := newCoreHTTPClient(30 * time.Second)
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", appGithubOwner, appGithubRepo)
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
+		debugLogf("update", "create app release request failed: %v", err)
 		return fmt.Errorf("lookup app release: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
@@ -149,16 +159,19 @@ func (s *CoreService) InstallAppUpdate() error {
 
 	response, err := client.Do(request)
 	if err != nil {
+		debugLogf("update", "lookup app release HTTP request failed: %v", err)
 		return fmt.Errorf("lookup app release: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		debugLogf("update", "lookup app release server returned %s", response.Status)
 		return fmt.Errorf("lookup app release: GitHub returned %s", response.Status)
 	}
 
 	var release githubRelease
 	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
+		debugLogf("update", "parse app release JSON failed: %v", err)
 		return fmt.Errorf("parse GitHub release: %w", err)
 	}
 
@@ -175,6 +188,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	}
 
 	if binaryAsset == nil {
+		debugLogf("update", "install app update failed: no windows amd64 binary found in release %s", release.TagName)
 		return errors.New("GitHub release 中未找到 Windows x64 可执行文件")
 	}
 
@@ -198,13 +212,16 @@ func (s *CoreService) InstallAppUpdate() error {
 			}
 		}
 	}
+	debugLogf("update", "target binary: name=%s url=%s expectedSHA=%s", binaryAsset.Name, binaryAsset.BrowserDownloadURL, expectedSHA)
 
 	executable, err := os.Executable()
 	if err != nil {
+		debugLogf("update", "locate executable failed: %v", err)
 		return fmt.Errorf("无法定位程序路径: %w", err)
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
+		debugLogf("update", "eval symlinks failed: %v", err)
 		return fmt.Errorf("解析程序路径失败: %w", err)
 	}
 	exeDir := filepath.Dir(executable)
@@ -213,6 +230,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	// Download binary to temp file in the same directory
 	tempFile, err := os.CreateTemp(exeDir, fmt.Sprintf(".%s-update-*.tmp", exeBase))
 	if err != nil {
+		debugLogf("update", "create temp file in %q failed: %v", exeDir, err)
 		return fmt.Errorf("创建临时更新文件失败（请确认是否具有写入权限）: %w", err)
 	}
 	tempFilePath := tempFile.Name()
@@ -224,20 +242,24 @@ func (s *CoreService) InstallAppUpdate() error {
 		}
 	}()
 
+	debugLogf("update", "downloading update binary to %s", tempFilePath)
 	downloadClient := newCoreHTTPClient(10 * time.Minute)
 	downloadReq, err := http.NewRequest(http.MethodGet, binaryAsset.BrowserDownloadURL, nil)
 	if err != nil {
+		debugLogf("update", "create download request failed: %v", err)
 		return fmt.Errorf("创建下载请求失败: %w", err)
 	}
 	downloadReq.Header.Set("User-Agent", "zashdesktop")
 
 	downloadResp, err := downloadClient.Do(downloadReq)
 	if err != nil {
+		debugLogf("update", "download update binary failed: %v", err)
 		return fmt.Errorf("下载安装包失败: %w", err)
 	}
 	defer downloadResp.Body.Close()
 
 	if downloadResp.StatusCode < http.StatusOK || downloadResp.StatusCode >= http.StatusMultipleChoices {
+		debugLogf("update", "download update binary server returned status %s", downloadResp.Status)
 		return fmt.Errorf("下载安装包失败: 服务器返回 %s", downloadResp.Status)
 	}
 
@@ -246,35 +268,43 @@ func (s *CoreService) InstallAppUpdate() error {
 
 	n, err := io.Copy(writer, io.LimitReader(downloadResp.Body, maxAppBinaryDownload))
 	if err != nil {
+		debugLogf("update", "save downloaded binary failed: %v", err)
 		return fmt.Errorf("写入更新文件失败: %w", err)
 	}
 	if n == 0 {
+		debugLogf("update", "downloaded binary is empty")
 		return errors.New("下载的更新文件为空")
 	}
 
 	if err := tempFile.Close(); err != nil {
+		debugLogf("update", "close temp update file failed: %v", err)
 		return fmt.Errorf("保存更新文件失败: %w", err)
 	}
 
 	actualSHA := hex.EncodeToString(hasher.Sum(nil))
 	if expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
+		debugLogf("update", "SHA256 checksum mismatch: expected=%s actual=%s", expectedSHA, actualSHA)
 		return fmt.Errorf("SHA256 校验失败: 期望 %s, 实际 %s", expectedSHA, actualSHA)
 	}
+	debugLogf("update", "binary downloaded and verified successfully (bytes=%d, sha256=%s)", n, actualSHA)
 
 	// Rename current exe to old
 	oldExePath := filepath.Join(exeDir, fmt.Sprintf("%s.old", exeBase))
 	_ = os.Remove(oldExePath)
 
 	if err := os.Rename(executable, oldExePath); err != nil {
+		debugLogf("update", "rename %q to %q failed: %v", executable, oldExePath, err)
 		return fmt.Errorf("备份当前可执行文件失败: %w", err)
 	}
 
 	// Rename temp file to target executable
 	if err := os.Rename(tempFilePath, executable); err != nil {
+		debugLogf("update", "rename %q to %q failed: %v, rolling back", tempFilePath, executable, err)
 		_ = os.Rename(oldExePath, executable) // rollback
 		return fmt.Errorf("替换程序文件失败: %w", err)
 	}
 	keepTempFile = true
+	debugLogf("update", "executable successfully replaced: %s", executable)
 
 	// Launch background helper to restart app after current process exits
 	pid := os.Getpid()
@@ -303,12 +333,15 @@ func (s *CoreService) InstallAppUpdate() error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		debugLogf("update", "launch PowerShell restart helper failed: %v, attempting CMD fallback", err)
 		cmdFallback := exec.Command("cmd.exe", "/c", fmt.Sprintf("ping 127.0.0.1 -n 2 >nul & start \"\" \"%s\"", executable))
 		cmdFallback.SysProcAttr = &syscall.SysProcAttr{
 			HideWindow:    true,
 			CreationFlags: 0x08000000,
 		}
 		_ = cmdFallback.Start()
+	} else {
+		debugLogf("update", "PowerShell restart helper launched successfully")
 	}
 
 	go func() {
@@ -316,6 +349,7 @@ func (s *CoreService) InstallAppUpdate() error {
 		s.mu.Lock()
 		app := s.app
 		s.mu.Unlock()
+		debugLogf("update", "quitting application for update restart")
 		if app != nil {
 			app.Quit()
 		} else {

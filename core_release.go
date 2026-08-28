@@ -698,14 +698,17 @@ func (s *CoreService) ForceCheckUpdate(currentVersion, rawCoreType string) (Core
 func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, force bool) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
+		debugLogf("release", "check update normalize coreType failed: %v", err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
+		debugLogf("release", "check update loadConfigSnapshot failed: %v", err)
 		return CoreConfig{}, err
 	}
 	s.applyCurrentVersion(&config, currentVersion)
 	if config.URLTemplate == "" {
+		debugLogf("release", "check update failed: core download URL not configured")
 		return CoreConfig{}, errors.New("core download URL has not been configured")
 	}
 	config.URLTemplate = canonicalMihomoURLTemplate(config)
@@ -713,6 +716,7 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 	owner, repository, err := githubRepository(config.URLTemplate)
 	if err != nil {
 		if config.ConfiguredVersion == "" {
+			debugLogf("release", "parse github repository from %q failed: %v", config.URLTemplate, err)
 			return CoreConfig{}, err
 		}
 		config.LatestVersion = config.ConfiguredVersion
@@ -729,6 +733,7 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 	if latest == "" {
 		latest, err = findLatestRelease(owner, repository, config.Channel)
 		if err != nil {
+			debugLogf("release", "find latest release failed for %s/%s (%s): %v", owner, repository, config.Channel, err)
 			return CoreConfig{}, err
 		}
 		s.setCachedLatestRelease(owner, repository, config.Channel, latest)
@@ -736,6 +741,7 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 
 	config.LatestVersion = latest
 	config.UpdateAvailable = isCoreUpdateAvailable(latest, config.Version, config.Channel)
+	debugLogf("release", "check update result: type=%s current=%s latest=%s updateAvailable=%t", coreType, config.Version, config.LatestVersion, config.UpdateAvailable)
 	return s.saveCheckedConfig(config, generation)
 }
 
@@ -1001,10 +1007,12 @@ func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
 	configureCoreCommand(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		debugLogf("release", "execute %s %v failed: %v", corePath, versionArgs, err)
 		return "", "", fmt.Errorf("read %s core version: %w", coreType, err)
 	}
 	version := normalizeCoreVersion(string(output))
 	if version == "" {
+		debugLogf("release", "unable to parse version from output: %q", string(output))
 		return "", "", fmt.Errorf("unable to read %s core version", coreType)
 	}
 	return version, strings.TrimSpace(string(output)), nil
@@ -1244,17 +1252,21 @@ func (t coreArchiveTools) replaceExecutable(sourcePath, targetPath string) (bool
 	if fileExists(targetPath) {
 		if err := os.Rename(targetPath, previousPath); err != nil {
 			if isFileLockedError(err) {
+				t.debugf("target file %q is locked (sharing/lock violation)", targetPath)
 				return false, nil
 			}
+			t.debugf("backup target file %q to %q failed: %v", targetPath, previousPath, err)
 			return false, fmt.Errorf("prepare core replacement: %w", err)
 		}
 	}
 	if err := os.Rename(sourcePath, targetPath); err != nil {
+		t.debugf("move source file %q to %q failed: %v", sourcePath, targetPath, err)
 		if fileExists(previousPath) {
 			_ = os.Rename(previousPath, targetPath)
 		}
 		return false, fmt.Errorf("replace core executable: %w", err)
 	}
 	_ = os.Remove(previousPath)
+	t.debugf("successfully replaced core binary at %q", targetPath)
 	return true, nil
 }

@@ -34,6 +34,7 @@ func configureCoreCommand(command *exec.Cmd) {
 func getProcessImagePath(pid uint32) (string, error) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
+		debugLogf("process", "open process %d for image path query failed: %v", pid, err)
 		return "", err
 	}
 	defer windows.CloseHandle(handle)
@@ -47,6 +48,7 @@ func getProcessImagePath(pid uint32) (string, error) {
 		uintptr(unsafe.Pointer(&size)),
 	)
 	if ret == 0 {
+		debugLogf("process", "query full process image name for pid %d failed: %v", pid, callErr)
 		return "", callErr
 	}
 	return windows.UTF16ToString(buf[:size]), nil
@@ -64,6 +66,7 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
+		debugLogf("process", "create process snapshot failed: %v", err)
 		return nil, fmt.Errorf("create process snapshot: %w", err)
 	}
 	defer windows.CloseHandle(snapshot)
@@ -71,6 +74,7 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 	var entry windows.ProcessEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
 	if err := windows.Process32First(snapshot, &entry); err != nil {
+		debugLogf("process", "read first process entry failed: %v", err)
 		return nil, nil
 	}
 
@@ -87,12 +91,14 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 					}
 					if strings.EqualFold(cleanImage, cleanExpected) {
 						if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
+							debugLogf("process", "matched external core process: type=%s pid=%d path=%q", coreType, entry.ProcessID, cleanImage)
 							return process, nil
 						}
 					}
 				}
 			} else {
 				if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
+					debugLogf("process", "matched external core process by name: type=%s pid=%d", coreType, entry.ProcessID)
 					return process, nil
 				}
 			}
@@ -106,19 +112,24 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 
 func requestCoreStop(process *os.Process) error {
 	if ret, _, err := coreFreeConsole.Call(); ret == 0 && err != windows.ERROR_INVALID_HANDLE {
+		debugLogf("process", "FreeConsole failed: %v", err)
 		return err
 	}
 	defer coreAttachConsole.Call(attachParentProcess)
 
 	if ret, _, err := coreAttachConsole.Call(uintptr(process.Pid)); ret == 0 && err != windows.ERROR_ACCESS_DENIED {
+		debugLogf("process", "AttachConsole for pid %d failed: %v", process.Pid, err)
 		return err
 	}
 	if ret, _, err := coreSetConsoleCtrlHandler.Call(0, 1); ret == 0 {
+		debugLogf("process", "SetConsoleCtrlHandler failed: %v", err)
 		return err
 	}
 	if ret, _, err := coreGenerateConsoleCtrlEvent.Call(windows.CTRL_BREAK_EVENT, uintptr(process.Pid)); ret == 0 {
+		debugLogf("process", "GenerateConsoleCtrlEvent CTRL_BREAK_EVENT for pid %d failed: %v", process.Pid, err)
 		return err
 	}
+	debugLogf("process", "successfully sent CTRL_BREAK_EVENT to pid %d", process.Pid)
 	return nil
 }
 

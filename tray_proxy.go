@@ -80,7 +80,7 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 		var err error
 		coreConfig, err = a.coreService.GetConfig()
 		if err != nil {
-			coreDebugf("refresh tray proxy groups get core config: %v", err)
+			debugLogf("tray", "refresh tray proxy groups get core config: %v", err)
 		}
 	}
 
@@ -89,7 +89,7 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 		var err error
 		groups, err = fetchTrayProxyGroups(ctx, a.trayAPIURL(), a.launch.APISecret)
 		if err != nil {
-			coreDebugf("refresh tray proxy groups: %v", err)
+			debugLogf("tray", "refresh tray proxy groups: %v", err)
 			groups = nil
 		}
 	}
@@ -182,15 +182,15 @@ func (a *App) trayStartCore() {
 	}
 	config, err := a.coreService.GetConfig()
 	if err != nil {
-		coreDebugf("tray start core get config: %v", err)
+		debugLogf("tray", "tray start core get config: %v", err)
 		return
 	}
 	if !config.Installed {
-		coreDebugf("tray start core: core not installed")
+		debugLogf("tray", "tray start core: core not installed")
 		return
 	}
 	if _, err := a.coreService.StartCore(config.RunArgs, config.CoreType); err != nil {
-		coreDebugf("tray start core failed: %v", err)
+		debugLogf("tray", "tray start core failed: %v", err)
 	}
 }
 
@@ -199,7 +199,7 @@ func (a *App) trayStopCore() {
 		return
 	}
 	if _, err := a.coreService.StopCore(); err != nil {
-		coreDebugf("tray stop core failed: %v", err)
+		debugLogf("tray", "tray stop core failed: %v", err)
 	}
 }
 
@@ -209,15 +209,15 @@ func (a *App) trayRestartCore() {
 	}
 	config, err := a.coreService.GetConfig()
 	if err != nil {
-		coreDebugf("tray restart core get config: %v", err)
+		debugLogf("tray", "tray restart core get config: %v", err)
 		return
 	}
 	if !config.Installed {
-		coreDebugf("tray restart core: core not installed")
+		debugLogf("tray", "tray restart core: core not installed")
 		return
 	}
 	if _, err := a.coreService.RestartCore(config.RunArgs, config.CoreType); err != nil {
-		coreDebugf("tray restart core failed: %v", err)
+		debugLogf("tray", "tray restart core failed: %v", err)
 	}
 }
 
@@ -225,7 +225,7 @@ func (a *App) selectTrayProxy(group, proxy string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := selectClashProxy(ctx, a.trayAPIURL(), a.launch.APISecret, group, proxy); err != nil {
-		coreDebugf("select tray proxy: group=%q proxy=%q err=%v", group, proxy, err)
+		debugLogf("tray", "select tray proxy: group=%q proxy=%q err=%v", group, proxy, err)
 		return
 	}
 	a.refreshTrayProxyGroups(context.Background())

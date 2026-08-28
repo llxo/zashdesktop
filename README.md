@@ -102,6 +102,22 @@ C:\DEV\zashdesktop\
 build/bin/zashdesktop.exe
 ```
 
+## 后端架构与代码解析 (Backend Architecture)
+
+`zashdesktop` 后端采用 Go 语言与 **Wails v3** 桌面框架构建，针对 Windows 原生环境进行了深度系统级适配，代码按功能领域模块化整合为 8 个核心文件：
+
+| 文件 | 功能领域 | 职责说明 |
+| :--- | :--- | :--- |
+| [`main.go`](file:///C:/DEV/workspace/zashdesktop/main.go) | 应用入口与窗口控制 | 程序入口 `main()`、命令行参数解析、Wails v3 实例生命周期、单实例互斥控制、原生窗口尺寸与位置记忆/恢复、WebView2 缓存清理。 |
+| [`core_service.go`](file:///C:/DEV/workspace/zashdesktop/core_service.go) | 核心调度与服务绑定 | 前端绑定的 `CoreService` 服务，处理内核启停调度、状态监听、`profiles.json` 原子化持久化，以及全后端模块统一的 `debug.log` 诊断日志。 |
+| [`core_config.go`](file:///C:/DEV/workspace/zashdesktop/core_config.go) | 内核配置管理 | 提供内核订阅下载（HTTP/HTTPS）、本地配置文件导入、文件名安全规范化、多配置文件目录扫描与无缝选择切换。 |
+| [`core_release.go`](file:///C:/DEV/workspace/zashdesktop/core_release.go) | 核心版本与更新下载 | sing-box 与 mihomo 的 GitHub Release 版本探测、多镜像加速下载、SHA256 完整性校验、ZIP / TAR.GZ 跨格式解压以及内核可执行文件热替换。 |
+| [`core_process.go`](file:///C:/DEV/workspace/zashdesktop/core_process.go) | 进程探测与优雅控制 | 基于 Win32 Toolhelp32 快照探测进程、管理外部残留内核、通过 `GenerateConsoleCtrlEvent` (`CTRL_BREAK_EVENT`) 实现内核优雅停机与文件锁检测。 |
+| [`tray_proxy.go`](file:///C:/DEV/workspace/zashdesktop/tray_proxy.go) | 系统托盘与节点管理 | Windows 原生托盘图标与动态菜单渲染，定时轮询 Clash API 同步代理组/节点状态，支持托盘一键启停核心与切换当前节点。 |
+| [`behavior.go`](file:///C:/DEV/workspace/zashdesktop/behavior.go) | 系统集成与特权行为 | Windows UAC 管理员提权检测、注册表 AppCompatFlags 兼容层、基于 XML 计划任务（`schtasks.exe`）的高权限开机自启、开始菜单快捷方式维护及系统代理探测。 |
+| [`app_update.go`](file:///C:/DEV/workspace/zashdesktop/app_update.go) | 客户端自身热更新 | 检测 `zashdesktop` 自身 GitHub 最新版本、二进制下载与校验、运行中可执行文件安全热替换（支持自动回退）与 PowerShell 辅助无缝重启。 |
+
 ## 后续计划
 
 - 优化管理窗口的启动速度
+
