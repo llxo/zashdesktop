@@ -13,7 +13,7 @@
     >
       <ProxiesCtrl />
       <FolderTopBar v-if="foldersUiVisible" />
-      <!-- 空状态与离线快捷引导 -->
+      <!-- 空状态引导 -->
       <div
         v-if="renderPageItems.length === 0"
         class="flex flex-col items-center justify-center p-6 text-center"
@@ -26,10 +26,10 @@
 
           <div class="flex flex-col gap-1">
             <h3 class="text-base font-semibold">
-              {{ isBackendOffline ? $t('backendDisconnected') : $t('noProxies') }}
+              {{ $t('noProxies') }}
             </h3>
             <p class="text-base-content/60 text-xs leading-relaxed">
-              {{ isBackendOffline ? $t('backendDisconnectedDesc', { url: activeBackendProbeUrl }) : $t('noProxiesDesc') }}
+              {{ $t('noProxiesDesc') }}
             </p>
           </div>
 
@@ -45,13 +45,6 @@
               @click="handleGoToCore"
             >
               {{ $t('coreSettings') }}
-            </button>
-            <button
-              v-if="isBackendOffline"
-              class="btn btn-ghost btn-sm"
-              @click="handleRetry"
-            >
-              {{ $t('retry') }}
             </button>
           </div>
         </div>
@@ -90,8 +83,6 @@
 
 <script setup lang="ts">
 import { fetchProxies, proxiesTabShow } from '@/assembly/proxies'
-import { startBackendSession } from '@/assembly/session'
-import { backendProbe } from '@/assembly/version'
 import ProxiesCtrl from '@/components/controls/ProxiesCtrl'
 import FolderManagerPanel from '@/components/proxies/folders/FolderManagerPanel.vue'
 import FolderTopBar from '@/components/proxies/folders/FolderTopBar.vue'
@@ -106,10 +97,10 @@ import {
   renderProxiesPageItems,
 } from '@/composables/proxies'
 import { PROXY_TAB_TYPE, ROUTE_NAME } from '@/constant'
-import { getBackendProbeUrl, isMiddleScreen } from '@/helper/utils'
+import { isMiddleScreen } from '@/helper/utils'
 import { folderManagerOpen, isProxyFolderModeActive } from '@/store/proxyFolders'
 import { disableProxiesPageTextSelect, twoColumnProxyGroup } from '@/store/settings'
-import { activeBackend, activeUuid, openBackendManager } from '@/store/setup'
+import { activeUuid, openBackendManager } from '@/store/setup'
 import { ServerIcon } from '@heroicons/vue/24/outline'
 import { useSessionStorage } from '@vueuse/core'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -128,17 +119,6 @@ const scrollStatus = useSessionStorage('cache/proxies-scroll-status', {
 
 const router = useRouter()
 
-const isBackendOffline = computed(() => {
-  if (!activeBackend.value) return true
-  const probe = backendProbe.value
-  if (probe?.uuid === activeUuid.value && probe.status === 'failed') return true
-  return false
-})
-
-const activeBackendProbeUrl = computed(() =>
-  activeBackend.value ? getBackendProbeUrl(activeBackend.value) : '',
-)
-
 const handleConfigureBackend = () => {
   if (activeUuid.value) {
     openBackendManager({ mode: 'edit', uuid: activeUuid.value })
@@ -149,10 +129,6 @@ const handleConfigureBackend = () => {
 
 const handleGoToCore = () => {
   router.push({ name: ROUTE_NAME.core })
-}
-
-const handleRetry = () => {
-  startBackendSession()
 }
 
 const handleScroll = () => {

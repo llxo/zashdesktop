@@ -735,8 +735,6 @@ const zh = {
   coreConfigFileDeleted: '配置文件已删除',
   coreConfigFileRestored: '配置文件已恢复',
   undo: '撤销',
-  backendDisconnected: '核心后端未连接',
-  backendDisconnectedDesc: '未能连接到后端服务 ({url})。请检查核心是否正在运行，或修改连接地址与端口。',
   noProxies: '暂无节点',
   noProxiesDesc: '未获取到任何代理节点或策略组。',
 }
