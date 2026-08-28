@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+//go:embed build/windows/icon.ico
+var appIcon []byte
 
 const (
 	defaultTrayAPIURL        = "http://127.0.0.1:9090"

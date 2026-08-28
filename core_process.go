@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -144,3 +145,21 @@ func coreProcessAlive(process *os.Process) (bool, error) {
 		return false, fmt.Errorf("unexpected process wait status: %d", state)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// File Lock Status
+// -----------------------------------------------------------------------------
+
+const (
+	errorSharingViolation syscall.Errno = 32
+	errorLockViolation    syscall.Errno = 33
+)
+
+func isFileLockedError(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == errorSharingViolation || errno == errorLockViolation
+}
+
