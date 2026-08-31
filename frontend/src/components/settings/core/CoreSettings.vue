@@ -972,9 +972,7 @@ const handleSelectConfigFile = async () => {
   const request = beginConfigRequest()
   try {
     const next = await CoreService.SelectConfigFile(activeConfigFile.value, request.coreType)
-    if (applyCurrentConfig(request, next)) {
-      showNotification({ content: 'coreActiveConfigSaved', type: 'alert-success' })
-    }
+    applyCurrentConfig(request, next)
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1044,7 +1042,7 @@ const selectDownloadSource = async () => {
   if (selectedSourceURL.value) {
     urlInput.value = selectedSourceURL.value
     touchDraft('url')
-    await saveURL(false)
+    await saveURL()
   }
 }
 
@@ -1090,7 +1088,6 @@ const validateAndAddURL = async () => {
     selectedSourceURL.value = normalizedURL
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
-    showNotification({ content: 'coreURLSaved', type: 'alert-success' })
     await checkUpdate()
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -1112,7 +1109,6 @@ const saveRunArgs = async () => {
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
     syncActiveConfigFile()
-    showNotification({ content: 'coreRunArgsSaved', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1132,7 +1128,6 @@ const startCore = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
-    showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1148,9 +1143,7 @@ const stopCore = async () => {
   const request = beginConfigRequest()
   try {
     const next = await CoreService.StopCore()
-    if (applyCurrentConfig(request, next)) {
-      showNotification({ content: 'coreStoppedSuccess', type: 'alert-success' })
-    }
+    applyCurrentConfig(request, next)
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1170,7 +1163,6 @@ const restartCore = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
-    showNotification({ content: 'coreStarted', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1305,7 +1297,6 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('behavior', draftRevision)
     applyCurrentConfig(request, next)
-    showNotification({ content: 'coreBehaviorSaved', type: 'alert-success' })
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1316,7 +1307,7 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
 }
 
-const saveURL = async (notify = true, refreshRemote = true) => {
+const saveURL = async (refreshRemote = true) => {
   if (isSaving.value || !urlInput.value.trim()) return false
   isSaving.value = true
   const request = beginConfigRequest()
@@ -1327,9 +1318,6 @@ const saveURL = async (notify = true, refreshRemote = true) => {
     rememberDownloadSource(next.urlTemplate)
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
-    if (notify) {
-      showNotification({ content: 'coreURLSaved', type: 'alert-success' })
-    }
     if (refreshRemote) {
       await checkUpdate()
     }
@@ -1389,7 +1377,7 @@ const maintainCore = async () => {
     advancedOpen.value = true
     return
   }
-  if (draftState.url.dirty && !(await saveURL(false, false))) return
+  if (draftState.url.dirty && !(await saveURL(false))) return
   await downloadCore()
 }
 
