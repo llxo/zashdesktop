@@ -118,6 +118,11 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	menu.Add("打开 zashdesktop").OnClick(func(*application.Context) {
 		a.showWindow()
 	})
+	menu.AddSeparator()
+	clearCacheMenu := menu.AddSubmenu("清理前端缓存")
+	clearCacheMenu.Add("确认清理").OnClick(func(*application.Context) {
+		go a.clearFrontendCache()
+	})
 
 	menu.AddSeparator()
 	if coreConfig.Running {
@@ -161,11 +166,6 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 			}
 		}
 	}
-
-	menu.AddSeparator()
-	menu.Add("清理前端缓存").OnClick(func(*application.Context) {
-		go a.clearFrontendCache()
-	})
 
 	menu.AddSeparator()
 	menu.Add("退出 zashdesktop").OnClick(func(*application.Context) {
