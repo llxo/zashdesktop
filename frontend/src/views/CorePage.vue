@@ -1,7 +1,10 @@
 <template>
-  <div class="relative flex h-full min-h-0 flex-col">
+  <div
+    class="relative h-full overflow-y-scroll"
+    :style="padding"
+  >
     <CtrlsBar>
-      <div class="flex items-center gap-2 p-2">
+      <div class="mx-auto flex w-full max-w-3xl items-center gap-2 p-2">
         <SegmentedControl
           :model-value="activeTab"
           :options="tabOptions"
@@ -10,17 +13,12 @@
       </div>
     </CtrlsBar>
 
-    <div
-      class="min-h-0 flex-1 overflow-y-auto"
-      :style="padding"
-    >
-      <div class="w-full max-w-3xl p-3 md:px-8 md:py-6">
-        <CoreSettings
-          :active-tab="activeTab"
-          :core-type="coreType"
-          @update:core-type="handleCoreTypeUpdate"
-        />
-      </div>
+    <div class="mx-auto w-full max-w-3xl p-3 md:p-6">
+      <CoreSettings
+        :active-tab="activeTab"
+        :core-type="coreType"
+        @update:core-type="handleCoreTypeUpdate"
+      />
     </div>
   </div>
 </template>
