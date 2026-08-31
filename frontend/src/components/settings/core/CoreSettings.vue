@@ -98,7 +98,7 @@
           </button>
         </div>
         <div class="settings-grid">
-          <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
+          <div class="setting-item gap-3 py-3">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
               <span class="setting-item-label">{{ $t('coreSettings') }}</span>
               <span
@@ -132,22 +132,43 @@
                 />
               </button>
             </div>
-            <button
-              class="btn btn-sm max-sm:self-stretch"
-              :class="{ 'btn-primary': !config.installed }"
-              :disabled="isCoreMaintenanceBusy"
-              @click="maintainCore"
-            >
-              <span
-                v-if="isCoreMaintenanceBusy"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownCircleIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ config.installed ? $t('updateCore') : $t('installCore') }}
-            </button>
+          </div>
+
+          <div class="setting-item py-3">
+            <div class="flex flex-wrap gap-2 self-start">
+              <button
+                class="btn btn-sm"
+                type="button"
+                :disabled="isCoreMaintenanceBusy || isSavingChannel"
+                @click="toggleChannel"
+              >
+                <span
+                  v-if="isSavingChannel"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowsRightLeftIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('switchCore') }}
+              </button>
+              <button
+                class="btn btn-sm"
+                :class="{ 'btn-primary': !config.installed }"
+                :disabled="isCoreMaintenanceBusy"
+                @click="maintainCore"
+              >
+                <span
+                  v-if="isCoreMaintenanceBusy"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowDownCircleIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ config.installed ? $t('updateCore') : $t('installCore') }}
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -327,7 +348,7 @@
             <div
               :class="{
                 'pointer-events-none opacity-60':
-                  isSavingChannel || isSaving || isChecking || isDownloading,
+                  isSavingChannel || isSaving || isDownloading,
               }"
             >
               <SegmentedControl
@@ -524,6 +545,7 @@ import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowsRightLeftIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   Cog6ToothIcon,
@@ -734,7 +756,6 @@ const isConfigMutationPending = computed(
   () =>
     isSaving.value ||
     isSavingChannel.value ||
-    isChecking.value ||
     isDownloading.value ||
     isValidatingURL.value ||
     isStarting.value ||
@@ -1062,9 +1083,7 @@ const saveChannel = async (rawChannel: string) => {
         next = await CoreService.SaveURL(newURL, coreType.value)
       }
     }
-    if (applyCurrentConfig(request, next)) {
-      await checkUpdate()
-    }
+    applyCurrentConfig(request, next)
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1072,6 +1091,12 @@ const saveChannel = async (rawChannel: string) => {
   } finally {
     isSavingChannel.value = false
   }
+  void checkUpdate(false)
+}
+
+const toggleChannel = async () => {
+  const targetChannel = currentChannel.value === 'test' ? 'stable' : 'test'
+  await saveChannel(targetChannel)
 }
 
 const validateAndAddURL = async () => {
@@ -1088,7 +1113,6 @@ const validateAndAddURL = async () => {
     selectedSourceURL.value = normalizedURL
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
-    await checkUpdate()
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -1096,6 +1120,7 @@ const validateAndAddURL = async () => {
   } finally {
     isValidatingURL.value = false
   }
+  void checkUpdate(false)
 }
 
 const saveRunArgs = async () => {
@@ -1314,13 +1339,10 @@ const saveURL = async (refreshRemote = true) => {
   const draftRevision = beginDraftSave('url')
   try {
     const next = await CoreService.SaveURL(urlInput.value.trim(), coreType.value)
-    if (!isCurrentConfigRequest(request)) return
+    if (!isCurrentConfigRequest(request)) return false
     rememberDownloadSource(next.urlTemplate)
     commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
-    if (refreshRemote) {
-      await checkUpdate()
-    }
     return true
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -1329,21 +1351,34 @@ const saveURL = async (refreshRemote = true) => {
     return false
   } finally {
     isSaving.value = false
+    if (refreshRemote) {
+      void checkUpdate(false)
+    }
   }
 }
 
 const checkUpdate = async (notifyError = true, force = false) => {
   if (isChecking.value || !urlInput.value.trim()) return null
   const sequence = ++checkSequence
+  const targetCoreType = coreType.value
   isChecking.value = true
-  const request = beginConfigRequest()
   try {
     const next = force
-      ? await CoreService.ForceCheckUpdate('', request.coreType)
-      : await CoreService.CheckUpdate('', request.coreType)
-    return applyCurrentConfig(request, next) ? next : null
+      ? await CoreService.ForceCheckUpdate('', targetCoreType)
+      : await CoreService.CheckUpdate('', targetCoreType)
+    if (sequence === checkSequence && coreType.value === targetCoreType) {
+      config.latestVersion = next.latestVersion
+      config.updateAvailable = next.updateAvailable
+      if (next.installedVersion) {
+        config.installedVersion = next.installedVersion
+      }
+      if (next.version) {
+        config.version = next.version
+      }
+    }
+    return next
   } catch (error) {
-    if (notifyError && isCurrentConfigRequest(request)) {
+    if (notifyError && sequence === checkSequence && coreType.value === targetCoreType) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
     return null
@@ -1441,7 +1476,7 @@ onMounted(() => {
       await nextTick()
       void scanConfigFiles(false)
       void checkCanUndoDelete()
-      await checkUpdate(false)
+      void checkUpdate(false)
     }
   })()
   refreshTimer = setInterval(() => {
@@ -1474,7 +1509,7 @@ watch(
       if (await loadConfig(false, true)) {
         void scanConfigFiles(false)
         void checkCanUndoDelete()
-        await checkUpdate(false)
+        void checkUpdate(false)
       }
     })()
   },

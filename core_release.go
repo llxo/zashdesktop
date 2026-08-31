@@ -113,23 +113,25 @@ func (s *CoreService) clearCachedLatestRelease(owner, repository, channel string
 	}
 }
 
-func (s *CoreService) getCachedCoreVersion(coreType string) (coreVersionCacheItem, bool) {
+func (s *CoreService) getCachedCoreVersion(coreType, channel string) (coreVersionCacheItem, bool) {
 	s.versionCacheMu.RLock()
 	defer s.versionCacheMu.RUnlock()
 	if s.versionCache == nil {
 		return coreVersionCacheItem{}, false
 	}
-	item, ok := s.versionCache[coreType]
+	key := normalizedCoreType(coreType) + ":" + strings.ToLower(strings.TrimSpace(channel))
+	item, ok := s.versionCache[key]
 	return item, ok
 }
 
-func (s *CoreService) setCachedCoreVersion(coreType string, item coreVersionCacheItem) {
+func (s *CoreService) setCachedCoreVersion(coreType, channel string, item coreVersionCacheItem) {
 	s.versionCacheMu.Lock()
 	defer s.versionCacheMu.Unlock()
 	if s.versionCache == nil {
 		s.versionCache = make(map[string]coreVersionCacheItem)
 	}
-	s.versionCache[coreType] = item
+	key := normalizedCoreType(coreType) + ":" + strings.ToLower(strings.TrimSpace(channel))
+	s.versionCache[key] = item
 }
 
 // -----------------------------------------------------------------------------
@@ -779,6 +781,7 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	if err != nil {
 		return CoreConfig{}, err
 	}
+
 	config, archivePath, targetVersion, err := s.downloadCoreArchive(currentVersion, config)
 	if err != nil {
 		coreDebugf("download request failed: err=%v", err)
@@ -898,7 +901,7 @@ func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConf
 }
 
 func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, targetVersion string) (CoreConfig, error) {
-	corePath := s.corePathFor(config.CoreType)
+	corePath := s.corePathFor(config.CoreType, config.Channel)
 	installed, err := s.archiveTools().Extract(archivePath, corePath, coreArchiveExecutableMatcher(config.CoreType))
 	if err != nil {
 		return CoreConfig{}, err
@@ -913,7 +916,7 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 		return CoreConfig{}, versionErr
 	}
 	if stat, statErr := os.Stat(corePath); statErr == nil {
-		s.setCachedCoreVersion(config.CoreType, coreVersionCacheItem{
+		s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
 			modTime: stat.ModTime(),
 			size:    stat.Size(),
 			version: installedVersion,
@@ -922,7 +925,6 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 	}
 	config.Version = installedVersion
 	config.VersionDetail = versionDetail
-	config.Channel = coreChannel(installedVersion)
 	config.InstalledVersion = installedVersion
 	config.Installed = true
 	config.LatestVersion = targetVersion
@@ -939,17 +941,18 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 // -----------------------------------------------------------------------------
 
 func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
+	if config.Channel == "" {
+		config.Channel = coreChannelStable
+	}
 	suppliedVersion := normalizeCoreVersion(supplied)
-	corePath := s.corePathFor(config.CoreType)
+	corePath := s.corePathFor(config.CoreType, config.Channel)
+	config.CorePath = corePath
 
 	stat, err := os.Stat(corePath)
 	if err != nil || stat.IsDir() {
 		config.Installed = false
 		config.InstalledVersion = ""
 		config.Version = suppliedVersion
-		if config.Channel == "" && suppliedVersion != "" {
-			config.Channel = coreChannel(suppliedVersion)
-		}
 		return
 	}
 
@@ -957,25 +960,19 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	if suppliedVersion != "" {
 		config.Version = suppliedVersion
 		config.InstalledVersion = suppliedVersion
-		if config.Channel == "" {
-			config.Channel = coreChannel(suppliedVersion)
-		}
 		return
 	}
 
-	if cached, ok := s.getCachedCoreVersion(config.CoreType); ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() && cached.version != "" {
+	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() && cached.version != "" {
 		config.Version = cached.version
 		config.VersionDetail = cached.detail
 		config.InstalledVersion = cached.version
-		if config.Channel == "" {
-			config.Channel = coreChannel(cached.version)
-		}
 		return
 	}
 
 	version, versionDetail, err := readCoreVersionDetail(corePath, config.CoreType)
 	if err == nil && version != "" {
-		s.setCachedCoreVersion(config.CoreType, coreVersionCacheItem{
+		s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
 			modTime: stat.ModTime(),
 			size:    stat.Size(),
 			version: version,
@@ -984,9 +981,6 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 		config.Version = version
 		config.VersionDetail = versionDetail
 		config.InstalledVersion = version
-		if config.Channel == "" {
-			config.Channel = coreChannel(version)
-		}
 	} else if config.InstalledVersion != "" {
 		config.Version = config.InstalledVersion
 	}
@@ -1053,10 +1047,13 @@ func coreArchiveExecutableMatcher(coreType string) func(string) bool {
 	}
 }
 
-func coreExecutableNameFor(coreType string) string {
+func coreExecutableNameFor(coreType, channel string) string {
 	baseName := coreExecutableBaseName
 	if normalizedCoreType(coreType) == coreTypeMihomo {
 		baseName = mihomoExecutableName
+	}
+	if strings.EqualFold(strings.TrimSpace(channel), coreChannelTest) {
+		return baseName + "-latest.exe"
 	}
 	return baseName + ".exe"
 }

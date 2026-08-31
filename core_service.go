@@ -420,6 +420,12 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 		return CoreConfig{}, err
 	}
 	config.Channel = channel
+	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
+	config.Installed = fileExistsCached(config.CorePath)
+	config.Version = ""
+	config.VersionDetail = ""
+	config.InstalledVersion = ""
+	s.applyCurrentVersion(&config, "")
 	config.LatestVersion = ""
 	config.UpdateAvailable = false
 	s.mu.Lock()
@@ -436,7 +442,7 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 		s.clearCachedLatestRelease(owner, repository, channel)
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("core", "save channel success: type=%s channel=%s", config.CoreType, config.Channel)
+	debugLogf("core", "save channel success: type=%s channel=%s installed=%t version=%s", config.CoreType, config.Channel, config.Installed, config.Version)
 	return config, nil
 }
 
@@ -602,7 +608,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	if !fileExists(s.corePathFor(config.CoreType)) {
+	if !fileExists(s.corePathFor(config.CoreType, config.Channel)) {
 		return CoreConfig{}, errors.New("sing-box core is not installed")
 	}
 
@@ -620,7 +626,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if len(args) == 0 {
 		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
 	}
-	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType), len(args), fileExists(s.configFilePath(config)))
+	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType, config.Channel), len(args), fileExists(s.configFilePath(config)))
 
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
@@ -631,7 +637,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		return CoreConfig{}, fmt.Errorf("open core log: %w", err)
 	}
 
-	command := exec.Command(s.corePathFor(config.CoreType), args...)
+	command := exec.Command(s.corePathFor(config.CoreType, config.Channel), args...)
 	command.Dir = s.coreDirFor(config.CoreType)
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -956,7 +962,13 @@ func (s *CoreService) detectExternalProcessLocked(coreType string) {
 		s.externalProcess = nil
 		s.externalCoreType = ""
 	}
-	process, err := findExternalCoreProcess(coreType, s.corePathFor(coreType))
+	channel := coreChannelStable
+	if s.cachedProfiles != nil {
+		if p, ok := s.cachedProfiles.Profiles[coreType]; ok && p.Channel != "" {
+			channel = p.Channel
+		}
+	}
+	process, err := findExternalCoreProcess(coreType, s.corePathFor(coreType, channel))
 	if err != nil {
 		coreDebugf("external core detection failed: type=%s err=%v", coreType, err)
 		return
@@ -1012,9 +1024,9 @@ func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 		return
 	}
 	config, err := s.loadProfileFromStoreLocked(profiles, coreType)
-	shouldStart := err == nil && fileExists(s.corePathFor(config.CoreType)) && fileExists(s.configFilePath(config))
+	shouldStart := err == nil && fileExists(s.corePathFor(config.CoreType, config.Channel)) && fileExists(s.configFilePath(config))
 	runArgs := config.RunArgs
-	coreDebugf("startup check: loadErr=%v autoStartCoreType=%s coreInstalled=%t configAvailable=%t", err, coreType, fileExists(s.corePathFor(config.CoreType)), fileExists(s.configFilePath(config)))
+	coreDebugf("startup check: loadErr=%v autoStartCoreType=%s coreInstalled=%t configAvailable=%t", err, coreType, fileExists(s.corePathFor(config.CoreType, config.Channel)), fileExists(s.configFilePath(config)))
 	if !shouldStart || ctx.Err() != nil {
 		return
 	}
@@ -1069,6 +1081,9 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 		config = CoreConfig{}
 	}
 	config.CoreType = coreType
+	if config.Channel == "" {
+		config.Channel = coreChannelStable
+	}
 	configFileName, configFileNameErr := normalizeConfigFileName(config.ConfigFileName, coreType)
 	if configFileNameErr != nil {
 		configFileName = defaultConfigFileName(coreType)
@@ -1079,7 +1094,7 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	}
 	applySharedBehavior(&config, profiles.Behavior)
 	s.applySystemBehavior(&config)
-	config.CorePath = s.corePathFor(config.CoreType)
+	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	config.Installed = fileExistsCached(config.CorePath)
 	s.applyCurrentVersion(&config, "")
 	return config, nil
@@ -1169,7 +1184,10 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 		return err
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
-	config.CorePath = s.corePathFor(config.CoreType)
+	if config.Channel == "" {
+		config.Channel = coreChannelStable
+	}
+	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	if activate {
 		profiles.ActiveCore = config.CoreType
 	}
@@ -1184,7 +1202,10 @@ func (s *CoreService) saveBehaviorLocked(config CoreConfig, behavior sharedBehav
 		return err
 	}
 	config.CoreType = normalizedCoreType(config.CoreType)
-	config.CorePath = s.corePathFor(config.CoreType)
+	if config.Channel == "" {
+		config.Channel = coreChannelStable
+	}
+	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	profiles.Behavior = behavior
 	profiles.Profiles[config.CoreType] = config
 	return s.writeProfilesLocked(profiles)
@@ -1292,8 +1313,8 @@ func (s *CoreService) coreDirFor(coreType string) string {
 	return filepath.Join(s.executableDir, directory)
 }
 
-func (s *CoreService) corePathFor(coreType string) string {
-	return filepath.Join(s.coreDirFor(coreType), coreExecutableNameFor(coreType))
+func (s *CoreService) corePathFor(coreType, channel string) string {
+	return filepath.Join(s.coreDirFor(coreType), coreExecutableNameFor(coreType, channel))
 }
 
 func (s *CoreService) logFilePath(coreType string) string {

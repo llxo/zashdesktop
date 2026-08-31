@@ -55,9 +55,12 @@ func getProcessImagePath(pid uint32) (string, error) {
 }
 
 func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error) {
-	name := strings.ToLower(coreExecutableNameFor(coreType))
+	stableName := strings.ToLower(coreExecutableNameFor(coreType, coreChannelStable))
+	testName := strings.ToLower(coreExecutableNameFor(coreType, coreChannelTest))
+	expectedName := stableName
 	var cleanExpected string
 	if expectedPath != "" {
+		expectedName = strings.ToLower(filepath.Base(expectedPath))
 		cleanExpected = filepath.Clean(expectedPath)
 		if eval, err := filepath.EvalSymlinks(cleanExpected); err == nil {
 			cleanExpected = eval
@@ -81,7 +84,7 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 	currentPID := uint32(os.Getpid())
 	for {
 		processName := strings.ToLower(windows.UTF16ToString(entry.ExeFile[:]))
-		if processName == name && entry.ProcessID != currentPID && entry.ProcessID > 0 {
+		if (processName == stableName || processName == testName) && entry.ProcessID != currentPID && entry.ProcessID > 0 {
 			if cleanExpected != "" {
 				imagePath, err := getProcessImagePath(entry.ProcessID)
 				if err == nil && imagePath != "" {
@@ -94,6 +97,11 @@ func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error)
 							debugLogf("process", "matched external core process: type=%s pid=%d path=%q", coreType, entry.ProcessID, cleanImage)
 							return process, nil
 						}
+					}
+				} else if processName == expectedName {
+					if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
+						debugLogf("process", "matched external core process by fallback name: type=%s pid=%d", coreType, entry.ProcessID)
+						return process, nil
 					}
 				}
 			} else {
