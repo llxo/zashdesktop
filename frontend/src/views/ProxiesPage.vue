@@ -15,7 +15,7 @@
       <FolderTopBar v-if="foldersUiVisible" />
       <!-- 空状态引导 -->
       <div
-        v-if="renderPageItems.length === 0"
+        v-if="!isInitialLoading && renderPageItems.length === 0"
         class="flex flex-col items-center justify-center p-6 text-center"
         style="min-height: 50vh;"
       >
@@ -163,14 +163,28 @@ watch(proxiesTabShow, () =>
 )
 
 isProxiesPageMounted.value = false
+const isInitialLoading = ref(renderProxiesPageItems.value.length === 0)
+
+watch(
+  () => renderPageItems.value.length,
+  (len) => {
+    if (len > 0) {
+      isInitialLoading.value = false
+    }
+  },
+)
 
 onMounted(() => {
-  setTimeout(() => {
+  setTimeout(async () => {
     isProxiesPageMounted.value = true
     nextTick(() => {
       waitTickUntilReady()
-      fetchProxies()
     })
+    try {
+      await fetchProxies()
+    } finally {
+      isInitialLoading.value = false
+    }
   })
 })
 
