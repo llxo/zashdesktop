@@ -590,7 +590,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		alive, aliveErr := coreProcessAlive(s.process.Process)
 		coreDebugf("start request: existing pid=%d alive=%t checkErr=%v", s.process.Process.Pid, alive, aliveErr)
 		if aliveErr != nil {
-			return CoreConfig{}, fmt.Errorf("check sing-box core status: %w", aliveErr)
+			return CoreConfig{}, fmt.Errorf("check core status: %w", aliveErr)
 		}
 		if alive {
 			runningCoreType := s.processCoreType
@@ -601,7 +601,11 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		}
 	}
 	if s.process != nil && s.processDone == nil {
-		return CoreConfig{}, errors.New("sing-box core is already running")
+		runningCoreType := s.processCoreType
+		if runningCoreType == "" {
+			runningCoreType = coreTypeSingBox
+		}
+		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -609,7 +613,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		return CoreConfig{}, err
 	}
 	if !fileExists(s.corePathFor(config.CoreType, config.Channel)) {
-		return CoreConfig{}, errors.New("sing-box core is not installed")
+		return CoreConfig{}, fmt.Errorf("%s core is not installed", config.CoreType)
 	}
 
 	runArgs := strings.TrimSpace(rawArgs)
@@ -624,7 +628,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 		return CoreConfig{}, err
 	}
 	if len(args) == 0 {
-		return CoreConfig{}, errors.New("请输入 sing-box 命令行参数")
+		return CoreConfig{}, fmt.Errorf("请输入 %s 命令行参数", config.CoreType)
 	}
 	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType, config.Channel), len(args), fileExists(s.configFilePath(config)))
 
@@ -644,7 +648,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	configureCoreCommand(command)
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
-		return CoreConfig{}, fmt.Errorf("start sing-box core: %w", err)
+		return CoreConfig{}, fmt.Errorf("start %s core: %w", config.CoreType, err)
 	}
 	coreDebugf("process started: type=%s pid=%d", config.CoreType, command.Process.Pid)
 
@@ -764,7 +768,7 @@ func (s *CoreService) stopCoreProcess() error {
 
 func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) error {
 	if done == nil {
-		return errors.New("sing-box core process state is invalid")
+		return errors.New("core process state is invalid")
 	}
 
 	select {
@@ -808,7 +812,7 @@ func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) 
 			return nil
 		default:
 		}
-		return fmt.Errorf("stop sing-box core: %w", err)
+		return fmt.Errorf("stop core: %w", err)
 	}
 	select {
 	case <-done:
@@ -816,7 +820,7 @@ func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) 
 		return nil
 	case <-time.After(5 * time.Second):
 		coreDebugf("core stop timed out: pid=%d", process.Process.Pid)
-		return errors.New("timed out waiting for sing-box core to stop")
+		return errors.New("timed out waiting for core to stop")
 	}
 }
 
@@ -843,7 +847,7 @@ func (s *CoreService) stopExternalProcess(process *os.Process) error {
 
 	coreDebugf("external graceful stop timed out, forcing kill: pid=%d", process.Pid)
 	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return fmt.Errorf("stop external sing-box core: %w", err)
+		return fmt.Errorf("stop external core: %w", err)
 	}
 	if err := waitForCoreProcessExit(process, 5*time.Second); err != nil {
 		coreDebugf("external core stop timed out: pid=%d", process.Pid)
@@ -868,7 +872,7 @@ func waitForCoreProcessExit(process *os.Process, timeout time.Duration) error {
 		}
 		select {
 		case <-deadline.C:
-			return errors.New("timed out waiting for external sing-box core to stop")
+			return errors.New("timed out waiting for external core to stop")
 		case <-ticker.C:
 		}
 	}
