@@ -75,8 +75,6 @@ jobs:
         run: |
           $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
           Copy-Item -LiteralPath build\bin\zashdesktop.exe -Destination $assetName
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetName).Hash.ToLowerInvariant()
-          "$hash  $assetName" | Set-Content -LiteralPath "$assetName.sha256" -Encoding ascii
 
       - name: Create GitHub Release
         shell: pwsh
@@ -85,4 +83,4 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
-          gh release create $env:RELEASE_TAG $assetName "$assetName.sha256" --title "zashdesktop $env:RELEASE_TAG" --generate-notes
+          gh release create $env:RELEASE_TAG $assetName --title "zashdesktop $env:RELEASE_TAG" --generate-notes
