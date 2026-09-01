@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -464,3 +466,59 @@ func proxyBypassed(target *url.URL, override string) bool {
 	}
 	return false
 }
+
+var (
+	fontExtRegex   = regexp.MustCompile(`\s*\([^)]*\)$`)
+	fontStyleRegex = regexp.MustCompile(`(?i)\s+(Bold(\s+Italic)?|Italic|Light(\s+Italic)?|Regular|Medium|Semibold|SemiBold|Semi-Bold|ExtraBold|Extra-Bold|Black|Heavy|Thin|ExtraLight|Extra-Light|Ultralight|SemiLight|Semi-Light|Normal|Oblique)$`)
+)
+
+func (s *CoreService) GetSystemFonts() []string {
+	fontSet := make(map[string]struct{})
+
+	readFontsFromKey := func(root registry.Key, path string) {
+		k, err := registry.OpenKey(root, path, registry.READ)
+		if err != nil {
+			return
+		}
+		defer k.Close()
+
+		names, err := k.ReadValueNames(-1)
+		if err != nil {
+			return
+		}
+
+		for _, rawName := range names {
+			clean := fontExtRegex.ReplaceAllString(rawName, "")
+			parts := strings.Split(clean, "&")
+			for _, part := range parts {
+				name := strings.TrimSpace(part)
+				if name == "" {
+					continue
+				}
+				family := fontStyleRegex.ReplaceAllString(name, "")
+				family = strings.TrimSpace(family)
+				if family != "" {
+					fontSet[family] = struct{}{}
+				} else {
+					fontSet[name] = struct{}{}
+				}
+			}
+		}
+	}
+
+	readFontsFromKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`)
+	readFontsFromKey(registry.CURRENT_USER, `Software\Microsoft\Windows NT\CurrentVersion\Fonts`)
+
+	list := make([]string, 0, len(fontSet))
+	for f := range fontSet {
+		list = append(list, f)
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return strings.ToLower(list[i]) < strings.ToLower(list[j])
+	})
+
+	debugLogf("system", "enumerated %d system font families", len(list))
+	return list
+}
+

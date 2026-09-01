@@ -53,6 +53,10 @@ export function GetConfigForType(rawCoreType: string): $CancellablePromise<$mode
     return $Call.ByID(798218691, rawCoreType);
 }
 
+export function GetSystemFonts(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(3946130123);
+}
+
 export function ImportConfig(rawContent: string, sourceFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(579250609, rawContent, sourceFileName, rawCoreType);
 }

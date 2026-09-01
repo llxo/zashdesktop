@@ -1,9 +1,9 @@
-import { blurIntensity, dashboardTransparent } from '@/store/settings'
+import { activeFontFamily, blurIntensity, dashboardTransparent } from '@/store/settings'
 import { watchEffect } from 'vue'
 
 /**
- * 把「背景不透明度 / 毛玻璃强度」两个设置发布成 CSS 变量,供
- * assets/styles/utilities/appearance.css 里的规则读取。
+ * 把「背景不透明度 / 毛玻璃强度 / 全局字体」设置发布成 CSS 变量,供
+ * 页面与 utilities/appearance.css 读取。
  *
  * 写在 documentElement 而不是 #app-content:拓扑图全屏时会 Teleport 到 body,
  * 挂在 #app-content 上的变量传不过去。
@@ -18,5 +18,7 @@ export const useAppearanceVars = () => {
       '--app-glass',
       Number(blurIntensity.value) > 0 ? `blur(${blurIntensity.value}px)` : 'none',
     )
+    root.style.setProperty('--app-font-family', activeFontFamily.value)
   })
 }
+

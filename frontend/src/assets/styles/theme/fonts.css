@@ -1,20 +1,25 @@
 /*
- * 字体族令牌与内置 emoji 字体。
- * 每个正文字体都要和一套 emoji 字体配对，具体加载策略见 src/assets/load-fonts.ts。
+ * 字体与内置 emoji 字体。
+ * 全局字体由 --app-font-family 驱动，自动串联正文字体与 emoji 国旗字体。
  */
 
-@theme {
-  --font-MiSans-NotoEmoji: 'MiSans-VF', 'NotoEmoji', system-ui;
-  --font-SarasaUI-NotoEmoji: 'SarasaUiSC-Regular', 'NotoEmoji', system-ui;
-  --font-PingFang-NotoEmoji: 'PingFangSC-Regular', 'NotoEmoji', system-ui;
-  --font-FiraSans-NotoEmoji: 'Fira Sans', 'NotoEmoji', system-ui;
-  --font-SystemUI-NotoEmoji: 'NotoEmoji', system-ui;
-
-  --font-MiSans-Twemoji: 'MiSans-VF', 'Twemoji', system-ui;
-  --font-SarasaUI-Twemoji: 'SarasaUiSC-Regular', 'Twemoji', system-ui;
-  --font-PingFang-Twemoji: 'PingFangSC-Regular', 'Twemoji', system-ui;
-  --font-FiraSans-Twemoji: 'Fira Sans', 'Twemoji', system-ui;
-  --font-SystemUI-Twemoji: 'Twemoji', system-ui;
+html,
+body,
+#app-content,
+input,
+select,
+textarea,
+button {
+  font-family: var(
+    --app-font-family,
+    'Twemoji',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif
+  );
 }
 
 @layer utilities {
@@ -30,3 +35,4 @@
     src: url('/src/assets/fonts/TwemojiMozilla-flags.woff2') format('woff2');
   }
 }
+

@@ -46,11 +46,20 @@
         <div class="setting-item-label">
           {{ $t('fonts') }}
         </div>
-        <SelectInput
-          class="select select-sm w-48"
-          v-model="font"
-          :options="fontOptions.map((value) => ({ value, label: value }))"
-        />
+        <div class="join">
+          <FontSelector
+            class="join-item w-38!"
+            v-model:value="font"
+          />
+          <button
+            class="btn btn-sm join-item"
+            :title="$t('customFont')"
+            @click="customFontModal = !customFontModal"
+          >
+            <PencilSquareIcon class="h-4 w-4" />
+          </button>
+        </div>
+        <CustomFontModal v-model:value="customFontModal" />
       </SettingItem>
       <SettingItem :setting-key="k.emoji">
         <div class="setting-item-label">Emoji</div>
@@ -69,15 +78,18 @@ import SettingItem from '@/components/settings/SettingItem.vue'
 import SelectInput from '@/components/common/SelectInput.vue'
 import { useIsSettingVisible } from '@/composables/settings'
 import { GENERAL_ITEM_KEYS } from '@/config/settingsItems'
-import { EMOJIS, FONTS } from '@/constant'
+import { EMOJIS } from '@/constant'
 import { autoTheme, darkTheme, defaultTheme, emoji, font } from '@/store/settings'
-import { PlusIcon } from '@heroicons/vue/24/outline'
+import { PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import { computed, ref } from 'vue'
 import BackgroundSettings from './BackgroundSettings.vue'
+import CustomFontModal from './CustomFontModal.vue'
 import CustomTheme from './CustomTheme.vue'
+import FontSelector from './FontSelector.vue'
 import ThemeSelector from './ThemeSelector.vue'
 
 const customThemeModal = ref(false)
+const customFontModal = ref(false)
 
 const k = GENERAL_ITEM_KEYS
 const isVisibleFonts = useIsSettingVisible(k.fonts)
@@ -97,14 +109,5 @@ const hasVisibleStyleItems = computed(() => {
     isVisibleEmoji.value
   )
 })
-
-const fontOptions = computed(() => {
-  const mode = import.meta.env.MODE
-
-  if (Object.values(FONTS).includes(mode as FONTS)) {
-    return [mode]
-  }
-
-  return Object.values(FONTS)
-})
 </script>
+

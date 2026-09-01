@@ -6,7 +6,6 @@ import {
   DETAILED_CARD_STYLE,
   EMOJIS,
   FOLDER_MODE,
-  FONTS,
   GEOIP_ASN_DATABASE_URL,
   GEOIP_COUNTRY_DATABASE_URL,
   GLOBAL,
@@ -172,18 +171,14 @@ export const isSidebarCollapsed = computed({
     isSidebarCollapsedConfig.value = value
   },
 })
-const fontConfig = useStorage<FONTS>('config/font', FONTS.MI_SANS)
-export const font = computed({
-  get: () => {
-    const mode = import.meta.env.MODE
-    if (Object.values(FONTS).includes(mode as FONTS)) {
-      return mode as FONTS
-    }
-    return fontConfig.value
-  },
-  set: (val) => {
-    fontConfig.value = val
-  },
+export const font = useStorage<string>('config/font', '')
+export const activeFontFamily = computed(() => {
+  const f = (font.value || '').trim()
+  const emojiFont = emoji.value === EMOJIS.NOTO_COLOR_EMOJI ? 'NotoEmoji' : 'Twemoji'
+  if (!f || f === 'SystemUI' || f === 'default' || f === 'System Default') {
+    return `'${emojiFont}', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`
+  }
+  return `'${f}', '${emojiFont}', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`
 })
 export const emoji = useStorage<EMOJIS>(
   'config/emoji',

@@ -52,7 +52,7 @@ export const useFloatingMenu = <TAnchor extends HTMLElement, TPanel extends HTML
 
     panelStyle.value = {
       left: `${left}px`,
-      width: measuredWidth ? `${width}px` : 'max-content',
+      width: measuredWidth ? `${width}px` : `${minWidth}px`,
       minWidth: `${minWidth}px`,
       maxWidth: `${maxWidth}px`,
       maxHeight: `${maxHeight}px`,
