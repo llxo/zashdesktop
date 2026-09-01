@@ -115,11 +115,11 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 
 func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	menu := a.app.Menu.New()
-	menu.Add("打开 zashdesktop").OnClick(func(*application.Context) {
+	menu.Add("打开面板").OnClick(func(*application.Context) {
 		a.showWindow()
 	})
 	menu.AddSeparator()
-	clearCacheMenu := menu.AddSubmenu("清理前端缓存")
+	clearCacheMenu := menu.AddSubmenu("清理缓存")
 	clearCacheMenu.Add("确认清理").OnClick(func(*application.Context) {
 		go a.clearFrontendCache()
 	})
@@ -168,7 +168,7 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	}
 
 	menu.AddSeparator()
-	menu.Add("退出 zashdesktop").OnClick(func(*application.Context) {
+	menu.Add("退出").OnClick(func(*application.Context) {
 		a.quit()
 	})
 	a.tray.SetMenu(menu)
