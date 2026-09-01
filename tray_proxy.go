@@ -11,9 +11,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -113,34 +116,114 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 	a.setTrayMenu(coreConfig, groups)
 }
 
+type trayI18nText struct {
+	OpenDashboard string
+	ClearCache    string
+	ConfirmClear  string
+	StartCore     string
+	StopCore      string
+	RestartCore   string
+	ProxyGroups   string
+	Quit          string
+}
+
+var (
+	modKernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	procGetUserDefaultLocaleName = modKernel32.NewProc("GetUserDefaultLocaleName")
+	procGetUserDefaultUILanguage = modKernel32.NewProc("GetUserDefaultUILanguage")
+)
+
+func isChineseLocale() bool {
+	if err := procGetUserDefaultLocaleName.Find(); err == nil {
+		buf := make([]uint16, 85) // LOCALE_NAME_MAX_LENGTH
+		r, _, _ := procGetUserDefaultLocaleName.Call(
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+		)
+		if r > 0 {
+			name := strings.ToLower(strings.TrimSpace(syscall.UTF16ToString(buf)))
+			if strings.HasPrefix(name, "zh") {
+				return true
+			}
+			return false
+		}
+	}
+
+	if err := procGetUserDefaultUILanguage.Find(); err == nil {
+		r, _, _ := procGetUserDefaultUILanguage.Call()
+		langID := uint16(r)
+		primaryLangID := langID & 0x3ff
+		if primaryLangID == 0x04 { // LANG_CHINESE
+			return true
+		}
+		if primaryLangID != 0 {
+			return false
+		}
+	}
+
+	for _, env := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if val := strings.ToLower(os.Getenv(env)); val != "" {
+			return strings.HasPrefix(val, "zh")
+		}
+	}
+
+	return false
+}
+
+func getTrayI18n() trayI18nText {
+	if isChineseLocale() {
+		return trayI18nText{
+			OpenDashboard: "打开面板",
+			ClearCache:    "清理缓存",
+			ConfirmClear:  "确认清理",
+			StartCore:     "启动核心",
+			StopCore:      "停止核心",
+			RestartCore:   "重启核心",
+			ProxyGroups:   "代理组",
+			Quit:          "退出",
+		}
+	}
+	return trayI18nText{
+		OpenDashboard: "Dashboard",
+		ClearCache:    "Clear Cache",
+		ConfirmClear:  "Confirm",
+		StartCore:     "Start Core",
+		StopCore:      "Stop Core",
+		RestartCore:   "Restart Core",
+		ProxyGroups:   "Proxy Groups",
+		Quit:          "Quit",
+	}
+}
+
 func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
+	i18n := getTrayI18n()
 	menu := a.app.Menu.New()
-	menu.Add("打开面板").OnClick(func(*application.Context) {
+	menu.Add(i18n.OpenDashboard).OnClick(func(*application.Context) {
 		a.showWindow()
 	})
 	menu.AddSeparator()
-	clearCacheMenu := menu.AddSubmenu("清理缓存")
-	clearCacheMenu.Add("确认清理").OnClick(func(*application.Context) {
+	clearCacheMenu := menu.AddSubmenu(i18n.ClearCache)
+	clearCacheMenu.Add(i18n.ConfirmClear).OnClick(func(*application.Context) {
 		go a.clearFrontendCache()
 	})
 
 	menu.AddSeparator()
 	if coreConfig.Running {
-		menu.Add("停止核心").OnClick(func(*application.Context) {
+		menu.Add(i18n.StopCore).OnClick(func(*application.Context) {
 			go a.trayStopCore()
 		})
-		restartItem := menu.Add("重启核心")
+		restartItem := menu.Add(i18n.RestartCore)
 		restartItem.SetEnabled(coreConfig.Installed)
 		restartItem.OnClick(func(*application.Context) {
 			go a.trayRestartCore()
 		})
 	} else {
-		startItem := menu.Add("启动核心")
+		startItem := menu.Add(i18n.StartCore)
 		startItem.SetEnabled(coreConfig.Installed)
 		startItem.OnClick(func(*application.Context) {
 			go a.trayStartCore()
 		})
-		restartItem := menu.Add("重启核心")
+		restartItem := menu.Add(i18n.RestartCore)
 		restartItem.SetEnabled(coreConfig.Installed)
 		restartItem.OnClick(func(*application.Context) {
 			go a.trayRestartCore()
@@ -148,7 +231,7 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	}
 
 	if len(groups) > 0 {
-		proxyMenu := menu.AddSubmenu("代理组")
+		proxyMenu := menu.AddSubmenu(i18n.ProxyGroups)
 		for _, group := range groups {
 			group := group
 			groupMenu := proxyMenu.AddSubmenu(group.Name)
@@ -168,7 +251,7 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	}
 
 	menu.AddSeparator()
-	menu.Add("退出").OnClick(func(*application.Context) {
+	menu.Add(i18n.Quit).OnClick(func(*application.Context) {
 		a.quit()
 	})
 	a.tray.SetMenu(menu)
