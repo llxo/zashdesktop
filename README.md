@@ -1,14 +1,15 @@
 # zashdesktop
 
-面向 Windows 裸核用户的 sing-box 桌面管理工具。zashdesktop 将核心管理、配置管理和 zashboard 前端整合到一个原生桌面应用中，减少浏览器快捷方式带来的常驻内存占用。
+面向 Windows 裸核用户的 sing-box / mihomo 桌面管理工具。zashdesktop 将核心管理、配置管理和 zashboard 前端整合到一个原生桌面应用中，免除手写自启动核心的脚本，同时显著减少浏览器快捷方式带来的常驻内存占用。
 
 ## 主要功能
 
-- 自启动核心，并在面板或托盘右键快捷启动、停止和重启核心
-- 启动核心时自动清理旧日志
+- 支持一键开机自启与核心自启（基于 Windows 计划任务）
+- 面板与系统托盘右键快捷启动、停止和重启核心
 - 系统托盘常驻，关闭窗口后核心仍可在后台运行
-- 通过系统托盘菜单快速切换代理组
-- 下载和管理核心配置
+- 通过系统托盘菜单快速切换代理组与节点
+- 在线下载、导入、切换和管理多份核心配置文件
+- 支持自定义全局界面字体与系统字体扫描
 - 使用 zashboard 的成熟前端设计
 - 后端逻辑借鉴 GUI.for.SingBox
 - 基于 Wails v3 和系统 WebView2，不捆绑额外浏览器
@@ -23,41 +24,25 @@
 
 相比使用 zashboard 浏览器快捷方式，zashdesktop 可以显著减少常驻的浏览器内存占用。
 
-## 前端基线
+## 使用指南 (Usage)
 
-桌面版前端基于 [zashboard](https://github.com/Zephyruso/zashboard) `3.21.0`
+### 首次使用与核心初始化
 
-## 使用
+桌面端预设了默认的本地核心连接配置（`http://127.0.0.1:9090`），开箱即用。首次使用时，直接进入「核心」页面即可一站式完成准备：
 
-### 构建环境
+1. **选择核心类型**：在 `sing-box` 与 `mihomo` 之间按需选择当前使用的核心。
+2. **下载核心**：点击版本检测，可一键在线检测并下载对应核心的最新稳定版二进制（内置多镜像加速）。
+3. **下载 / 导入配置**：支持输入订阅链接在线下载配置文件，或从本地直接导入现有配置（支持保存并无缝切换多份配置文件）。
+4. **启动核心**：点击「启动」即可运行内核。可按需一键开启“核心自启动”与“开机自启”（免去手动编写自启动脚本）。
 
-需要安装以下组件：
+核心成功启动后，即可直接在节点列表、仪表盘以及系统托盘中无缝管理代理与分流。
 
-- Go
-- Node.js 和 pnpm
-- Wails v3
-- WebView2 运行时
-
-前端源码位于 `frontend/`，桌面构建使用系统字体，并将静态资源输出到 `frontend/dist`。
-
-### 首次启动和核心初始化
-
-首次启动时会进入面板初始化页面，用于填写 Clash API 或 sing-box API 的连接信息。初始化页面下方有“核心”入口，即使还没有配置面板 API，也可以点击它进入核心页面完成初始化。
-
-核心页面可以在 `sing-box` 和 `mihomo` 之间切换，并提供以下操作：
-
-- 查看核心和配置的安装状态与路径
-- 下载核心
-- 下载核心配置
-- 启动、停止和重启核心
-- 设置命令行参数、核心自启动和程序自启动
-
-下载核心及配置，启动成功后，再返回面板初始化页面填写 API 信息即可进入代理面板。
+> [!NOTE]
+> 客户端默认连接地址为 `http://127.0.0.1:9090`。若您的核心配置文件使用了其他端口、监听地址或设置了 API Secret 密钥，可在 **「设置」->「后端」** 中进行修改或添加新的连接。
 
 ### 手动添加核心和配置
 
-程序会从 `zashdesktop.exe` 所在目录读取核心和配置。以
-`C:\DEV\zashdesktop` 为例，目录结构如下：
+程序会从 `zashdesktop.exe` 所在目录读取核心和配置。以 `C:\DEV\zashdesktop` 为例，目录结构如下：
 
 ```text
 C:\DEV\zashdesktop\
@@ -67,7 +52,8 @@ C:\DEV\zashdesktop\
 ├─ sing-box\
 │  ├─ sing-box.exe
 │  └─ config.json
-└─ profiles.json
+├─ profiles.json
+└─ zashdesktop.exe
 ```
 
 可以按照下面的规则手动复制文件：
@@ -79,45 +65,46 @@ C:\DEV\zashdesktop\
 
 核心文件名和配置文件名需要保持不变，配置文件也要放在对应核心目录中。两个核心可以同时保留，运行时选择其中一个作为当前核心。
 
-### 启动报错的处理
+### 启动报错与排错
 
-以 sing-box 为例
+若核心启动失败，可按以下步骤排查：
 
-- 查看 /sing-box/core.log 的具体报错
-- 检查 /sing-box/config.json 是否有问题
-- 检查 /sing-box/sing-box.exe 是否为对应版本
-- 删除 /sing-box/cache.db
+- 查看对应核心目录下的 `core.log`（例如 `sing-box/core.log` 或 `mihomo/core.log`）的具体报错
+- 检查对应核心的配置文件语法是否正确
+- 检查核心可执行文件是否为对应架构与版本
+- 尝试删除对应核心目录下的缓存数据库（如 `sing-box/cache.db`）
+- 查看程序目录下的 `debug.log` 获取客户端后台详细诊断日志
 
-### 构建程序
+## 开发与构建 (Development)
 
-在 Windows PowerShell 中执行：
+### 前端
+
+桌面版前端基于 [zashboard](https://github.com/Zephyruso/zashboard) `3.21.0` 深度定制。前端源码位于 `frontend/`。
+
+### 开发与构建环境
+
+进行本地开发或源码构建需要安装以下环境：
+
+- **Go** 1.22+
+- **Node.js** 和 **pnpm**
+- **Wails v3** CLI (`v3.0.0-beta.8`)
+- **WebView2 运行时** (Windows 10/11 通常已自带)
+
+### 编译打包
+
+在 Windows PowerShell 中执行全自动构建脚本：
 
 ```powershell
 .\build.ps1
 ```
 
-构建脚本会生成 Wails 前端绑定、构建前端资源和生成 Windows 资源，最终输出：
+构建脚本会自动完成环境校验、Wails 前端绑定生成、前端资源打包和 Windows 资源生成，最终输出单文件可执行程序：
 
 ```text
 build/bin/zashdesktop.exe
 ```
 
-## 后端架构与代码解析 (Backend Architecture)
-
-`zashdesktop` 后端采用 Go 语言与 **Wails v3** 桌面框架构建，针对 Windows 原生环境进行了深度系统级适配，代码按功能领域模块化整合为 8 个核心文件：
-
-| 文件 | 功能领域 | 职责说明 |
-| :--- | :--- | :--- |
-| [`main.go`](file:///C:/DEV/workspace/zashdesktop/main.go) | 应用入口与窗口控制 | 程序入口 `main()`、命令行参数解析、Wails v3 实例生命周期、单实例互斥控制、原生窗口尺寸与位置记忆/恢复、WebView2 缓存清理。 |
-| [`core_service.go`](file:///C:/DEV/workspace/zashdesktop/core_service.go) | 核心调度与服务绑定 | 前端绑定的 `CoreService` 服务，处理内核启停调度、状态监听、`profiles.json` 原子化持久化，以及全后端模块统一的 `debug.log` 诊断日志。 |
-| [`core_config.go`](file:///C:/DEV/workspace/zashdesktop/core_config.go) | 内核配置管理 | 提供内核订阅下载（HTTP/HTTPS）、本地配置文件导入、文件名安全规范化、多配置文件目录扫描与无缝选择切换。 |
-| [`core_release.go`](file:///C:/DEV/workspace/zashdesktop/core_release.go) | 核心版本与更新下载 | sing-box 与 mihomo 的 GitHub Release 版本探测、多镜像加速下载、SHA256 完整性校验、ZIP / TAR.GZ 跨格式解压以及内核可执行文件热替换。 |
-| [`core_process.go`](file:///C:/DEV/workspace/zashdesktop/core_process.go) | 进程探测与优雅控制 | 基于 Win32 Toolhelp32 快照探测进程、管理外部残留内核、通过 `GenerateConsoleCtrlEvent` (`CTRL_BREAK_EVENT`) 实现内核优雅停机与文件锁检测。 |
-| [`tray_proxy.go`](file:///C:/DEV/workspace/zashdesktop/tray_proxy.go) | 系统托盘与节点管理 | Windows 原生托盘图标与动态菜单渲染，定时轮询 Clash API 同步代理组/节点状态，支持托盘一键启停核心与切换当前节点。 |
-| [`behavior.go`](file:///C:/DEV/workspace/zashdesktop/behavior.go) | 系统集成与特权行为 | Windows UAC 管理员提权检测、注册表 AppCompatFlags 兼容层、基于 XML 计划任务（`schtasks.exe`）的高权限开机自启、开始菜单快捷方式维护及系统代理探测。 |
-| [`app_update.go`](file:///C:/DEV/workspace/zashdesktop/app_update.go) | 客户端自身热更新 | 检测 `zashdesktop` 自身 GitHub 最新版本、二进制下载与校验、运行中可执行文件安全热替换（支持自动回退）与 PowerShell 辅助无缝重启。 |
-
 ## 后续计划
 
 - 优化管理窗口的启动速度
-
+- 支持 Windows ARM64 架构
