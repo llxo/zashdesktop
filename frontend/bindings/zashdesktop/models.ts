@@ -30,6 +30,7 @@ export interface CoreConfig {
     "running": boolean;
     "pid": number;
     "logPath": string;
+    "coreLogError": boolean;
     "configPath": string;
     "configAvailable": boolean;
     "runAsAdmin": boolean;

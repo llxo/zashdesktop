@@ -79,6 +79,22 @@
                 />
                 {{ $t('coreRestart') }}
               </button>
+              <button
+                v-if="showCoreLogError"
+                class="btn btn-sm text-error"
+                :disabled="isOpeningLog"
+                @click="openCoreLog"
+              >
+                <span
+                  v-if="isOpeningLog"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <DocumentTextIcon
+                  v-else
+                  class="h-4 w-4 text-error"
+                />
+                {{ $t('coreOpenLog') }}
+              </button>
             </div>
           </div>
         </div>
@@ -549,6 +565,7 @@ import {
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   Cog6ToothIcon,
+  DocumentTextIcon,
   PlayIcon,
   StopIcon,
   TrashIcon,
@@ -651,6 +668,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   running: false,
   pid: 0,
   logPath: '',
+  coreLogError: false,
   configPath: '',
   configAvailable: false,
   runAsAdmin: false,
@@ -726,6 +744,11 @@ const isValidatingURL = ref(false)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const isRestarting = ref(false)
+const hasCoreLogError = ref(false)
+const isOpeningLog = ref(false)
+const showCoreLogError = computed(
+  () => !config.running && (hasCoreLogError.value || Boolean(config.coreLogError)),
+)
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isSavingConfigFileName = ref(false)
@@ -1146,6 +1169,7 @@ const saveRunArgs = async () => {
 const startCore = async () => {
   if (isStarting.value || config.running) return
   isStarting.value = true
+  hasCoreLogError.value = false
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('runArgs')
   try {
@@ -1153,8 +1177,12 @@ const startCore = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
+    if (!next.running && next.coreLogError) {
+      hasCoreLogError.value = true
+    }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
+      hasCoreLogError.value = true
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
@@ -1165,6 +1193,7 @@ const startCore = async () => {
 const stopCore = async () => {
   if (isStopping.value || !config.running) return
   isStopping.value = true
+  hasCoreLogError.value = false
   const request = beginConfigRequest()
   try {
     const next = await CoreService.StopCore()
@@ -1181,6 +1210,7 @@ const stopCore = async () => {
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
+  hasCoreLogError.value = false
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('runArgs')
   try {
@@ -1188,12 +1218,28 @@ const restartCore = async () => {
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
+    if (!next.running && next.coreLogError) {
+      hasCoreLogError.value = true
+    }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
+      hasCoreLogError.value = true
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
     isRestarting.value = false
+  }
+}
+
+const openCoreLog = async () => {
+  if (isOpeningLog.value) return
+  isOpeningLog.value = true
+  try {
+    await CoreService.OpenCoreLog(coreType.value)
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  } finally {
+    isOpeningLog.value = false
   }
 }
 
@@ -1496,6 +1542,7 @@ watch(
     availableConfigFiles.value = []
     activeConfigFile.value = ''
     canUndoDelete.value = false
+    hasCoreLogError.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
     loadDownloadSources()
     resetDraft('url')

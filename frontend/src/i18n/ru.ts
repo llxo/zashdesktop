@@ -706,6 +706,7 @@ const ru: LANG_MESSAGE = {
   coreStart: 'Запустить',
   coreStop: 'Остановить',
   coreRestart: 'Перезапустить',
+  coreOpenLog: 'Открыть журнал',
   coreConfigURLPlaceholder: 'Вставьте ссылку на конфигурацию',
   downloadConfig: 'Скачать',
   coreConfig: 'Конфигурация',

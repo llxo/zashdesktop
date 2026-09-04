@@ -698,6 +698,7 @@ const zh = {
   coreStart: '启动',
   coreStop: '停止',
   coreRestart: '重启',
+  coreOpenLog: '打开日志',
   coreConfigURLPlaceholder: '粘贴配置下载地址',
   downloadConfig: '下载',
   coreConfig: '配置文件',

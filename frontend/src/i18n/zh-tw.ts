@@ -690,6 +690,7 @@ const zhTW: LANG_MESSAGE = {
   coreStart: '啟動',
   coreStop: '停止',
   coreRestart: '重啟',
+  coreOpenLog: '開啟日誌',
   coreConfigURLPlaceholder: '貼上設定檔下載網址',
   downloadConfig: '下載',
   coreConfig: '設定檔',

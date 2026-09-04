@@ -69,6 +69,10 @@ export function ListConfigFiles(rawCoreType: string): $CancellablePromise<string
     return $Call.ByID(2883527251, rawCoreType);
 }
 
+export function OpenCoreLog(rawCoreType: string): $CancellablePromise<void> {
+    return $Call.ByID(722706685, rawCoreType);
+}
+
 export function RestartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }

@@ -704,6 +704,7 @@ const en = {
   coreStart: 'Start',
   coreStop: 'Stop',
   coreRestart: 'Restart',
+  coreOpenLog: 'Open Log',
   coreConfigURLPlaceholder: 'Paste config download URL',
   downloadConfig: 'Download',
   coreConfig: 'Config files',

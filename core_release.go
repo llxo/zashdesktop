@@ -826,7 +826,7 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	if s.configGeneration != generation {
 		s.mu.Unlock()
 		if wasRunning {
-			_, _ = s.startCore("", coreType)
+			_, _ = s.startCore("", coreType, false)
 		}
 		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
 	}
@@ -837,7 +837,7 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	}
 
 	if wasRunning {
-		restarted, restartErr := s.startCore(runArgs, coreType)
+		restarted, restartErr := s.startCore(runArgs, coreType, false)
 		if restartErr != nil {
 			if err != nil {
 				return CoreConfig{}, fmt.Errorf("%v; restart %s core: %w", err, coreType, restartErr)

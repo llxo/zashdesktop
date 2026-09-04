@@ -13,9 +13,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -52,6 +54,7 @@ type CoreConfig struct {
 	Running           bool   `json:"running"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
+	CoreLogError      bool   `json:"coreLogError"`
 	ConfigPath        string `json:"configPath"`
 	ConfigAvailable   bool   `json:"configAvailable"`
 	RunAsAdmin        bool   `json:"runAsAdmin"`
@@ -113,6 +116,8 @@ type CoreService struct {
 	trayAPIURL         string
 	keepCoreOnShutdown bool
 	onStateChange      func()
+	stoppingPids       map[int]bool
+	coreLogError       map[string]bool
 
 	app             *application.App
 	appUpdateMu     sync.Mutex
@@ -138,6 +143,8 @@ func NewCoreService() (*CoreService, error) {
 	service := &CoreService{
 		executableDir:      execDir,
 		applicationPath:    executable,
+		stoppingPids:       make(map[int]bool),
+		coreLogError:       make(map[string]bool),
 		lastDeletedFiles:   make(map[string]deletedConfigFile),
 		versionCache:       make(map[string]coreVersionCacheItem),
 		remoteReleaseCache: make(map[string]remoteReleaseCacheItem),
@@ -571,10 +578,10 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 func (s *CoreService) StartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
-	return s.startCore(rawArgs, rawCoreType)
+	return s.startCore(rawArgs, rawCoreType, true)
 }
 
-func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -630,7 +637,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	if len(args) == 0 {
 		return CoreConfig{}, fmt.Errorf("请输入 %s 命令行参数", config.CoreType)
 	}
-	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t", config.CoreType, s.corePathFor(config.CoreType, config.Channel), len(args), fileExists(s.configFilePath(config)))
+	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t panelStart=%t", config.CoreType, s.corePathFor(config.CoreType, config.Channel), len(args), fileExists(s.configFilePath(config)), isPanelStart)
 
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
@@ -648,6 +655,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	configureCoreCommand(command)
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
+		coreDebugf("start core process failed: type=%s err=%v", config.CoreType, err)
 		return CoreConfig{}, fmt.Errorf("start %s core: %w", config.CoreType, err)
 	}
 	coreDebugf("process started: type=%s pid=%d", config.CoreType, command.Process.Pid)
@@ -665,7 +673,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string) (CoreConfig, error)
 	s.process = command
 	s.processDone = done
 	s.processCoreType = coreType
-	go s.waitForCore(command, logFile, done)
+	s.coreLogError[config.CoreType] = false
+	go s.waitForCore(command, logFile, done, config.CoreType, isPanelStart)
 
 	go func(appPath string) {
 		if err := ensureProgramDataShortcut(appPath); err != nil {
@@ -695,6 +704,7 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.coreLogError[config.CoreType] = false
 	s.applyRuntimeState(&config)
 	s.notifyStateChangeLocked()
 	return config, nil
@@ -735,7 +745,7 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 	if err := s.stopCoreProcess(); err != nil {
 		return CoreConfig{}, err
 	}
-	return s.startCore(rawArgs, coreType)
+	return s.startCore(rawArgs, coreType, true)
 }
 
 func (s *CoreService) stopManagedCoreProcess() error {
@@ -770,6 +780,12 @@ func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) 
 	if done == nil {
 		return errors.New("core process state is invalid")
 	}
+
+	s.mu.Lock()
+	if process != nil && process.Process != nil {
+		s.stoppingPids[process.Process.Pid] = true
+	}
+	s.mu.Unlock()
 
 	select {
 	case <-done:
@@ -887,7 +903,7 @@ func (s *CoreService) clearExternalProcess(process *os.Process) {
 	}
 }
 
-func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan struct{}) {
+func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan struct{}, coreType string, isPanelStart bool) {
 	err := command.Wait()
 	if err == nil {
 		coreDebugf("process exited: pid=%d path=%q", command.Process.Pid, command.Path)
@@ -895,15 +911,27 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 		coreDebugf("process exited with error: pid=%d path=%q err=%v", command.Process.Pid, command.Path, err)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(logFile, "\n[sing-box exited: %v]\n", err)
+		_, _ = fmt.Fprintf(logFile, "\n[%s exited: %v]\n", coreType, err)
 	}
 	_ = logFile.Close()
 
 	s.mu.Lock()
+	pid := 0
+	if command.Process != nil {
+		pid = command.Process.Pid
+	}
+	wasStopping := s.stoppingPids[pid]
+	delete(s.stoppingPids, pid)
+
 	if s.process == command {
 		s.process = nil
 		s.processDone = nil
 		s.processCoreType = ""
+	}
+
+	if !wasStopping && isPanelStart {
+		s.coreLogError[coreType] = true
+		coreDebugf("core %s exited during/after panel start: pid=%d err=%v", coreType, pid, err)
 	}
 	s.mu.Unlock()
 	close(done)
@@ -945,6 +973,7 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 		config.PID = s.process.Process.Pid
 	}
 	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
+	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running
 	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
 		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
 		s.stateLogged = true
@@ -1037,7 +1066,7 @@ func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 	s.mu.Lock()
 	s.trayAPIURL = config.TrayAPIURL
 	s.mu.Unlock()
-	if _, err := s.startCore(runArgs, config.CoreType); err != nil {
+	if _, err := s.startCore(runArgs, config.CoreType, false); err != nil {
 		coreDebugf("start core on startup failed: %v", err)
 	}
 }
@@ -1323,6 +1352,43 @@ func (s *CoreService) corePathFor(coreType, channel string) string {
 
 func (s *CoreService) logFilePath(coreType string) string {
 	return filepath.Join(s.coreDirFor(coreType), "core.log")
+}
+
+func (s *CoreService) OpenCoreLog(rawCoreType string) error {
+	s.mu.Lock()
+	coreType, err := normalizeCoreType(rawCoreType)
+	if err != nil {
+		if config, loadErr := s.loadConfigLocked(); loadErr == nil {
+			coreType = config.CoreType
+		} else {
+			coreType = coreTypeSingBox
+		}
+	}
+	logPath := s.logFilePath(coreType)
+	s.mu.Unlock()
+
+	if !fileExists(logPath) {
+		return fmt.Errorf("日志文件不存在: %s", logPath)
+	}
+
+	verb, _ := windows.UTF16PtrFromString("open")
+	file, err := windows.UTF16PtrFromString(logPath)
+	if err != nil {
+		debugLogf("core", "convert log path to utf16 failed: %v", err)
+		return err
+	}
+	if err := windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL); err == nil {
+		debugLogf("core", "opened core log: %s", logPath)
+		return nil
+	}
+	cmd := exec.Command("cmd", "/c", "start", "", logPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		debugLogf("core", "open core log failed: %v", err)
+		return fmt.Errorf("打开日志文件失败: %w", err)
+	}
+	debugLogf("core", "opened core log via cmd fallback: %s", logPath)
+	return nil
 }
 
 func (s *CoreService) configFilePath(config CoreConfig) string {
