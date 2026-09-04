@@ -696,8 +696,6 @@ const ru: LANG_MESSAGE = {
 
   // Настройки ядра для десктопа
   coreSettings: 'Ядро',
-  coreDownloadURL: 'Ссылка для скачивания ядра',
-  coreDownloadURLPlaceholder: 'Вставьте ссылку на GitHub Release ZIP',
   coreRun: 'Запуск ядра',
   coreRunStatus: 'Статус',
   coreRunning: 'Работает',
@@ -724,6 +722,7 @@ const ru: LANG_MESSAGE = {
   coreChannel: 'Канал',
   switchCore: 'Переключить',
   coreDownloadSource: 'Источник загрузки',
+  coreManualInstallTip: 'Для использования других версий ядра загрузите исполняемый файл и поместите его в {path}, затем перезапустите ядро.',
   coreStableBuild: 'Стабильная',
   coreTestBuild: 'Тестовая',
   coreInstalled: 'Установлено',

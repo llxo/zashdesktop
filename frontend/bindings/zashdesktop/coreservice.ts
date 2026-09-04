@@ -116,7 +116,3 @@ export function StopCore(): $CancellablePromise<$models.CoreConfig> {
 export function UndoDeleteConfigFile(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(132981571, rawCoreType);
 }
-
-export function ValidateURL(rawURL: string): $CancellablePromise<string> {
-    return $Call.ByID(1987657121, rawURL);
-}

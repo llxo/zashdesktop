@@ -680,8 +680,6 @@ const zhTW: LANG_MESSAGE = {
 
   // 桌面核心設定(項目私有)
   coreSettings: '核心',
-  coreDownloadURL: '核心下載網址',
-  coreDownloadURLPlaceholder: '貼上 GitHub Release ZIP 網址',
   coreRun: '執行核心',
   coreRunStatus: '執行狀態',
   coreRunning: '執行中',
@@ -708,6 +706,7 @@ const zhTW: LANG_MESSAGE = {
   coreChannel: '通道',
   switchCore: '切換',
   coreDownloadSource: '下載來源',
+  coreManualInstallTip: '若使用其他核心版本，請手動下載對應可執行檔放置到 {path}，重新啟動核心即可生效。',
   coreStableBuild: '穩定版',
   coreTestBuild: '測試版',
   coreInstalled: '已安裝',

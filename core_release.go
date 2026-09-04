@@ -24,12 +24,23 @@ import (
 )
 
 const (
+	singBoxDefaultURLTemplate   = "https://github.com/llxo/sing-box-releases/releases/download/v{version}/sing-box-{version}-windows-amd64.zip"
 	mihomoPrereleaseTag         = "Prerelease-Alpha"
 	mihomoMetaTestURLTemplate   = "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-compatible-{version}.zip"
 	mihomoMetaStableURLTemplate = "https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-compatible-v{version}.zip"
 	mihomoSmartTestURLTemplate  = "https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-v2-go120-{version}.zip"
 	remoteReleaseCacheTTL       = 30 * time.Minute
 )
+
+func defaultCoreURLTemplate(coreType, channel string) string {
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		if channel == coreChannelTest {
+			return mihomoMetaTestURLTemplate
+		}
+		return mihomoMetaStableURLTemplate
+	}
+	return singBoxDefaultURLTemplate
+}
 
 var (
 	semverPattern     = regexp.MustCompile(`(?i)(?:^|[^0-9a-z])v?(\d+\.\d+\.\d+(-[0-9a-z]+([.-][0-9a-z]+)*)?)(?:[^0-9a-z]|$)`)
@@ -298,81 +309,6 @@ func isCoreStaticReleaseTag(tag string) bool {
 // -----------------------------------------------------------------------------
 // Core URL & GitHub Repository Helpers
 // -----------------------------------------------------------------------------
-
-func parseCoreURL(rawURL string) (CoreConfig, error) {
-	rawURL = strings.TrimSpace(rawURL)
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return CoreConfig{}, errors.New("请输入有效的 HTTP(S) 核心下载地址")
-	}
-
-	segments := pathSegments(parsedURL.Path)
-	if len(segments) < 5 || !strings.EqualFold(segments[2], "releases") || !strings.EqualFold(segments[3], "download") {
-		return CoreConfig{}, errors.New("请输入 GitHub Release 的核心 ZIP 下载地址")
-	}
-
-	tag := segments[4]
-	var filename string
-	if len(segments) >= 6 {
-		filename = segments[5]
-	}
-
-	channel := ""
-	configuredVersion := ""
-	if isCoreStaticReleaseTag(tag) {
-		channel = coreChannelTest
-		if filename != "" && !strings.Contains(filename, "{version}") {
-			configuredVersion = normalizeCoreVersion(filename)
-		}
-	} else if !strings.Contains(tag, "{version}") {
-		configuredVersion = normalizeCoreVersion(tag)
-		if configuredVersion == "" && filename != "" {
-			configuredVersion = normalizeCoreVersion(filename)
-		}
-		if configuredVersion == "" && !strings.EqualFold(tag, "latest") {
-			return CoreConfig{}, errors.New("无法从地址识别版本号")
-		}
-		if tag != "" && !strings.EqualFold(tag, "latest") {
-			channel = coreChannel(tag)
-		} else if configuredVersion != "" {
-			channel = coreChannel(configuredVersion)
-		}
-
-		if !strings.EqualFold(tag, "latest") {
-			tagReplacement := "{version}"
-			if strings.HasPrefix(tag, "v") || strings.HasPrefix(tag, "V") {
-				tagReplacement = tag[:1] + "{version}"
-			}
-			segments[4] = tagReplacement
-		}
-	}
-
-	if filename != "" && !strings.Contains(filename, "{version}") && configuredVersion != "" {
-		if tag != "" && !isCoreStaticReleaseTag(tag) && strings.Contains(filename, tag) {
-			tagReplacement := "{version}"
-			if strings.HasPrefix(tag, "v") || strings.HasPrefix(tag, "V") {
-				tagReplacement = tag[:1] + "{version}"
-			}
-			segments[5] = strings.Replace(filename, tag, tagReplacement, 1)
-		} else if strings.Contains(filename, "v"+configuredVersion) {
-			segments[5] = strings.Replace(filename, "v"+configuredVersion, "v{version}", 1)
-		} else if strings.Contains(filename, configuredVersion) {
-			segments[5] = strings.Replace(filename, configuredVersion, "{version}", 1)
-		}
-	}
-
-	parsedURL.Path = "/" + strings.Join(segments, "/")
-	parsedURL.RawPath = ""
-	templateURL := parsedURL.String()
-	templateURL = strings.ReplaceAll(templateURL, "%7Bversion%7D", "{version}")
-	templateURL = strings.ReplaceAll(templateURL, "%7bversion%7d", "{version}")
-
-	return CoreConfig{
-		URLTemplate:       templateURL,
-		ConfiguredVersion: configuredVersion,
-		Channel:           channel,
-	}, nil
-}
 
 func pathSegments(p string) []string {
 	parts := strings.Split(strings.Trim(p, "/"), "/")
@@ -714,20 +650,15 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 	}
 	s.applyCurrentVersion(&config, currentVersion)
 	if config.URLTemplate == "" {
-		debugLogf("release", "check update failed: core download URL not configured")
-		return CoreConfig{}, errors.New("core download URL has not been configured")
+		config.URLTemplate = defaultCoreURLTemplate(config.CoreType, config.Channel)
+	} else {
+		config.URLTemplate = canonicalMihomoURLTemplate(config)
 	}
-	config.URLTemplate = canonicalMihomoURLTemplate(config)
 
 	owner, repository, err := githubRepository(config.URLTemplate)
 	if err != nil {
-		if config.ConfiguredVersion == "" {
-			debugLogf("release", "parse github repository from %q failed: %v", config.URLTemplate, err)
-			return CoreConfig{}, err
-		}
-		config.LatestVersion = config.ConfiguredVersion
-		config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
-		return s.saveCheckedConfig(config, generation)
+		debugLogf("release", "parse github repository from %q failed: %v", config.URLTemplate, err)
+		return CoreConfig{}, err
 	}
 
 	var latest string
@@ -749,26 +680,6 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 	config.UpdateAvailable = isCoreUpdateAvailable(latest, config.Version, config.Channel)
 	debugLogf("release", "check update result: type=%s current=%s latest=%s updateAvailable=%t", coreType, config.Version, config.LatestVersion, config.UpdateAvailable)
 	return s.saveCheckedConfig(config, generation)
-}
-
-func (s *CoreService) ValidateURL(rawURL string) (string, error) {
-	config, err := parseCoreURL(rawURL)
-	if err != nil {
-		return "", err
-	}
-	owner, repository, err := githubRepository(config.URLTemplate)
-	if err != nil {
-		return "", err
-	}
-	version, err := findLatestRelease(owner, repository, config.Channel)
-	if err != nil {
-		return "", err
-	}
-	downloadURL := strings.ReplaceAll(config.URLTemplate, "{version}", version)
-	if _, err := findReleaseAssetDigest(owner, repository, version, downloadURL); err != nil {
-		coreDebugf("validate URL: release digest check returned: %v", err)
-	}
-	return config.URLTemplate, nil
 }
 
 func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConfig, error) {
@@ -854,19 +765,14 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConfig) (CoreConfig, string, string, error) {
 	s.applyCurrentVersion(&config, currentVersion)
 	if config.URLTemplate == "" {
-		return CoreConfig{}, "", "", errors.New("core download URL has not been configured")
+		config.URLTemplate = defaultCoreURLTemplate(config.CoreType, config.Channel)
+	} else {
+		config.URLTemplate = canonicalMihomoURLTemplate(config)
 	}
-	config.URLTemplate = canonicalMihomoURLTemplate(config)
 
 	targetVersion := normalizeCoreVersion(config.LatestVersion)
 	if isMihomoTestPlaceholderVersion(config, targetVersion) {
 		targetVersion = ""
-	}
-	if targetVersion == "" {
-		targetVersion = normalizeCoreVersion(config.ConfiguredVersion)
-		if isMihomoTestPlaceholderVersion(config, targetVersion) {
-			targetVersion = ""
-		}
 	}
 	if targetVersion == "" {
 		var err error

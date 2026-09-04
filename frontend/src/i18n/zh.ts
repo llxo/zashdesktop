@@ -688,8 +688,6 @@ const zh = {
 
   // 桌面核心设置(项目私有)
   coreSettings: '核心',
-  coreDownloadURL: '核心下载地址',
-  coreDownloadURLPlaceholder: '粘贴 GitHub Release ZIP 地址',
   coreRun: '运行核心',
   coreRunStatus: '运行状态',
   coreRunning: '运行中',
@@ -716,6 +714,7 @@ const zh = {
   coreChannel: '渠道',
   switchCore: '切换',
   coreDownloadSource: '下载源',
+  coreManualInstallTip: '若使用其他核心版本，请手动下载对应可执行文件放置到 {path}，重新启动核心即可生效。',
   coreStableBuild: '稳定版',
   coreTestBuild: '测试版',
   coreInstalled: '已安装',

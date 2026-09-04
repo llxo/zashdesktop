@@ -35,10 +35,9 @@ const (
 )
 
 type CoreConfig struct {
-	CoreType          string `json:"coreType"`
-	URLTemplate       string `json:"urlTemplate"`
-	ConfiguredVersion string `json:"configuredVersion"`
-	Version           string `json:"version"`
+	CoreType         string `json:"coreType"`
+	URLTemplate      string `json:"urlTemplate"`
+	Version          string `json:"version"`
 	VersionDetail     string `json:"versionDetail"`
 	Channel           string `json:"channel"`
 	CorePath          string `json:"corePath"`
@@ -337,38 +336,25 @@ func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
 		debugLogf("core", "save URL failed: %v", err)
 		return CoreConfig{}, err
 	}
-	existing, generation, err := s.loadConfigSnapshot(coreType)
+	cleanURL := strings.TrimSpace(rawURL)
+	if cleanURL != "" {
+		if err := validateHTTPURL(cleanURL, "核心下载地址"); err != nil {
+			debugLogf("core", "save URL failed invalid url: %v", err)
+			return CoreConfig{}, err
+		}
+		if _, _, err := githubRepository(cleanURL); err != nil {
+			debugLogf("core", "save URL failed invalid github repo: %v", err)
+			return CoreConfig{}, err
+		}
+	}
+	config, generation, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("core", "save URL failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
-	config, err := parseCoreURL(rawURL)
-	if err != nil {
-		debugLogf("core", "save URL failed to parse %q: %v", rawURL, err)
-		return CoreConfig{}, err
-	}
-	if config.Channel == "" {
-		config.Channel = existing.Channel
-	}
-	if config.Channel == "" {
-		config.Channel = coreChannelStable
-	}
+	config.URLTemplate = cleanURL
 	config.LatestVersion = ""
 	config.UpdateAvailable = false
-	config.Version = existing.Version
-	config.VersionDetail = existing.VersionDetail
-	config.InstalledVersion = existing.InstalledVersion
-	config.Installed = existing.Installed
-	config.RunArgs = existing.RunArgs
-	config.CoreType = existing.CoreType
-	config.ConfigURL = existing.ConfigURL
-	config.AutoStartSingBox = existing.AutoStartSingBox
-	config.AutoStartMihomo = existing.AutoStartMihomo
-	config.RunAsAdmin = existing.RunAsAdmin
-	config.AutoStart = existing.AutoStart
-	config.BackendDebugLog = existing.BackendDebugLog
-	config.StopCoreOnExit = existing.StopCoreOnExit
-	config.TrayAPIURL = existing.TrayAPIURL
 
 	saved, err := s.commitConfigUpdate(config, generation)
 	if err != nil {

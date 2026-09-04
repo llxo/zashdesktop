@@ -135,7 +135,7 @@
                 type="button"
                 :aria-label="$t('checkUpdate')"
                 :title="$t('checkUpdate')"
-                :disabled="isChecking || isDownloading || isSaving || !urlInput.trim()"
+                :disabled="isChecking || isDownloading || isSaving"
                 @click="checkUpdate(true, true)"
               >
                 <span
@@ -381,7 +381,7 @@
               v-model="selectedSourceURL"
               class="select select-sm min-w-44 max-sm:w-full"
               :aria-label="$t('coreDownloadSource')"
-              :disabled="isSaving || isValidatingURL || isDownloading"
+              :disabled="isSaving || isDownloading"
               @change="selectDownloadSource"
             >
               <option
@@ -393,20 +393,10 @@
               </option>
             </select>
           </label>
+        </div>
 
-          <label class="setting-item flex-col !items-stretch py-3">
-            <span class="setting-item-label">{{ $t('coreDownloadURL') }}</span>
-            <input
-              v-model="urlInput"
-              class="input input-sm w-full"
-              type="url"
-              :placeholder="$t('coreDownloadURLPlaceholder')"
-              :disabled="isSaving || isValidatingURL || isDownloading"
-              @input="touchDraft('url')"
-              @change="saveURL()"
-              @keydown.enter.prevent="validateAndAddURL"
-            />
-          </label>
+        <div class="mt-3 rounded-lg bg-base-200/50 p-2.5 text-xs leading-relaxed text-base-content/70">
+          {{ $t('coreManualInstallTip', { path: `${coreType}/${coreType}.exe` }) }}
         </div>
       </DialogWrapper>
     </template>
@@ -576,7 +566,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from
 type CoreType = 'sing-box' | 'mihomo'
 type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 type CoreChannel = 'stable' | 'test'
-type DraftKey = 'url' | 'runArgs' | 'configURL' | 'configFileName' | 'behavior'
+type DraftKey = 'runArgs' | 'configURL' | 'configFileName' | 'behavior'
 
 type DownloadSource = {
   label: string
@@ -653,7 +643,6 @@ const emit = defineEmits<{
 const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   coreType,
   urlTemplate: '',
-  configuredVersion: '',
   version: '',
   versionDetail: '',
   channel: '',
@@ -705,9 +694,7 @@ const defaultConfigFileName = computed(() =>
   coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
 )
 const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml' : '.json'))
-const urlInput = ref('')
 const selectedSourceURL = ref('')
-const customDownloadSources = ref<DownloadSource[]>([])
 const runArgsInput = ref('')
 const configURLInput = ref('')
 const configFileNameInput = ref('')
@@ -715,7 +702,6 @@ const configFileInput = ref<HTMLInputElement | null>(null)
 const advancedOpen = ref(false)
 // A response may only clean the exact draft revision that it submitted.
 const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
-  url: { dirty: false, revision: 0 },
   runArgs: { dirty: false, revision: 0 },
   configURL: { dirty: false, revision: 0 },
   configFileName: { dirty: false, revision: 0 },
@@ -741,7 +727,6 @@ const isSaving = ref(false)
 const isSavingChannel = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
-const isValidatingURL = ref(false)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const isRestarting = ref(false)
@@ -781,7 +766,6 @@ const isConfigMutationPending = computed(
     isSaving.value ||
     isSavingChannel.value ||
     isDownloading.value ||
-    isValidatingURL.value ||
     isStarting.value ||
     isStopping.value ||
     isRestarting.value ||
@@ -801,7 +785,7 @@ const installedVersionLabel = computed(() => {
   return config.installedVersion || config.version || t('coreInstalled')
 })
 const isCoreMaintenanceBusy = computed(
-  () => isSaving.value || isValidatingURL.value || isDownloading.value,
+  () => isSaving.value || isDownloading.value,
 )
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshRequest = 0
@@ -820,39 +804,9 @@ const applyCurrentConfig = (request: ConfigRequest, next: CoreConfig, forceDraft
   applyConfig(next, forceDrafts)
   return true
 }
-const sourceStorageKey = computed(() => `core-download-sources:${coreType.value}`)
-const sourceOptions = computed(() => [
-  ...builtInDownloadSources[coreType.value],
-  ...customDownloadSources.value,
-])
+const sourceOptions = computed(() => builtInDownloadSources[coreType.value])
 const sourceURL = (source: DownloadSource, channel = currentChannel.value) =>
   source.channelURLs?.[channel] ?? source.url
-
-const sourceLabel = (rawURL: string) => {
-  try {
-    const segments = new URL(rawURL).pathname.split('/').filter(Boolean)
-    return segments.length >= 2 ? `${segments[0]}/${segments[1]}` : rawURL
-  } catch {
-    return rawURL
-  }
-}
-
-const isBuiltInOrLegacySource = (url: string) => {
-  const normalized = url.trim().toLowerCase()
-  if (!normalized) return true
-  for (const source of builtInDownloadSources[coreType.value]) {
-    if (source.url.toLowerCase() === normalized) return true
-    for (const channelURL of Object.values(source.channelURLs ?? {})) {
-      if (channelURL.toLowerCase() === normalized) return true
-    }
-  }
-  if (coreType.value === 'mihomo') {
-    if (normalized.includes('metacubex/mihomo') || normalized.includes('vernesong/mihomo')) {
-      return true
-    }
-  }
-  return false
-}
 
 const findMatchingDownloadSource = (url: string) => {
   if (!url) return undefined
@@ -876,55 +830,16 @@ const findMatchingDownloadSource = (url: string) => {
   return undefined
 }
 
-const loadDownloadSources = () => {
-  customDownloadSources.value = []
-  try {
-    const stored = JSON.parse(localStorage.getItem(sourceStorageKey.value) || '[]')
-    if (!Array.isArray(stored)) return
-    customDownloadSources.value = stored
-      .filter((url): url is string => typeof url === 'string' && url.trim() !== '')
-      .map((url) => url.trim())
-      .filter((url, index, urls) => !isBuiltInOrLegacySource(url) && urls.indexOf(url) === index)
-      .map((url) => ({ label: sourceLabel(url), url }))
-  } catch {
-    customDownloadSources.value = []
-  }
-}
-
-const persistDownloadSources = () => {
-  try {
-    localStorage.setItem(
-      sourceStorageKey.value,
-      JSON.stringify(customDownloadSources.value.map((source) => source.url)),
-    )
-  } catch {
-    // Local storage is optional in the desktop webview.
-  }
-}
-
-const rememberDownloadSource = (rawURL: string) => {
-  const normalizedURL = rawURL.trim()
-  if (!normalizedURL || isBuiltInOrLegacySource(normalizedURL) || sourceOptions.value.some((source) => source.url === normalizedURL)) return
-  customDownloadSources.value.push({ label: sourceLabel(normalizedURL), url: normalizedURL })
-  persistDownloadSources()
-}
-
 const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
   const coreChanged = nextCoreType !== props.coreType
   const syncAllDrafts = forceDrafts || coreChanged
   Object.assign(config, next)
   if (coreChanged) emit('update:coreType', nextCoreType)
-  if (syncAllDrafts || !draftState.url.dirty) {
-    if (urlInput.value !== next.urlTemplate) {
-      urlInput.value = next.urlTemplate
-    }
-    resetDraft('url')
-    const matchSource = findMatchingDownloadSource(next.urlTemplate)
-    const matchURL = matchSource ? sourceURL(matchSource) : ''
-    if (selectedSourceURL.value !== matchURL) {
-      selectedSourceURL.value = matchURL
-    }
+  const matchSource = findMatchingDownloadSource(next.urlTemplate)
+  const matchURL = matchSource ? sourceURL(matchSource) : (sourceOptions.value[0] ? sourceURL(sourceOptions.value[0]) : '')
+  if (selectedSourceURL.value !== matchURL) {
+    selectedSourceURL.value = matchURL
   }
   if (syncAllDrafts || !draftState.runArgs.dirty) {
     if (runArgsInput.value !== next.runArgs) {
@@ -1077,9 +992,7 @@ const undoDeleteConfigFile = async () => {
 
 const selectDownloadSource = async () => {
   if (selectedSourceURL.value) {
-    urlInput.value = selectedSourceURL.value
-    touchDraft('url')
-    await saveURL()
+    await saveURL(selectedSourceURL.value)
   }
 }
 
@@ -1113,30 +1026,6 @@ const saveChannel = async (rawChannel: string) => {
 const toggleChannel = async () => {
   const targetChannel = currentChannel.value === 'test' ? 'stable' : 'test'
   await saveChannel(targetChannel)
-}
-
-const validateAndAddURL = async () => {
-  if (isValidatingURL.value || !urlInput.value.trim()) return
-  isValidatingURL.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('url')
-  try {
-    const normalizedURL = await CoreService.ValidateURL(urlInput.value.trim())
-    if (!isCurrentConfigRequest(request)) return
-    const next = await CoreService.SaveURL(normalizedURL, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    rememberDownloadSource(normalizedURL)
-    selectedSourceURL.value = normalizedURL
-    commitDraftSave('url', draftRevision)
-    applyCurrentConfig(request, next)
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
-  } finally {
-    isValidatingURL.value = false
-  }
-  void checkUpdate(false)
 }
 
 const saveRunArgs = async () => {
@@ -1371,16 +1260,13 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
 }
 
-const saveURL = async (refreshRemote = true) => {
-  if (isSaving.value || !urlInput.value.trim()) return false
+const saveURL = async (targetURL: string, refreshRemote = true) => {
+  if (isSaving.value || !targetURL.trim()) return false
   isSaving.value = true
   const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('url')
   try {
-    const next = await CoreService.SaveURL(urlInput.value.trim(), coreType.value)
+    const next = await CoreService.SaveURL(targetURL.trim(), coreType.value)
     if (!isCurrentConfigRequest(request)) return false
-    rememberDownloadSource(next.urlTemplate)
-    commitDraftSave('url', draftRevision)
     applyCurrentConfig(request, next)
     return true
   } catch (error) {
@@ -1397,7 +1283,7 @@ const saveURL = async (refreshRemote = true) => {
 }
 
 const checkUpdate = async (notifyError = true, force = false) => {
-  if (isChecking.value || !urlInput.value.trim()) return null
+  if (isChecking.value) return null
   const sequence = ++checkSequence
   const targetCoreType = coreType.value
   isChecking.value = true
@@ -1447,11 +1333,6 @@ const downloadCore = async () => {
 }
 
 const maintainCore = async () => {
-  if (!urlInput.value.trim()) {
-    advancedOpen.value = true
-    return
-  }
-  if (draftState.url.dirty && !(await saveURL(false))) return
   await downloadCore()
 }
 
@@ -1499,7 +1380,6 @@ const installAppUpdate = async () => {
 }
 
 onMounted(() => {
-  loadDownloadSources()
   void (async () => {
     try {
       const v = await CoreService.GetAppVersion()
@@ -1537,8 +1417,6 @@ watch(
     canUndoDelete.value = false
     hasCoreLogError.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
-    loadDownloadSources()
-    resetDraft('url')
     resetDraft('runArgs')
     resetDraft('configURL')
     resetDraft('configFileName')

@@ -694,8 +694,6 @@ const en = {
 
   // Desktop Core Settings (Desktop Private)
   coreSettings: 'Core',
-  coreDownloadURL: 'Core download URL',
-  coreDownloadURLPlaceholder: 'Paste GitHub Release ZIP URL',
   coreRun: 'Run Core',
   coreRunStatus: 'Status',
   coreRunning: 'Running',
@@ -722,6 +720,7 @@ const en = {
   coreChannel: 'Channel',
   switchCore: 'Switch',
   coreDownloadSource: 'Download source',
+  coreManualInstallTip: 'To use other core versions, manually download the executable and place it at {path}, then restart the core.',
   coreStableBuild: 'Stable',
   coreTestBuild: 'Test',
   coreInstalled: 'Installed',

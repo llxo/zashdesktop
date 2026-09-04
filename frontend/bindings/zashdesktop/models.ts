@@ -15,7 +15,6 @@ export interface AppUpdateInfo {
 export interface CoreConfig {
     "coreType": string;
     "urlTemplate": string;
-    "configuredVersion": string;
     "version": string;
     "versionDetail": string;
     "channel": string;
