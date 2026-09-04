@@ -51,6 +51,7 @@ type CoreConfig struct {
 	RunArgs           string `json:"runArgs"`
 	ConfigURL         string `json:"configURL"`
 	ConfigFileName    string `json:"configFileName"`
+	ActiveConfigFile  string `json:"activeConfigFile"`
 	Running           bool   `json:"running"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
@@ -1122,6 +1123,16 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 		configFileName = defaultConfigFileName(coreType)
 	}
 	config.ConfigFileName = configFileName
+
+	activeConfigFile := config.ActiveConfigFile
+	if strings.TrimSpace(activeConfigFile) == "" && strings.TrimSpace(config.ConfigFileName) != "" {
+		activeConfigFile = config.ConfigFileName
+	}
+	normalizedActive, activeErr := normalizeConfigFileName(activeConfigFile, coreType)
+	if activeErr != nil {
+		normalizedActive = defaultConfigFileName(coreType)
+	}
+	config.ActiveConfigFile = normalizedActive
 	if strings.TrimSpace(config.TrayAPIURL) == "" {
 		config.TrayAPIURL = defaultTrayAPIURL
 	}
@@ -1273,15 +1284,16 @@ type persistedProfileClean struct {
 	LatestVersion  string `json:"latestVersion,omitempty"`
 	RunArgs        string `json:"runArgs,omitempty"`
 	ConfigURL      string `json:"configURL,omitempty"`
-	ConfigFileName string `json:"configFileName,omitempty"`
-	TrayAPIURL     string `json:"trayAPIURL,omitempty"`
+	ConfigFileName   string `json:"configFileName,omitempty"`
+	ActiveConfigFile string `json:"activeConfigFile,omitempty"`
+	TrayAPIURL       string `json:"trayAPIURL,omitempty"`
 }
 
 func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error) {
 	clean := struct {
-		ActiveCore string                             `json:"activeCore"`
-		Behavior   sharedBehaviorConfig               `json:"behavior"`
-		Profiles   map[string]persistedProfileClean   `json:"profiles"`
+		ActiveCore string                           `json:"activeCore"`
+		Behavior   sharedBehaviorConfig             `json:"behavior"`
+		Profiles   map[string]persistedProfileClean `json:"profiles"`
 	}{
 		ActiveCore: profiles.ActiveCore,
 		Behavior:   profiles.Behavior,
@@ -1289,16 +1301,17 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 	}
 	for key, p := range profiles.Profiles {
 		clean.Profiles[key] = persistedProfileClean{
-			CoreType:       p.CoreType,
-			URLTemplate:    p.URLTemplate,
-			Version:        p.Version,
-			VersionDetail:  p.VersionDetail,
-			Channel:        p.Channel,
-			LatestVersion:  p.LatestVersion,
-			RunArgs:        p.RunArgs,
-			ConfigURL:      p.ConfigURL,
-			ConfigFileName: p.ConfigFileName,
-			TrayAPIURL:     p.TrayAPIURL,
+			CoreType:         p.CoreType,
+			URLTemplate:      p.URLTemplate,
+			Version:          p.Version,
+			VersionDetail:    p.VersionDetail,
+			Channel:          p.Channel,
+			LatestVersion:    p.LatestVersion,
+			RunArgs:          p.RunArgs,
+			ConfigURL:        p.ConfigURL,
+			ConfigFileName:   p.ConfigFileName,
+			ActiveConfigFile: p.ActiveConfigFile,
+			TrayAPIURL:       p.TrayAPIURL,
 		}
 	}
 	return json.MarshalIndent(clean, "", "  ")
@@ -1392,6 +1405,14 @@ func (s *CoreService) OpenCoreLog(rawCoreType string) error {
 }
 
 func (s *CoreService) configFilePath(config CoreConfig) string {
+	fileName, err := normalizeConfigFileName(config.ActiveConfigFile, config.CoreType)
+	if err != nil {
+		fileName = defaultConfigFileName(config.CoreType)
+	}
+	return filepath.Join(s.coreDirFor(config.CoreType), fileName)
+}
+
+func (s *CoreService) saveConfigFilePath(config CoreConfig) string {
 	fileName, err := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
 	if err != nil {
 		fileName = defaultConfigFileName(config.CoreType)

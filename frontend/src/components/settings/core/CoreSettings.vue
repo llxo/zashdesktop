@@ -665,6 +665,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   runArgs: '',
   configURL: '',
   configFileName: coreType === 'mihomo' ? 'config.yaml' : 'config.json',
+  activeConfigFile: coreType === 'mihomo' ? 'config.yaml' : 'config.json',
   running: false,
   pid: 0,
   logPath: '',
@@ -970,7 +971,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
 }
 
 const syncActiveConfigFile = () => {
-  const target = config.configFileName || defaultConfigFileName.value
+  const target = config.activeConfigFile || defaultConfigFileName.value
   if (availableConfigFiles.value.length === 0) {
     activeConfigFile.value = target
     return

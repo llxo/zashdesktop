@@ -82,7 +82,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 		debugLogf("config", "create core directory failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	targetPath := s.configFilePath(config)
+	targetPath := s.saveConfigFilePath(config)
 	if err := writeFileAtomically(targetPath, data, 0o600); err != nil {
 		debugLogf("config", "write config atomically to %q failed: %v", targetPath, err)
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
@@ -133,7 +133,7 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		debugLogf("config", "create core directory failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	targetPath := s.configFilePath(config)
+	targetPath := s.saveConfigFilePath(config)
 	if err := writeFileAtomically(targetPath, data, 0o600); err != nil {
 		debugLogf("config", "write imported config to %q failed: %v", targetPath, err)
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
@@ -263,7 +263,7 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 	}
 
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
-	config.ConfigFileName = fileName
+	config.ActiveConfigFile = fileName
 
 	debugLogf("config", "select config file: type=%s file=%q", coreType, fileName)
 	if err := s.saveConfigLocked(config); err != nil {
@@ -354,8 +354,8 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		nextFile = defaultName
 	}
 
-	if strings.EqualFold(config.ConfigFileName, fileName) {
-		config.ConfigFileName = nextFile
+	if strings.EqualFold(config.ActiveConfigFile, fileName) {
+		config.ActiveConfigFile = nextFile
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, nextFile, coreType)
 		if err := s.saveConfigLocked(config); err != nil {
 			return CoreConfig{}, err
@@ -410,7 +410,7 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 	delete(s.lastDeletedFiles, coreType)
 	coreDebugf("undo delete success: type=%s name=%q", coreType, deleted.FileName)
 
-	config.ConfigFileName = deleted.FileName
+	config.ActiveConfigFile = deleted.FileName
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, deleted.FileName, coreType)
 
 	if err := s.saveConfigLocked(config); err != nil {
