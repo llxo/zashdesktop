@@ -708,8 +708,6 @@ const zh = {
   coreUpdateAvailable: '有更新可用',
   checkUpdate: '检查更新',
   updateCore: '更新',
-  installCore: '安装核心',
-  reinstallCore: '重新安装',
   coreMaintenance: '下载核心',
   coreChannel: '渠道',
   coreDownloadSource: '下载源',

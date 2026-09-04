@@ -716,8 +716,6 @@ const ru: LANG_MESSAGE = {
   coreUpdateAvailable: 'Доступно обновление',
   checkUpdate: 'Проверить обновления',
   updateCore: 'Обновить',
-  installCore: 'Установить ядро',
-  reinstallCore: 'Переустановить',
   coreMaintenance: 'Загрузка ядра',
   coreChannel: 'Канал',
   coreDownloadSource: 'Источник загрузки',

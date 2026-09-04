@@ -1,25 +1,35 @@
 <template>
   <div class="flex flex-col gap-3 text-sm">
     <template v-if="props.activeTab !== 'settings'">
+      <!-- 运行核心 -->
       <section>
         <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
           {{ $t('coreRun') }}
         </div>
         <div class="settings-grid">
+          <!-- 运行状态 -->
           <div class="setting-item">
-            <span class="setting-item-label">{{ $t('coreRunStatus') }}</span>
-            <span
-              class="badge badge-sm"
-              :class="config.running ? 'badge-success' : 'badge-ghost'"
-            >
-              {{ config.running ? $t('coreRunning') : $t('coreStopped') }}
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreRunStatus') }}
             </span>
+            <div class="flex flex-1 items-center justify-end">
+              <span
+                class="badge badge-sm"
+                :class="config.running ? 'badge-success' : 'badge-ghost'"
+              >
+                {{ config.running ? $t('coreRunning') : $t('coreStopped') }}
+              </span>
+            </div>
           </div>
 
-          <div class="setting-item flex-col !items-stretch py-3">
+          <!-- 命令行参数 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreRunArgs') }}
+            </span>
             <input
               v-model="runArgsInput"
-              class="input input-sm w-full font-mono text-xs"
+              class="input input-sm flex-1 min-w-0 font-mono text-xs"
               type="text"
               :aria-label="$t('coreRunArgs')"
               :placeholder="defaultRunArgsPlaceholder"
@@ -30,11 +40,17 @@
               @change="saveRunArgs"
               @keydown.enter.prevent="saveRunArgs"
             />
+          </div>
 
-            <div class="flex flex-wrap gap-2 self-start">
+          <!-- 运行操作 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('actions') }}
+            </span>
+            <div class="flex flex-1 items-center justify-end gap-2">
               <button
                 v-if="!config.running"
-                class="btn btn-primary btn-sm"
+                class="btn btn-primary btn-sm min-w-16"
                 :disabled="isStarting || isStopping || isRestarting || !config.installed"
                 @click="startCore"
               >
@@ -50,7 +66,7 @@
               </button>
               <button
                 v-else
-                class="btn btn-error btn-sm"
+                class="btn btn-error btn-sm min-w-16"
                 :disabled="isStarting || isStopping || isRestarting"
                 @click="stopCore"
               >
@@ -65,7 +81,7 @@
                 {{ $t('coreStop') }}
               </button>
               <button
-                class="btn btn-sm"
+                class="btn btn-sm min-w-16"
                 :disabled="isStarting || isStopping || isRestarting || !config.installed"
                 @click="restartCore"
               >
@@ -81,7 +97,7 @@
               </button>
               <button
                 v-if="showCoreLogError"
-                class="btn btn-sm text-error"
+                class="btn btn-sm text-error min-w-16"
                 :disabled="isOpeningLog"
                 @click="openCoreLog"
               >
@@ -91,7 +107,7 @@
                 ></span>
                 <DocumentTextIcon
                   v-else
-                  class="h-4 w-4 text-error"
+                  class="h-4 w-4"
                 />
                 {{ $t('coreOpenLog') }}
               </button>
@@ -100,36 +116,40 @@
         </div>
       </section>
 
+      <!-- 下载核心 -->
       <section>
         <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
           {{ $t('coreMaintenance') }}
         </div>
         <div class="settings-grid">
-          <div class="setting-item gap-3 py-3">
-            <span class="setting-item-label">{{ $t('coreSettings') }}</span>
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <!-- 核心版本 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreSettings') }}
+            </span>
+            <div class="flex flex-1 items-center justify-end gap-2">
               <span
-                class="badge badge-sm font-mono"
-                :class="config.installed ? 'badge-success' : 'badge-ghost'"
+                class="badge badge-sm badge-ghost font-mono whitespace-nowrap"
+                :class="{ 'opacity-60': !config.installed }"
               >
                 {{ installedVersionLabel }}
               </span>
               <template v-if="config.latestVersion">
-                <span
-                  v-if="config.updateAvailable"
-                  class="badge badge-warning badge-sm font-mono"
-                >
-                  {{ $t('coreUpdateAvailable') }}: {{ config.latestVersion }}
-                </span>
+                <template v-if="config.updateAvailable">
+                  <ArrowRightIcon class="text-base-content/40 h-3.5 w-3.5 shrink-0" />
+                  <span class="badge badge-warning badge-sm font-mono whitespace-nowrap">
+                    {{ config.latestVersion }}
+                  </span>
+                </template>
                 <span
                   v-else-if="config.installed"
-                  class="badge badge-ghost badge-sm text-xs opacity-75 font-mono"
+                  class="text-base-content/60 text-xs font-mono whitespace-nowrap"
                 >
                   {{ $t('appUpToDate') }}
                 </span>
               </template>
               <button
-                class="btn btn-circle btn-ghost btn-xs"
+                class="btn btn-circle btn-ghost btn-xs shrink-0"
                 type="button"
                 :aria-label="$t('checkUpdate')"
                 :title="$t('checkUpdate')"
@@ -148,9 +168,13 @@
             </div>
           </div>
 
-          <div class="setting-item py-3">
-            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
+          <!-- 渠道切换 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreChannel') }}
+            </span>
             <div
+              class="flex flex-1 justify-end"
               :class="{
                 'pointer-events-none opacity-60':
                   isSavingChannel || isSaving || isDownloading,
@@ -164,30 +188,31 @@
             </div>
           </div>
 
-          <label class="setting-item max-sm:flex-col max-sm:items-stretch! py-3">
-            <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
-            <select
-              v-model="selectedSourceURL"
-              class="select select-sm min-w-44 max-sm:w-full"
-              :aria-label="$t('coreDownloadSource')"
-              :disabled="isSaving || isDownloading"
-              @change="selectDownloadSource"
-            >
-              <option
-                v-for="source in sourceOptions"
-                :key="source.url"
-                :value="sourceURL(source)"
+          <!-- 下载源与核心更新 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreDownloadSource') }}
+            </span>
+            <div class="join flex-1 min-w-0">
+              <select
+                v-model="selectedSourceURL"
+                class="join-item select select-sm flex-1 min-w-0"
+                :aria-label="$t('coreDownloadSource')"
+                :disabled="isSaving || isDownloading"
+                @change="selectDownloadSource"
               >
-                {{ source.label }}
-              </option>
-            </select>
-          </label>
-
-          <div class="setting-item py-3">
-            <div class="flex flex-wrap gap-2 self-start">
+                <option
+                  v-for="source in sourceOptions"
+                  :key="source.url"
+                  :value="sourceURL(source)"
+                >
+                  {{ source.label }}
+                </option>
+              </select>
               <button
-                class="btn btn-sm"
+                class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 :class="{ 'btn-primary': !config.installed || config.updateAvailable }"
+                type="button"
                 :disabled="isCoreMaintenanceBusy"
                 @click="maintainCore"
               >
@@ -199,29 +224,27 @@
                   v-else
                   class="h-4 w-4"
                 />
-                {{
-                  !config.installed
-                    ? $t('installCore')
-                    : config.updateAvailable
-                      ? $t('updateCore')
-                      : $t('reinstallCore')
-                }}
+                {{ $t('updateCore') }}
               </button>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- 配置文件 -->
       <section>
         <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
           {{ $t('coreConfig') }}
         </div>
         <div class="settings-grid">
-          <div class="setting-item grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2 py-3">
-            <span class="setting-item-label">{{ $t('coreConfigURL') }}</span>
+          <!-- 订阅链接输入 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreConfigURL') }}
+            </span>
             <input
               v-model="configURLInput"
-              class="input input-sm w-full min-w-0"
+              class="input input-sm flex-1 min-w-0"
               type="url"
               :aria-label="$t('coreConfigURL')"
               :placeholder="$t('coreConfigURLPlaceholder')"
@@ -230,53 +253,56 @@
             />
           </div>
 
-          <div
-            class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
-          >
-            <span class="setting-item-label">{{ $t('coreConfigSaveTo') }}</span>
-            <input
-              v-model="configFileNameInput"
-              class="input input-sm w-full min-w-0 font-mono"
-              type="text"
-              :aria-label="$t('coreConfigSaveTo')"
-              :placeholder="defaultConfigFileName"
-              :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
-              @input="touchDraft('configFileName')"
-              @change="saveConfigFileName()"
-              @keydown.enter.prevent="saveConfigFileName()"
-            />
-            <button
-              class="btn btn-sm"
-              type="button"
-              :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
-              @click="downloadConfig"
-            >
-              <span
-                v-if="isDownloadingConfig"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownTrayIcon
-                v-else
-                class="h-4 w-4"
+          <!-- 保存并下载/导入 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreConfigSaveTo') }}
+            </span>
+            <div class="join flex-1 min-w-0">
+              <input
+                v-model="configFileNameInput"
+                class="join-item input input-sm flex-1 min-w-0 font-mono"
+                type="text"
+                :aria-label="$t('coreConfigSaveTo')"
+                :placeholder="defaultConfigFileName"
+                :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
+                @input="touchDraft('configFileName')"
+                @change="saveConfigFileName()"
+                @keydown.enter.prevent="saveConfigFileName()"
               />
-              {{ $t('downloadConfig') }}
-            </button>
-            <button
-              class="btn btn-sm"
-              type="button"
-              :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
-              @click="openConfigFilePicker"
-            >
-              <span
-                v-if="isImportingConfig"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowUpTrayIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('coreImportConfig') }}
-            </button>
+              <button
+                class="join-item btn btn-sm shrink-0 whitespace-nowrap"
+                type="button"
+                :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
+                @click="downloadConfig"
+              >
+                <span
+                  v-if="isDownloadingConfig"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowDownTrayIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('downloadConfig') }}
+              </button>
+              <button
+                class="join-item btn btn-sm shrink-0 whitespace-nowrap"
+                type="button"
+                :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
+                @click="openConfigFilePicker"
+              >
+                <span
+                  v-if="isImportingConfig"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowUpTrayIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('coreImportConfig') }}
+              </button>
+            </div>
             <input
               ref="configFileInput"
               class="hidden"
@@ -286,97 +312,99 @@
             />
           </div>
 
-          <div
-            class="setting-item grid grid-cols-[auto_minmax(7rem,10rem)_auto_auto] items-center gap-2 py-3"
-          >
-            <span class="setting-item-label">{{ $t('coreActiveConfig') }}</span>
-            <select
-              v-model="activeConfigFile"
-              class="select select-sm w-full min-w-0 font-mono"
-              :aria-label="$t('coreActiveConfig')"
-              :disabled="
-                config.running ||
-                isStarting ||
-                isStopping ||
-                isRestarting ||
-                isSelectingConfigFile ||
-                isDeletingConfigFile ||
-                isUndoingDelete
-              "
-              @focus="scanConfigFiles(false)"
-              @mousedown="scanConfigFiles(false)"
-              @change="handleSelectConfigFile"
-            >
-              <option
-                v-if="availableConfigFiles.length === 0"
-                disabled
-                value=""
+          <!-- 生效配置切换与删除 -->
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreActiveConfig') }}
+            </span>
+            <div class="join flex-1 min-w-0">
+              <select
+                v-model="activeConfigFile"
+                class="join-item select select-sm flex-1 min-w-0 font-mono"
+                :aria-label="$t('coreActiveConfig')"
+                :disabled="
+                  config.running ||
+                  isStarting ||
+                  isStopping ||
+                  isRestarting ||
+                  isSelectingConfigFile ||
+                  isDeletingConfigFile ||
+                  isUndoingDelete
+                "
+                @focus="scanConfigFiles(false)"
+                @mousedown="scanConfigFiles(false)"
+                @change="handleSelectConfigFile"
               >
-                {{ $t('noConfigFilesFound') }}
-              </option>
-              <option
-                v-for="file in availableConfigFiles"
-                :key="file"
-                :value="file"
+                <option
+                  v-if="availableConfigFiles.length === 0"
+                  disabled
+                  value=""
+                >
+                  {{ $t('noConfigFilesFound') }}
+                </option>
+                <option
+                  v-for="file in availableConfigFiles"
+                  :key="file"
+                  :value="file"
+                >
+                  {{ file }}
+                </option>
+              </select>
+              <button
+                class="join-item btn btn-sm text-error shrink-0 whitespace-nowrap"
+                type="button"
+                :disabled="
+                  config.running ||
+                  isStarting ||
+                  isStopping ||
+                  isRestarting ||
+                  isSelectingConfigFile ||
+                  isDeletingConfigFile ||
+                  isUndoingDelete ||
+                  !activeConfigFile ||
+                  availableConfigFiles.length === 0
+                "
+                @click="deleteActiveConfigFile"
               >
-                {{ file }}
-              </option>
-            </select>
-            <button
-              class="btn btn-sm text-error"
-              type="button"
-              :disabled="
-                config.running ||
-                isStarting ||
-                isStopping ||
-                isRestarting ||
-                isSelectingConfigFile ||
-                isDeletingConfigFile ||
-                isUndoingDelete ||
-                !activeConfigFile ||
-                availableConfigFiles.length === 0
-              "
-              @click="deleteActiveConfigFile"
-            >
-              <span
-                v-if="isDeletingConfigFile"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <TrashIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('delete') }}
-            </button>
-            <button
-              class="btn btn-sm"
-              type="button"
-              :disabled="
-                config.running ||
-                isStarting ||
-                isStopping ||
-                isRestarting ||
-                isSelectingConfigFile ||
-                isDeletingConfigFile ||
-                isUndoingDelete ||
-                !canUndoDelete
-              "
-              @click="undoDeleteConfigFile"
-            >
-              <span
-                v-if="isUndoingDelete"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowUturnLeftIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('undo') }}
-            </button>
+                <span
+                  v-if="isDeletingConfigFile"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <TrashIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('delete') }}
+              </button>
+              <button
+                v-if="canUndoDelete"
+                class="join-item btn btn-sm shrink-0 whitespace-nowrap"
+                type="button"
+                :disabled="
+                  config.running ||
+                  isStarting ||
+                  isStopping ||
+                  isRestarting ||
+                  isSelectingConfigFile ||
+                  isDeletingConfigFile ||
+                  isUndoingDelete
+                "
+                @click="undoDeleteConfigFile"
+              >
+                <span
+                  v-if="isUndoingDelete"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowUturnLeftIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('undo') }}
+              </button>
+            </div>
           </div>
         </div>
       </section>
-
     </template>
 
     <template v-else>
@@ -386,77 +414,103 @@
         </div>
         <div class="settings-grid">
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('coreRunAsAdmin') }}</span>
-            <input
-              v-model="behaviorDraft.runAsAdmin"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior"
-              @change="saveBehavior()"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreRunAsAdmin') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.runAsAdmin"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior()"
+              />
+            </div>
           </label>
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('coreAutoStart') }}</span>
-            <input
-              v-model="behaviorDraft.autoStart"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior || !config.isAdmin"
-              @change="saveBehavior()"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('coreAutoStart') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.autoStart"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior || !config.isAdmin"
+                @change="saveBehavior()"
+              />
+            </div>
           </label>
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('autoStartSingBox') }}</span>
-            <input
-              v-model="behaviorDraft.autoStartSingBox"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior"
-              @change="saveBehavior('sing-box')"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('autoStartSingBox') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.autoStartSingBox"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior('sing-box')"
+              />
+            </div>
           </label>
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('autoStartMihomo') }}</span>
-            <input
-              v-model="behaviorDraft.autoStartMihomo"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior"
-              @change="saveBehavior('mihomo')"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('autoStartMihomo') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.autoStartMihomo"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior('mihomo')"
+              />
+            </div>
           </label>
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('stopCoreOnExit') }}</span>
-            <input
-              v-model="behaviorDraft.stopCoreOnExit"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior"
-              @change="saveBehavior()"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('stopCoreOnExit') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.stopCoreOnExit"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior()"
+              />
+            </div>
           </label>
           <label class="setting-item">
-            <span class="setting-item-label">{{ $t('backendDebugLog') }}</span>
-            <input
-              v-model="behaviorDraft.backendDebugLog"
-              class="toggle"
-              type="checkbox"
-              :disabled="isSavingBehavior"
-              @change="saveBehavior()"
-            />
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('backendDebugLog') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.backendDebugLog"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior()"
+              />
+            </div>
           </label>
-          <label class="setting-item flex-col !items-stretch py-3">
-            <span class="setting-item-label">{{ $t('trayAPIURL') }}</span>
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('trayAPIURL') }}
+            </span>
             <input
               v-model="behaviorDraft.trayAPIURL"
-              class="input input-sm w-full"
+              class="input input-sm flex-1 min-w-0"
               type="url"
               :placeholder="$t('trayAPIURLPlaceholder')"
               :disabled="isSavingBehavior"
               @input="touchDraft('behavior')"
               @change="saveBehavior()"
             />
-          </label>
+          </div>
         </div>
       </section>
 
@@ -465,21 +519,22 @@
           {{ $t('appUpdate') }}
         </div>
         <div class="settings-grid">
-          <div class="setting-item gap-3 max-sm:flex-col max-sm:items-start! max-sm:py-3">
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <span class="setting-item-label">{{ $t('desktopApp') }}</span>
-              <span class="badge badge-sm badge-ghost">
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('desktopApp') }}
+            </span>
+            <div class="flex flex-1 items-center justify-end gap-2">
+              <span class="badge badge-sm badge-ghost font-mono whitespace-nowrap">
                 {{ appVersionLabel }}
               </span>
-              <span
-                v-if="appUpdateInfo.latestVersion"
-                class="badge badge-sm"
-                :class="appUpdateInfo.updateAvailable ? 'badge-warning' : 'badge-ghost'"
-              >
-                {{ appUpdateInfo.latestVersion }}
-              </span>
+              <template v-if="appUpdateInfo.latestVersion && appUpdateInfo.updateAvailable">
+                <ArrowRightIcon class="text-base-content/40 h-3.5 w-3.5 shrink-0" />
+                <span class="badge badge-sm badge-warning font-mono whitespace-nowrap">
+                  {{ appUpdateInfo.latestVersion }}
+                </span>
+              </template>
               <button
-                class="btn btn-circle btn-ghost btn-xs"
+                class="btn btn-circle btn-ghost btn-xs shrink-0"
                 type="button"
                 :aria-label="$t('checkUpdate')"
                 :title="$t('checkUpdate')"
@@ -496,22 +551,29 @@
                 />
               </button>
             </div>
-            <button
-              class="btn btn-sm max-sm:self-stretch"
-              :class="{ 'btn-primary': appUpdateInfo.updateAvailable }"
-              :disabled="isUpdatingApp || isCheckingAppUpdate || !appUpdateInfo.updateAvailable"
-              @click="installAppUpdate()"
-            >
-              <span
-                v-if="isUpdatingApp"
-                class="loading loading-spinner h-4 w-4"
-              ></span>
-              <ArrowDownCircleIcon
-                v-else
-                class="h-4 w-4"
-              />
-              {{ $t('updateApp') }}
-            </button>
+          </div>
+          <div class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('actions') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <button
+                class="btn btn-sm min-w-16"
+                :class="{ 'btn-primary': appUpdateInfo.updateAvailable }"
+                :disabled="isUpdatingApp || isCheckingAppUpdate || !appUpdateInfo.updateAvailable"
+                @click="installAppUpdate()"
+              >
+                <span
+                  v-if="isUpdatingApp"
+                  class="loading loading-spinner h-4 w-4"
+                ></span>
+                <ArrowDownCircleIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+                {{ $t('updateApp') }}
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -528,6 +590,7 @@ import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowRightIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   DocumentTextIcon,

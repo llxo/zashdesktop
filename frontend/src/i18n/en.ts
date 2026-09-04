@@ -714,8 +714,6 @@ const en = {
   coreUpdateAvailable: 'Update available',
   checkUpdate: 'Check update',
   updateCore: 'Update',
-  installCore: 'Install Core',
-  reinstallCore: 'Reinstall',
   coreMaintenance: 'Download Core',
   coreChannel: 'Channel',
   coreDownloadSource: 'Download source',

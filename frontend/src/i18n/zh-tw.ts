@@ -700,8 +700,6 @@ const zhTW: LANG_MESSAGE = {
   coreUpdateAvailable: '有可用更新',
   checkUpdate: '檢查更新',
   updateCore: '更新',
-  installCore: '安裝核心',
-  reinstallCore: '重新安裝',
   coreMaintenance: '下載核心',
   coreChannel: '通道',
   coreDownloadSource: '下載來源',
