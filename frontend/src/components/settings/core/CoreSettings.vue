@@ -101,35 +101,33 @@
       </section>
 
       <section>
-        <div class="text-base-content/85 mt-1 mb-2.5 flex items-center justify-between px-1">
-          <span class="text-base font-semibold tracking-tight">{{ $t('coreMaintenance') }}</span>
-          <button
-            class="btn btn-circle btn-sm"
-            type="button"
-            :aria-label="$t('coreAdvanced')"
-            :title="$t('coreAdvanced')"
-            @click="advancedOpen = true"
-          >
-            <Cog6ToothIcon class="h-4 w-4" />
-          </button>
+        <div class="text-base-content/85 mt-1 mb-2.5 px-1 text-base font-semibold tracking-tight">
+          {{ $t('coreMaintenance') }}
         </div>
         <div class="settings-grid">
           <div class="setting-item gap-3 py-3">
+            <span class="setting-item-label">{{ $t('coreSettings') }}</span>
             <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <span class="setting-item-label">{{ $t('coreSettings') }}</span>
               <span
-                class="badge badge-sm"
+                class="badge badge-sm font-mono"
                 :class="config.installed ? 'badge-success' : 'badge-ghost'"
               >
                 {{ installedVersionLabel }}
               </span>
-              <span
-                v-if="config.latestVersion"
-                class="badge badge-sm"
-                :class="config.updateAvailable ? 'badge-warning' : 'badge-ghost'"
-              >
-                {{ config.latestVersion }}
-              </span>
+              <template v-if="config.latestVersion">
+                <span
+                  v-if="config.updateAvailable"
+                  class="badge badge-warning badge-sm font-mono"
+                >
+                  {{ $t('coreUpdateAvailable') }}: {{ config.latestVersion }}
+                </span>
+                <span
+                  v-else-if="config.installed"
+                  class="badge badge-ghost badge-sm text-xs opacity-75 font-mono"
+                >
+                  {{ $t('appUpToDate') }}
+                </span>
+              </template>
               <button
                 class="btn btn-circle btn-ghost btn-xs"
                 type="button"
@@ -151,26 +149,45 @@
           </div>
 
           <div class="setting-item py-3">
+            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
+            <div
+              :class="{
+                'pointer-events-none opacity-60':
+                  isSavingChannel || isSaving || isDownloading,
+              }"
+            >
+              <SegmentedControl
+                :model-value="currentChannel"
+                :options="channelOptions"
+                @update:model-value="saveChannel"
+              />
+            </div>
+          </div>
+
+          <label class="setting-item max-sm:flex-col max-sm:items-stretch! py-3">
+            <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
+            <select
+              v-model="selectedSourceURL"
+              class="select select-sm min-w-44 max-sm:w-full"
+              :aria-label="$t('coreDownloadSource')"
+              :disabled="isSaving || isDownloading"
+              @change="selectDownloadSource"
+            >
+              <option
+                v-for="source in sourceOptions"
+                :key="source.url"
+                :value="sourceURL(source)"
+              >
+                {{ source.label }}
+              </option>
+            </select>
+          </label>
+
+          <div class="setting-item py-3">
             <div class="flex flex-wrap gap-2 self-start">
               <button
                 class="btn btn-sm"
-                type="button"
-                :disabled="isCoreMaintenanceBusy || isSavingChannel"
-                @click="toggleChannel"
-              >
-                <span
-                  v-if="isSavingChannel"
-                  class="loading loading-spinner h-4 w-4"
-                ></span>
-                <ArrowsRightLeftIcon
-                  v-else
-                  class="h-4 w-4"
-                />
-                {{ $t('switchCore') }}
-              </button>
-              <button
-                class="btn btn-sm"
-                :class="{ 'btn-primary': !config.installed }"
+                :class="{ 'btn-primary': !config.installed || config.updateAvailable }"
                 :disabled="isCoreMaintenanceBusy"
                 @click="maintainCore"
               >
@@ -182,7 +199,13 @@
                   v-else
                   class="h-4 w-4"
                 />
-                {{ config.installed ? $t('updateCore') : $t('installCore') }}
+                {{
+                  !config.installed
+                    ? $t('installCore')
+                    : config.updateAvailable
+                      ? $t('updateCore')
+                      : $t('reinstallCore')
+                }}
               </button>
             </div>
           </div>
@@ -278,7 +301,7 @@
                 isRestarting ||
                 isSelectingConfigFile ||
                 isDeletingConfigFile ||
-                isRevertingConfigFile
+                isUndoingDelete
               "
               @focus="scanConfigFiles(false)"
               @mousedown="scanConfigFiles(false)"
@@ -354,51 +377,6 @@
         </div>
       </section>
 
-      <DialogWrapper
-        v-model="advancedOpen"
-        :title="$t('coreAdvanced')"
-      >
-        <div class="settings-grid">
-          <div class="setting-item">
-            <span class="setting-item-label">{{ $t('coreChannel') }}</span>
-            <div
-              :class="{
-                'pointer-events-none opacity-60':
-                  isSavingChannel || isSaving || isDownloading,
-              }"
-            >
-              <SegmentedControl
-                :model-value="currentChannel"
-                :options="channelOptions"
-                @update:model-value="saveChannel"
-              />
-            </div>
-          </div>
-
-          <label class="setting-item max-sm:flex-col max-sm:items-stretch! max-sm:py-3">
-            <span class="setting-item-label">{{ $t('coreDownloadSource') }}</span>
-            <select
-              v-model="selectedSourceURL"
-              class="select select-sm min-w-44 max-sm:w-full"
-              :aria-label="$t('coreDownloadSource')"
-              :disabled="isSaving || isDownloading"
-              @change="selectDownloadSource"
-            >
-              <option
-                v-for="source in sourceOptions"
-                :key="source.url"
-                :value="sourceURL(source)"
-              >
-                {{ source.label }}
-              </option>
-            </select>
-          </label>
-        </div>
-
-        <div class="mt-3 rounded-lg bg-base-200/50 p-2.5 text-xs leading-relaxed text-base-content/70">
-          {{ $t('coreManualInstallTip', { path: `${coreType}/${coreType}.exe` }) }}
-        </div>
-      </DialogWrapper>
     </template>
 
     <template v-else>
@@ -544,17 +522,14 @@
 <script setup lang="ts">
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { AppUpdateInfo, CoreConfig } from '../../../../bindings/zashdesktop/models'
-import DialogWrapper from '@/components/common/DialogWrapper.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
-  ArrowsRightLeftIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
-  Cog6ToothIcon,
   DocumentTextIcon,
   PlayIcon,
   StopIcon,
@@ -699,7 +674,6 @@ const runArgsInput = ref('')
 const configURLInput = ref('')
 const configFileNameInput = ref('')
 const configFileInput = ref<HTMLInputElement | null>(null)
-const advancedOpen = ref(false)
 // A response may only clean the exact draft revision that it submitted.
 const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
   runArgs: { dirty: false, revision: 0 },
@@ -1023,10 +997,6 @@ const saveChannel = async (rawChannel: string) => {
   void checkUpdate(false)
 }
 
-const toggleChannel = async () => {
-  const targetChannel = currentChannel.value === 'test' ? 'stable' : 'test'
-  await saveChannel(targetChannel)
-}
 
 const saveRunArgs = async () => {
   if (isSavingRunArgs.value || config.running) return
@@ -1422,7 +1392,6 @@ watch(
     resetDraft('configFileName')
     resetDraft('behavior')
     selectedSourceURL.value = ''
-    advancedOpen.value = false
     void (async () => {
       if (await loadConfig(false, true)) {
         void scanConfigFiles(false)
