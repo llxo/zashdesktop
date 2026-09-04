@@ -66,60 +66,81 @@ func (s *CoreService) GetAppUpdateInfo() (AppUpdateInfo, error) {
 	return s.CheckAppUpdate()
 }
 
-func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
-	debugLogf("update", "checking app update from GitHub: owner=%s repo=%s currentVersion=%s", appGithubOwner, appGithubRepo, appVersion)
-	client := newCoreHTTPClient(30 * time.Second)
+type appReleaseTarget struct {
+	release     githubRelease
+	binaryAsset *githubAsset
+	sha256Asset *githubAsset
+}
+
+func fetchLatestAppRelease(client *http.Client) (appReleaseTarget, error) {
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", appGithubOwner, appGithubRepo)
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		debugLogf("update", "create app update request failed: %v", err)
-		return AppUpdateInfo{}, fmt.Errorf("check app update: %w", err)
+		debugLogf("update", "create app release request failed: %v", err)
+		return appReleaseTarget{}, fmt.Errorf("lookup app release: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("User-Agent", "zashdesktop")
 
 	response, err := client.Do(request)
 	if err != nil {
-		debugLogf("update", "check app update HTTP request failed: %v", err)
-		return AppUpdateInfo{}, fmt.Errorf("check app update: %w", err)
+		debugLogf("update", "lookup app release HTTP request failed: %v", err)
+		return appReleaseTarget{}, fmt.Errorf("lookup app release: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		debugLogf("update", "check app update server returned status %s", response.Status)
-		return AppUpdateInfo{}, fmt.Errorf("check app update: GitHub returned %s", response.Status)
+		debugLogf("update", "lookup app release server returned %s", response.Status)
+		return appReleaseTarget{}, fmt.Errorf("lookup app release: GitHub returned %s", response.Status)
 	}
 
 	var release githubRelease
 	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
-		debugLogf("update", "decode app release JSON failed: %v", err)
-		return AppUpdateInfo{}, fmt.Errorf("parse GitHub release: %w", err)
+		debugLogf("update", "parse app release JSON failed: %v", err)
+		return appReleaseTarget{}, fmt.Errorf("parse GitHub release: %w", err)
 	}
 
 	var binaryAsset *githubAsset
+	var sha256Asset *githubAsset
 	for i := range release.Assets {
 		asset := &release.Assets[i]
 		lower := strings.ToLower(asset.Name)
 		if strings.HasSuffix(lower, ".exe") && !strings.HasSuffix(lower, ".sha256") && strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
 			binaryAsset = asset
-			break
+		} else if strings.HasSuffix(lower, ".sha256") && strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
+			sha256Asset = asset
 		}
 	}
 
 	if binaryAsset == nil {
 		debugLogf("update", "no windows amd64 binary asset found in release %s", release.TagName)
-		return AppUpdateInfo{}, errors.New("GitHub release 中未找到 Windows x64 可执行文件")
+		return appReleaseTarget{}, errors.New("GitHub release 中未找到 Windows x64 可执行文件")
+	}
+
+	return appReleaseTarget{
+		release:     release,
+		binaryAsset: binaryAsset,
+		sha256Asset: sha256Asset,
+	}, nil
+}
+
+func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
+	debugLogf("update", "checking app update from GitHub: owner=%s repo=%s currentVersion=%s", appGithubOwner, appGithubRepo, appVersion)
+	client := newCoreHTTPClient(30 * time.Second)
+	target, err := fetchLatestAppRelease(client)
+	if err != nil {
+		return AppUpdateInfo{}, err
 	}
 
 	info := AppUpdateInfo{
 		CurrentVersion:  appVersion,
-		LatestVersion:   release.TagName,
-		UpdateAvailable: isAppUpdateAvailable(appVersion, release.TagName),
-		ReleaseURL:      release.HTMLURL,
-		ReleaseNotes:    release.Body,
-		PublishedAt:     release.PublishedAt,
-		DownloadURL:     binaryAsset.BrowserDownloadURL,
-		AssetSize:       binaryAsset.Size,
+		LatestVersion:   target.release.TagName,
+		UpdateAvailable: isAppUpdateAvailable(appVersion, target.release.TagName),
+		ReleaseURL:      target.release.HTMLURL,
+		ReleaseNotes:    target.release.Body,
+		PublishedAt:     target.release.PublishedAt,
+		DownloadURL:     target.binaryAsset.BrowserDownloadURL,
+		AssetSize:       target.binaryAsset.Size,
 	}
 
 	s.mu.Lock()
@@ -148,49 +169,13 @@ func (s *CoreService) InstallAppUpdate() error {
 
 	debugLogf("update", "starting app update installation")
 	client := newCoreHTTPClient(30 * time.Second)
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", appGithubOwner, appGithubRepo)
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	target, err := fetchLatestAppRelease(client)
 	if err != nil {
-		debugLogf("update", "create app release request failed: %v", err)
-		return fmt.Errorf("lookup app release: %w", err)
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "zashdesktop")
-
-	response, err := client.Do(request)
-	if err != nil {
-		debugLogf("update", "lookup app release HTTP request failed: %v", err)
-		return fmt.Errorf("lookup app release: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		debugLogf("update", "lookup app release server returned %s", response.Status)
-		return fmt.Errorf("lookup app release: GitHub returned %s", response.Status)
+		return err
 	}
 
-	var release githubRelease
-	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&release); err != nil {
-		debugLogf("update", "parse app release JSON failed: %v", err)
-		return fmt.Errorf("parse GitHub release: %w", err)
-	}
-
-	var binaryAsset *githubAsset
-	var sha256Asset *githubAsset
-	for i := range release.Assets {
-		asset := &release.Assets[i]
-		lower := strings.ToLower(asset.Name)
-		if strings.HasSuffix(lower, ".exe") && !strings.HasSuffix(lower, ".sha256") && strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
-			binaryAsset = asset
-		} else if strings.HasSuffix(lower, ".sha256") && strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
-			sha256Asset = asset
-		}
-	}
-
-	if binaryAsset == nil {
-		debugLogf("update", "install app update failed: no windows amd64 binary found in release %s", release.TagName)
-		return errors.New("GitHub release 中未找到 Windows x64 可执行文件")
-	}
+	binaryAsset := target.binaryAsset
+	sha256Asset := target.sha256Asset
 
 	expectedSHA := ""
 	if strings.HasPrefix(strings.ToLower(binaryAsset.Digest), "sha256:") {

@@ -164,19 +164,13 @@ func (s *CoreService) SaveConfigFileName(rawFileName, rawCoreType string) (CoreC
 		return CoreConfig{}, err
 	}
 	config.ConfigFileName = fileName
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.configGeneration != generation {
-		debugLogf("config", "save config file name failed: generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
-	}
-	if err := s.saveConfigLocked(config); err != nil {
+	saved, err := s.commitConfigUpdate(config, generation)
+	if err != nil {
 		debugLogf("config", "save config file name failed: %v", err)
 		return CoreConfig{}, err
 	}
-	s.applyRuntimeState(&config)
-	debugLogf("config", "save config file name success: type=%s name=%q", config.CoreType, fileName)
-	return config, nil
+	debugLogf("config", "save config file name success: type=%s name=%q", saved.CoreType, fileName)
+	return saved, nil
 }
 
 func (s *CoreService) ListConfigFiles(rawCoreType string) ([]string, error) {

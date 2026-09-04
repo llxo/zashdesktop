@@ -155,31 +155,8 @@ func saveWindowState(path string, state windowState) error {
 	}
 	data = append(data, '\n')
 
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".window-*.json")
-	if err != nil {
-		debugLogf("app", "create temp window state file failed: %v", err)
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		debugLogf("app", "chmod temp window state file failed: %v", err)
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		debugLogf("app", "write temp window state file failed: %v", err)
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		debugLogf("app", "close temp window state file failed: %v", err)
-		return err
-	}
-
-	if err := os.Rename(temporaryPath, path); err != nil {
-		debugLogf("app", "rename temp window state file to %q failed: %v", path, err)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		debugLogf("app", "write window state file %q failed: %v", path, err)
 		return err
 	}
 	return nil
