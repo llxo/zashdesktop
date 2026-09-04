@@ -698,7 +698,7 @@ const channelOptions = computed<SegmentOption[]>(() => [
   { value: 'test', label: t('coreTestBuild') },
 ])
 const defaultRunArgsPlaceholder = computed(() =>
-  coreType.value === 'mihomo' ? '-d . -f config.yaml' : 'run -c config.json -D .',
+  coreType.value === 'mihomo' ? '-d . -f "config.yaml"' : 'run -c "config.json" -D .',
 )
 const defaultConfigFileName = computed(() =>
   coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
@@ -969,29 +969,21 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   syncActiveConfigFile()
 }
 
-const extractConfigFileFromRunArgs = (runArgs: string, core: CoreType): string => {
-  const trimmed = runArgs.trim()
-  if (core === 'mihomo') {
-    const match = /(?:^|\s)-f\s+([^\s]+)/i.exec(trimmed)
-    return match ? match[1].split(/[\\/]/).pop() || '' : ''
-  }
-  const match = /(?:^|\s)-c\s+([^\s]+)/i.exec(trimmed)
-  return match ? match[1].split(/[\\/]/).pop() || '' : ''
-}
-
 const syncActiveConfigFile = () => {
-  const fromArgs = extractConfigFileFromRunArgs(config.runArgs, coreType.value)
-  if (fromArgs) {
-    activeConfigFile.value = fromArgs
+  const target = config.configFileName || defaultConfigFileName.value
+  if (availableConfigFiles.value.length === 0) {
+    activeConfigFile.value = target
     return
   }
-  if (config.configFileName) {
-    activeConfigFile.value = config.configFileName
+  if (availableConfigFiles.value.includes(target)) {
+    activeConfigFile.value = target
     return
   }
-  if (availableConfigFiles.value.length > 0) {
-    activeConfigFile.value = availableConfigFiles.value[0]
+  if (availableConfigFiles.value.includes(defaultConfigFileName.value)) {
+    activeConfigFile.value = defaultConfigFileName.value
+    return
   }
+  activeConfigFile.value = availableConfigFiles.value[0]
 }
 
 const scanConfigFiles = async (notify = false) => {

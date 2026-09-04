@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	singboxConfigArgPattern = regexp.MustCompile(`(?i)(^|\s)-c\s+([^\s]+)`)
-	mihomoConfigArgPattern  = regexp.MustCompile(`(?i)(^|\s)-f\s+([^\s]+)`)
+	singboxConfigArgPattern = regexp.MustCompile(`(?i)(^|\s)-c\s+("[^"]*"|'[^']*'|[^\s]+)`)
+	mihomoConfigArgPattern  = regexp.MustCompile(`(?i)(^|\s)-f\s+("[^"]*"|'[^']*'|[^\s]+)`)
 )
 
 type deletedConfigFile struct {
@@ -354,14 +354,7 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		nextFile = defaultName
 	}
 
-	currentActive := fileName
-	if match := singboxConfigArgPattern.FindStringSubmatch(config.RunArgs); len(match) > 2 && coreType == coreTypeSingBox {
-		currentActive = filepath.Base(match[2])
-	} else if match := mihomoConfigArgPattern.FindStringSubmatch(config.RunArgs); len(match) > 2 && coreType == coreTypeMihomo {
-		currentActive = filepath.Base(match[2])
-	}
-
-	if strings.EqualFold(currentActive, fileName) || strings.EqualFold(config.ConfigFileName, fileName) {
+	if strings.EqualFold(config.ConfigFileName, fileName) {
 		config.ConfigFileName = nextFile
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, nextFile, coreType)
 		if err := s.saveConfigLocked(config); err != nil {
@@ -477,24 +470,25 @@ func updateRunArgsWithConfigFile(currentArgs, fileName, coreType string) string 
 	trimmed := strings.TrimSpace(currentArgs)
 	if normalizedCoreType(coreType) == coreTypeMihomo {
 		if trimmed == "" || isDefaultCoreRunArgs(trimmed) {
-			return fmt.Sprintf("-d . -f %s", fileName)
+			return fmt.Sprintf(`-d . -f "%s"`, fileName)
 		}
 		if mihomoConfigArgPattern.MatchString(trimmed) {
-			return mihomoConfigArgPattern.ReplaceAllString(trimmed, fmt.Sprintf("${1}-f %s", fileName))
+			return mihomoConfigArgPattern.ReplaceAllString(trimmed, fmt.Sprintf(`${1}-f "%s"`, fileName))
 		}
-		return fmt.Sprintf("%s -f %s", trimmed, fileName)
+		return fmt.Sprintf(`%s -f "%s"`, trimmed, fileName)
 	}
 
 	if trimmed == "" || isDefaultCoreRunArgs(trimmed) {
-		return fmt.Sprintf("run -c %s -D .", fileName)
+		return fmt.Sprintf(`run -c "%s" -D .`, fileName)
 	}
 	if singboxConfigArgPattern.MatchString(trimmed) {
-		return singboxConfigArgPattern.ReplaceAllString(trimmed, fmt.Sprintf("${1}-c %s", fileName))
+		return singboxConfigArgPattern.ReplaceAllString(trimmed, fmt.Sprintf(`${1}-c "%s"`, fileName))
 	}
-	return fmt.Sprintf("%s -c %s", trimmed, fileName)
+	return fmt.Sprintf(`%s -c "%s"`, trimmed, fileName)
 }
 
 func isDefaultCoreRunArgs(raw string) bool {
 	runArgs := strings.TrimSpace(raw)
-	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs
+	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs ||
+		runArgs == "run -c config.json -D ." || runArgs == "-d . -f config.yaml"
 }

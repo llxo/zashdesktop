@@ -32,8 +32,8 @@ const (
 	maxCoreConfig           = 20 << 20
 	defaultCoreConfigFile   = "config.json"
 	defaultMihomoConfigFile = "config.yaml"
-	defaultCoreRunArgs      = "run -c config.json -D ."
-	defaultMihomoRunArgs    = "-d . -f config.yaml"
+	defaultCoreRunArgs      = `run -c "config.json" -D .`
+	defaultMihomoRunArgs    = `-d . -f "config.yaml"`
 )
 
 type CoreConfig struct {
