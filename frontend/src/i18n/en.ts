@@ -729,8 +729,6 @@ const en = {
   autoStartMihomo: 'Launch mihomo on app startup',
   stopCoreOnExit: 'Stop core on app exit',
   backendDebugLog: 'Backend debug log',
-  trayAPIURL: 'Tray API URL',
-  trayAPIURLPlaceholder: 'http://127.0.0.1:9090',
   appUpdate: 'App Update',
   desktopApp: 'Desktop App',
   updateApp: 'Update App',

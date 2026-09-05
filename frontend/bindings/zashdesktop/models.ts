@@ -40,5 +40,4 @@ export interface CoreConfig {
     "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
     "stopCoreOnExit": boolean;
-    "trayAPIURL": string;
 }

@@ -9,10 +9,12 @@
 // 旧会话醒来必须让位给新会话,不能抢着建流。
 
 import { PROXY_TAB_TYPE, RULE_TAB_TYPE } from '@/constant'
+import { getUrlFromBackend } from '@/helper/utils'
 import { initConnections, stopConnections } from '@/store/connections'
 import { initSatistic, stopSatistic } from '@/store/overview'
 import { activeBackend } from '@/store/setup'
 import { watch } from 'vue'
+import * as CoreService from '../../bindings/zashdesktop/coreservice'
 import { fetchConfigs } from './config'
 import { initLogs, stopLogs } from './logs'
 import { fetchProxies, proxiesTabShow, resetProxies } from './proxies'
@@ -51,5 +53,19 @@ export const startBackendSession = async () => {
   initSatistic()
 }
 
+const syncTrayAPI = () => {
+  if (!activeBackend.value) return
+  const url = getUrlFromBackend(activeBackend.value)
+  const secret = activeBackend.value.password || ''
+  CoreService.SetTrayAPI(url, secret).catch(() => {})
+}
+
 // 会话跟着 activeBackend 走:换后端要重建,把当前后端的地址 / 密码改掉同样要重建。
-watch(activeBackend, startBackendSession, { immediate: true })
+watch(
+  activeBackend,
+  () => {
+    syncTrayAPI()
+    startBackendSession()
+  },
+  { immediate: true },
+)

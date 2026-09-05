@@ -111,9 +111,6 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 		normalizedActive = defaultConfigFileName(coreType)
 	}
 	config.ActiveConfigFile = normalizedActive
-	if strings.TrimSpace(config.TrayAPIURL) == "" {
-		config.TrayAPIURL = defaultTrayAPIURL
-	}
 	applySharedBehavior(&config, profiles.Behavior)
 	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
@@ -264,7 +261,6 @@ type persistedProfileClean struct {
 	ConfigURL        string `json:"configURL,omitempty"`
 	ConfigFileName   string `json:"configFileName,omitempty"`
 	ActiveConfigFile string `json:"activeConfigFile,omitempty"`
-	TrayAPIURL       string `json:"trayAPIURL,omitempty"`
 }
 
 func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error) {
@@ -289,7 +285,6 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 			ConfigURL:        p.ConfigURL,
 			ConfigFileName:   p.ConfigFileName,
 			ActiveConfigFile: p.ActiveConfigFile,
-			TrayAPIURL:       p.TrayAPIURL,
 		}
 	}
 	return json.MarshalIndent(clean, "", "  ")

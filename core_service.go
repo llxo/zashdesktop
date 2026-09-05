@@ -62,7 +62,6 @@ type CoreConfig struct {
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
 	StopCoreOnExit    bool   `json:"stopCoreOnExit"`
-	TrayAPIURL        string `json:"trayAPIURL"`
 }
 
 type coreVersionCacheItem struct {
@@ -90,6 +89,7 @@ type CoreService struct {
 	lastRunning        bool
 	lastPID            int
 	trayAPIURL         string
+	trayAPISecret      string
 	keepCoreOnShutdown bool
 	onStateChange      func()
 	stoppingPids       map[int]bool
@@ -210,7 +210,6 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 	s.shuttingDown = false
 	startupConfig, configErr := s.loadConfigLocked()
 	if configErr == nil {
-		s.trayAPIURL = startupConfig.TrayAPIURL
 		if s.cachedProfiles != nil {
 			s.syncSystemBehaviorOnce(&s.cachedProfiles.Behavior)
 		}
@@ -454,15 +453,10 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return saved, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawTrayAPIURL, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("system", "save behavior failed to normalize core type: %v", err)
-		return CoreConfig{}, err
-	}
-	trayAPIURL, err := normalizeTrayAPIURL(rawTrayAPIURL)
-	if err != nil {
-		debugLogf("system", "save behavior invalid tray API URL %q: %v", rawTrayAPIURL, err)
 		return CoreConfig{}, err
 	}
 	config, generation, err := s.loadConfigSnapshot(coreType)
@@ -496,7 +490,6 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		}
 	}
 	applySharedBehavior(&config, behavior)
-	config.TrayAPIURL = trayAPIURL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.configGeneration != generation {
@@ -507,13 +500,33 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		debugLogf("system", "save behavior failed to write profiles: %v", err)
 		return CoreConfig{}, err
 	}
-	s.trayAPIURL = trayAPIURL
 	if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t debugLog=%t trayURL=%s", runAsAdmin, autoStart, backendDebugLog, trayAPIURL)
+	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t debugLog=%t", runAsAdmin, autoStart, backendDebugLog)
 	return config, nil
+}
+
+func (s *CoreService) SetTrayAPI(rawURL, rawSecret string) error {
+	normalizedURL, err := normalizeTrayAPIURL(rawURL)
+	if err != nil {
+		debugLogf("tray", "set tray API invalid url %q: %v", rawURL, err)
+		return err
+	}
+	secret := strings.TrimSpace(rawSecret)
+
+	s.mu.Lock()
+	changed := s.trayAPIURL != normalizedURL || s.trayAPISecret != secret
+	s.trayAPIURL = normalizedURL
+	s.trayAPISecret = secret
+	s.mu.Unlock()
+
+	if changed {
+		debugLogf("tray", "set tray API updated: url=%s hasSecret=%t", normalizedURL, secret != "")
+		s.notifyStateChange()
+	}
+	return nil
 }
 
 func (s *CoreService) StartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
@@ -990,9 +1003,6 @@ func (s *CoreService) startCoreOnStartup(ctx context.Context) {
 	if !shouldStart || ctx.Err() != nil {
 		return
 	}
-	s.mu.Lock()
-	s.trayAPIURL = config.TrayAPIURL
-	s.mu.Unlock()
 	if _, err := s.startCore(runArgs, config.CoreType, false); err != nil {
 		coreDebugf("start core on startup failed: %v", err)
 	}

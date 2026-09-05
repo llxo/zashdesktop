@@ -77,8 +77,8 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartSingBox: boolean, autoStartMihomo: boolean, stopCoreOnExit: boolean, backendDebugLog: boolean, rawTrayAPIURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog, rawTrayAPIURL, rawCoreType);
+export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartSingBox: boolean, autoStartMihomo: boolean, stopCoreOnExit: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog, rawCoreType);
 }
 
 export function SaveChannel(rawChannel: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
@@ -103,6 +103,10 @@ export function SaveURL(rawURL: string, rawCoreType: string): $CancellablePromis
 
 export function SelectConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1276464918, rawFileName, rawCoreType);
+}
+
+export function SetTrayAPI(rawURL: string, rawSecret: string): $CancellablePromise<void> {
+    return $Call.ByID(879970318, rawURL, rawSecret);
 }
 
 export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {

@@ -103,7 +103,7 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 		}
 	}
 
-	fingerprint := coreFingerprint + "|" + responseHash
+	fingerprint := fmt.Sprintf("%s|%s|%s|%s", coreFingerprint, a.trayAPIURL(), a.trayAPISecret(), responseHash)
 
 	a.mu.Lock()
 	if a.quitting || fingerprint == a.trayProxyFingerprint {
@@ -305,7 +305,7 @@ func (a *App) trayRestartCore() {
 func (a *App) selectTrayProxy(group, proxy string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := selectClashProxy(ctx, a.trayAPIURL(), a.launch.APISecret, group, proxy); err != nil {
+	if err := selectClashProxy(ctx, a.trayAPIURL(), a.trayAPISecret(), group, proxy); err != nil {
 		debugLogf("tray", "select tray proxy: group=%q proxy=%q err=%v", group, proxy, err)
 		return
 	}
@@ -313,7 +313,7 @@ func (a *App) selectTrayProxy(group, proxy string) {
 }
 
 func (a *App) fetchTrayProxyGroupsCached(ctx context.Context) ([]trayProxy, string, error) {
-	body, err := fetchTrayProxyRawBody(ctx, a.trayAPIURL(), a.launch.APISecret)
+	body, err := fetchTrayProxyRawBody(ctx, a.trayAPIURL(), a.trayAPISecret())
 	if err != nil {
 		return nil, "", err
 	}
@@ -445,6 +445,18 @@ func (a *App) trayAPIURL() string {
 		}
 	}
 	return defaultTrayAPIURL
+}
+
+func (a *App) trayAPISecret() string {
+	if a.coreService != nil {
+		a.coreService.mu.Lock()
+		secret := a.coreService.trayAPISecret
+		a.coreService.mu.Unlock()
+		if secret != "" {
+			return secret
+		}
+	}
+	return a.launch.APISecret
 }
 
 func normalizeTrayAPIURL(rawURL string) (string, error) {

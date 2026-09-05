@@ -731,8 +731,6 @@ const ru: LANG_MESSAGE = {
   autoStartMihomo: 'Запускать mihomo при старте приложения',
   stopCoreOnExit: 'Останавливать ядро при выходе',
   backendDebugLog: 'Отладочный журнал бэкенда',
-  trayAPIURL: 'API для трея',
-  trayAPIURLPlaceholder: 'http://127.0.0.1:9090',
   appUpdate: 'Обновление приложения',
   desktopApp: 'Десктоп-версия',
   updateApp: 'Обновить приложение',

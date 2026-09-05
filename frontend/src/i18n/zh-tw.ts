@@ -715,8 +715,6 @@ const zhTW: LANG_MESSAGE = {
   autoStartMihomo: '啟動程式時開啟 mihomo',
   stopCoreOnExit: '結束程式時關閉核心',
   backendDebugLog: '後端除錯記錄',
-  trayAPIURL: '系統匣使用 API',
-  trayAPIURLPlaceholder: 'http://127.0.0.1:9090',
   appUpdate: '應用程式更新',
   desktopApp: '桌面端',
   updateApp: '更新應用程式',

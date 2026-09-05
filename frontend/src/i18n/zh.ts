@@ -723,8 +723,6 @@ const zh = {
   autoStartMihomo: '启动程序时开启 mihomo',
   stopCoreOnExit: '退出程序时关闭核心',
   backendDebugLog: '后端调试日志',
-  trayAPIURL: '托盘使用 API',
-  trayAPIURLPlaceholder: 'http://127.0.0.1:9090',
   appUpdate: '应用更新',
   desktopApp: '桌面端',
   updateApp: '更新应用',

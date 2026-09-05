@@ -497,20 +497,6 @@
               />
             </div>
           </label>
-          <div class="setting-item">
-            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
-              {{ $t('trayAPIURL') }}
-            </span>
-            <input
-              v-model="behaviorDraft.trayAPIURL"
-              class="input input-sm flex-1 min-w-0"
-              type="url"
-              :placeholder="$t('trayAPIURLPlaceholder')"
-              :disabled="isSavingBehavior"
-              @input="touchDraft('behavior')"
-              @change="saveBehavior()"
-            />
-          </div>
         </div>
       </section>
 
@@ -706,7 +692,6 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   autoStartMihomo: false,
   backendDebugLog: false,
   stopCoreOnExit: true,
-  trayAPIURL: 'http://127.0.0.1:9090',
 })
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 // Polling replaces config every second. Editable controls must bind to drafts.
@@ -717,7 +702,6 @@ const behaviorDraft = reactive({
   autoStartMihomo: false,
   backendDebugLog: false,
   stopCoreOnExit: true,
-  trayAPIURL: 'http://127.0.0.1:9090',
 })
 const coreType = computed(() => props.coreType)
 const { t } = useI18n()
@@ -904,8 +888,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
       behaviorDraft.autoStartSingBox !== next.autoStartSingBox ||
       behaviorDraft.autoStartMihomo !== next.autoStartMihomo ||
       behaviorDraft.stopCoreOnExit !== next.stopCoreOnExit ||
-      behaviorDraft.backendDebugLog !== next.backendDebugLog ||
-      behaviorDraft.trayAPIURL !== next.trayAPIURL
+      behaviorDraft.backendDebugLog !== next.backendDebugLog
     ) {
       Object.assign(behaviorDraft, {
         runAsAdmin: next.runAsAdmin,
@@ -914,7 +897,6 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
         autoStartMihomo: next.autoStartMihomo,
         stopCoreOnExit: next.stopCoreOnExit,
         backendDebugLog: next.backendDebugLog,
-        trayAPIURL: next.trayAPIURL,
       })
     }
     resetDraft('behavior')
@@ -1277,7 +1259,6 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
       behaviorDraft.autoStartMihomo,
       behaviorDraft.stopCoreOnExit,
       behaviorDraft.backendDebugLog,
-      behaviorDraft.trayAPIURL,
       coreType.value,
     )
     if (!isCurrentConfigRequest(request)) return
