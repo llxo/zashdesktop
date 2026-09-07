@@ -869,21 +869,25 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 		return
 	}
 
-	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() && cached.version != "" {
-		config.Version = cached.version
-		config.VersionDetail = cached.detail
-		config.InstalledVersion = cached.version
+	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() {
+		if cached.version != "" {
+			config.Version = cached.version
+			config.VersionDetail = cached.detail
+			config.InstalledVersion = cached.version
+		} else if config.InstalledVersion != "" {
+			config.Version = config.InstalledVersion
+		}
 		return
 	}
 
 	version, versionDetail, err := readCoreVersionDetail(corePath, config.CoreType)
+	s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
+		modTime: stat.ModTime(),
+		size:    stat.Size(),
+		version: version,
+		detail:  versionDetail,
+	})
 	if err == nil && version != "" {
-		s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
-			modTime: stat.ModTime(),
-			size:    stat.Size(),
-			version: version,
-			detail:  versionDetail,
-		})
 		config.Version = version
 		config.VersionDetail = versionDetail
 		config.InstalledVersion = version

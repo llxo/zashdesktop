@@ -427,9 +427,6 @@ func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, erro
 }
 
 func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
-	s.operationMu.Lock()
-	defer s.operationMu.Unlock()
-
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("core", "save core type failed: %v", err)

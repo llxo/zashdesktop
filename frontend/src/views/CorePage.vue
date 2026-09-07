@@ -56,17 +56,19 @@ const handleCoreTypeUpdate = (nextType: CoreType) => {
 
 const changeTab = async (nextTab: string) => {
   if (nextTab === activeTab.value) return
+  const prevCoreType = coreType.value
+  activeTab.value = nextTab as CoreTab
   if (nextTab === 'settings') {
-    activeTab.value = 'settings'
     return
   }
   const nextCoreType: CoreType = nextTab === 'mihomo' ? 'mihomo' : 'sing-box'
-  try {
-    const config = await CoreService.SaveCoreType(nextCoreType)
-    coreType.value = config.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
-    activeTab.value = coreType.value
-  } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+  coreType.value = nextCoreType
+  if (nextCoreType !== prevCoreType) {
+    try {
+      await CoreService.SaveCoreType(nextCoreType)
+    } catch (error) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
   }
 }
 
