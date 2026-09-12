@@ -590,19 +590,52 @@ func findWebView2ProcessPIDs() []uint32 {
 	return webviewPIDs
 }
 
+type unicodeString struct {
+	Length        uint16
+	MaximumLength uint16
+	Buffer        *uint16
+}
+
+func getProcessCommandLine(h windows.Handle) string {
+	var returnLength uint32
+	_ = windows.NtQueryInformationProcess(h, 60, nil, 0, &returnLength)
+	if returnLength == 0 {
+		returnLength = 2048
+	}
+	buf := make([]byte, returnLength+64)
+	if err := windows.NtQueryInformationProcess(h, 60, unsafe.Pointer(&buf[0]), uint32(len(buf)), &returnLength); err != nil {
+		return ""
+	}
+	us := (*unicodeString)(unsafe.Pointer(&buf[0]))
+	if us.Buffer == nil || us.Length == 0 {
+		return ""
+	}
+	charCount := int(us.Length / 2)
+	slice := unsafe.Slice(us.Buffer, charCount)
+	return string(utf16.Decode(slice))
+}
+
 func suspendWebView2Processes() []uint32 {
 	if behaviorNtSuspendProcess.Find() != nil {
 		return nil
 	}
 	pids := findWebView2ProcessPIDs()
-	const access = 0x0800 | windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA
+	const access = 0x0800 | windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA | windows.PROCESS_QUERY_LIMITED_INFORMATION
 	var suspended []uint32
 	for _, pid := range pids {
 		if h, err := windows.OpenProcess(access, false, pid); err == nil {
-			if r, _, _ := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
-				suspended = append(suspended, pid)
-				trimProcessWorkingSet(h)
+			cmdLine := getProcessCommandLine(h)
+			// 差异化挂起核心分流：
+			// 仅挂起沙盒渲染进程（--type=renderer），坚决放行主 Browser 进程、GPU 进程与 Utility 进程。
+			// 确保主 Browser 进程的 Windows 消息泵与 UIA 探针畅通无阻，从根本上杜绝任务管理器 IPC 超时死锁与全局降级。
+			if strings.Contains(cmdLine, "--type=renderer") {
+				if r, _, _ := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
+					suspended = append(suspended, pid)
+					debugLogf("window", "suspended webview2 renderer process (pid=%d)", pid)
+				}
 			}
+			// 对所有 WebView2 相关子进程修剪物理工作集，释放 RAM
+			trimProcessWorkingSet(h)
 			windows.CloseHandle(h)
 		}
 	}
@@ -620,6 +653,7 @@ func resumeWebView2Processes(pids []uint32) {
 		if h, err := windows.OpenProcess(0x0800, false, pid); err == nil {
 			behaviorNtResumeProcess.Call(uintptr(h))
 			windows.CloseHandle(h)
+			debugLogf("window", "resumed webview2 renderer process (pid=%d)", pid)
 		}
 	}
 }
