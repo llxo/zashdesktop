@@ -329,6 +329,8 @@ type App struct {
 	freezeTimer           *time.Timer
 	suspendedWebView2PIDs []uint32
 	isWebView2Suspended   bool
+	isFreezing            bool
+	needResume            bool
 	trayProxyCancel       context.CancelFunc
 	trayProxyFingerprint  string
 	trayProxyCachedGroups []trayProxy
@@ -340,18 +342,22 @@ type App struct {
 	mu                    sync.Mutex
 }
 
-func (a *App) resumeWebView2Locked() {
+func (a *App) resumeWebView2Locked() (resumed bool) {
 	if a.freezeTimer != nil {
 		a.freezeTimer.Stop()
 		a.freezeTimer = nil
+	}
+	if a.isFreezing {
+		a.needResume = true
 	}
 	if a.isWebView2Suspended {
 		pids := a.suspendedWebView2PIDs
 		a.suspendedWebView2PIDs = nil
 		a.isWebView2Suspended = false
 		resumeWebView2Processes(pids)
-		time.Sleep(20 * time.Millisecond)
+		resumed = true
 	}
+	return resumed
 }
 
 func (a *App) showWindow() {
@@ -360,12 +366,16 @@ func (a *App) showWindow() {
 		a.mu.Unlock()
 		return
 	}
-	a.resumeWebView2Locked()
+	resumed := a.resumeWebView2Locked()
 	window := a.window
 	if window == nil {
 		window = a.createWindowLocked()
 	}
 	a.mu.Unlock()
+
+	if resumed {
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	if window.IsMinimised() {
 		window.Restore()
@@ -445,8 +455,11 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.freezeTimer = nil
 	}
 	if a.forceClose || a.quitting {
-		a.resumeWebView2Locked()
+		resumed := a.resumeWebView2Locked()
 		a.mu.Unlock()
+		if resumed {
+			time.Sleep(10 * time.Millisecond)
+		}
 		a.saveWindowState()
 		a.mu.Lock()
 		a.window = nil
@@ -469,12 +482,27 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 	a.mu.Lock()
 	a.freezeTimer = time.AfterFunc(250*time.Millisecond, func() {
 		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.window == nil || a.quitting || a.forceClose || a.isWebView2Suspended {
+		if a.window == nil || a.quitting || a.forceClose || a.isWebView2Suspended || a.isFreezing {
+			a.mu.Unlock()
 			return
 		}
-		a.suspendedWebView2PIDs = suspendWebView2Processes()
-		if len(a.suspendedWebView2PIDs) > 0 {
+		a.isFreezing = true
+		a.mu.Unlock()
+
+		pids := suspendWebView2Processes()
+
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.isFreezing = false
+		if a.window == nil || a.quitting || a.forceClose || a.needResume {
+			a.needResume = false
+			if len(pids) > 0 {
+				resumeWebView2Processes(pids)
+			}
+			return
+		}
+		a.suspendedWebView2PIDs = pids
+		if len(pids) > 0 {
 			a.isWebView2Suspended = true
 		}
 	})
@@ -508,10 +536,13 @@ func (a *App) quit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.forceClose = true
-	a.resumeWebView2Locked()
+	resumed := a.resumeWebView2Locked()
 	cancelTrayProxy := a.trayProxyCancel
 	win := a.window
 	a.mu.Unlock()
+	if resumed {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if cancelTrayProxy != nil {
 		cancelTrayProxy()
 	}
@@ -533,13 +564,17 @@ func (a *App) clearFrontendCache() {
 		a.mu.Unlock()
 		return
 	}
-	a.resumeWebView2Locked()
+	resumed := a.resumeWebView2Locked()
 	window := a.window
 	wasOpen := window != nil
 	if wasOpen {
 		a.forceClose = true
 	}
 	a.mu.Unlock()
+
+	if resumed {
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if wasOpen {
 		window.Close()

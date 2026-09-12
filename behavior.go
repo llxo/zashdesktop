@@ -606,10 +606,21 @@ func getProcessCommandLine(h windows.Handle) string {
 	if err := windows.NtQueryInformationProcess(h, 60, unsafe.Pointer(&buf[0]), uint32(len(buf)), &returnLength); err != nil {
 		return ""
 	}
+	if len(buf) < int(unsafe.Sizeof(unicodeString{})) {
+		return ""
+	}
 	us := (*unicodeString)(unsafe.Pointer(&buf[0]))
 	if us.Buffer == nil || us.Length == 0 {
 		return ""
 	}
+
+	bufStart := uintptr(unsafe.Pointer(&buf[0]))
+	bufEnd := bufStart + uintptr(len(buf))
+	ptrVal := uintptr(unsafe.Pointer(us.Buffer))
+	if ptrVal < bufStart || ptrVal+uintptr(us.Length) > bufEnd || ptrVal%2 != 0 {
+		return ""
+	}
+
 	charCount := int(us.Length / 2)
 	slice := unsafe.Slice(us.Buffer, charCount)
 	return string(utf16.Decode(slice))
@@ -629,9 +640,11 @@ func suspendWebView2Processes() []uint32 {
 			// 仅挂起沙盒渲染进程（--type=renderer），坚决放行主 Browser 进程、GPU 进程与 Utility 进程。
 			// 确保主 Browser 进程的 Windows 消息泵与 UIA 探针畅通无阻，从根本上杜绝任务管理器 IPC 超时死锁与全局降级。
 			if strings.Contains(cmdLine, "--type=renderer") {
-				if r, _, _ := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
+				if r, _, callErr := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
 					suspended = append(suspended, pid)
 					debugLogf("window", "suspended webview2 renderer process (pid=%d)", pid)
+				} else {
+					debugLogf("window", "failed to suspend webview2 renderer process (pid=%d, status=0x%x): %v", pid, r, callErr)
 				}
 			}
 			// 对所有 WebView2 相关子进程修剪物理工作集，释放 RAM
@@ -650,9 +663,16 @@ func resumeWebView2Processes(pids []uint32) {
 		return
 	}
 	for _, pid := range pids {
-		if h, err := windows.OpenProcess(0x0800, false, pid); err == nil {
-			behaviorNtResumeProcess.Call(uintptr(h))
-			windows.CloseHandle(h)
+		h, err := windows.OpenProcess(0x0800, false, pid)
+		if err != nil {
+			debugLogf("window", "failed to open webview2 renderer process for resume (pid=%d): %v", pid, err)
+			continue
+		}
+		r, _, callErr := behaviorNtResumeProcess.Call(uintptr(h))
+		windows.CloseHandle(h)
+		if r != 0 {
+			debugLogf("window", "failed to resume webview2 renderer process (pid=%d, status=0x%x): %v", pid, r, callErr)
+		} else {
 			debugLogf("window", "resumed webview2 renderer process (pid=%d)", pid)
 		}
 	}
