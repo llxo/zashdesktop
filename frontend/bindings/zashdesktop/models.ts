@@ -40,4 +40,5 @@ export interface CoreConfig {
     "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
     "stopCoreOnExit": boolean;
+    "quickWakeup": boolean;
 }

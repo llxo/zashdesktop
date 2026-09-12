@@ -730,6 +730,7 @@ const ru: LANG_MESSAGE = {
   autoStartSingBox: 'Запускать sing-box при старте приложения',
   autoStartMihomo: 'Запускать mihomo при старте приложения',
   stopCoreOnExit: 'Останавливать ядро при выходе',
+  quickWakeup: 'Быстрое пробуждение',
   backendDebugLog: 'Отладочный журнал бэкенда',
   appUpdate: 'Обновление приложения',
   desktopApp: 'Десктоп-версия',

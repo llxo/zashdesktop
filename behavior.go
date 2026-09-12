@@ -33,6 +33,9 @@ var (
 	behaviorWinHttpGetIEProxyConfigForCurrentUser = behaviorWinHTTP.NewProc("WinHttpGetIEProxyConfigForCurrentUser")
 	behaviorKernel32                              = windows.NewLazySystemDLL("kernel32.dll")
 	behaviorGlobalFree                            = behaviorKernel32.NewProc("GlobalFree")
+	behaviorSetProcessWorkingSetSize              = behaviorKernel32.NewProc("SetProcessWorkingSetSize")
+	behaviorPsapi                                 = windows.NewLazySystemDLL("psapi.dll")
+	behaviorEmptyWorkingSet                       = behaviorPsapi.NewProc("EmptyWorkingSet")
 )
 
 func readRunAsAdminSetting(applicationPath string) (bool, error) {
@@ -520,5 +523,90 @@ func (s *CoreService) GetSystemFonts() []string {
 
 	debugLogf("system", "enumerated %d system font families", len(list))
 	return list
+}
+
+// -----------------------------------------------------------------------------
+// Process Tree Working Set Memory Trimming (Quick Wakeup Optimization)
+// -----------------------------------------------------------------------------
+
+func trimProcessWorkingSet(h windows.Handle) {
+	if behaviorEmptyWorkingSet.Find() == nil {
+		behaviorEmptyWorkingSet.Call(uintptr(h))
+	} else if behaviorSetProcessWorkingSetSize.Find() == nil {
+		behaviorSetProcessWorkingSetSize.Call(uintptr(h), ^uintptr(0), ^uintptr(0))
+	}
+}
+
+// trimProcessTreeMemory trims the working set of the current process and all its child processes (e.g. WebView2).
+func trimProcessTreeMemory() {
+	currentPID := uint32(os.Getpid())
+
+	// 1. Trim current process
+	if h, err := windows.GetCurrentProcess(); err == nil {
+		trimProcessWorkingSet(h)
+	}
+
+	// 2. Snapshot processes to discover all children
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		debugLogf("app", "create process snapshot failed: %v", err)
+		return
+	}
+	defer windows.CloseHandle(snapshot)
+
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+
+	if err := windows.Process32First(snapshot, &entry); err != nil {
+		debugLogf("app", "process32first failed: %v", err)
+		return
+	}
+
+	type procInfo struct {
+		pid       uint32
+		parentPid uint32
+	}
+	var allProcs []procInfo
+
+	for {
+		allProcs = append(allProcs, procInfo{
+			pid:       entry.ProcessID,
+			parentPid: entry.ParentProcessID,
+		})
+		if err := windows.Process32Next(snapshot, &entry); err != nil {
+			break
+		}
+	}
+
+	pids := make(map[uint32]bool)
+	pids[currentPID] = true
+
+	// Expand to all descendants
+	changed := true
+	for changed {
+		changed = false
+		for _, p := range allProcs {
+			if !pids[p.pid] && pids[p.parentPid] {
+				pids[p.pid] = true
+				changed = true
+			}
+		}
+	}
+
+	const access = windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA
+	trimmedCount := 1 // already trimmed current process
+	for pid := range pids {
+		if pid == currentPID || pid == 0 {
+			continue
+		}
+		hProcess, err := windows.OpenProcess(access, false, pid)
+		if err != nil {
+			continue
+		}
+		trimProcessWorkingSet(hProcess)
+		windows.CloseHandle(hProcess)
+		trimmedCount++
+	}
+	debugLogf("app", "trimmed working set for process tree (%d/%d processes)", trimmedCount, len(pids))
 }
 

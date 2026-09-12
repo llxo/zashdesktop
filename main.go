@@ -332,6 +332,7 @@ type App struct {
 	trayProxyResponseHash     string
 	trayProxyRefreshMu        sync.Mutex
 	clearCacheMu              sync.Mutex
+	forceClose                bool
 	quitting                  bool
 	mu                        sync.Mutex
 }
@@ -348,6 +349,9 @@ func (a *App) showWindow() {
 	}
 	a.mu.Unlock()
 
+	if window.IsMinimised() {
+		window.Restore()
+	}
 	window.Show().Focus()
 }
 
@@ -412,19 +416,57 @@ func (a *App) saveWindowState() {
 	a.mu.Unlock()
 }
 
-func (a *App) releaseWindow(*application.WindowEvent) {
+func (a *App) releaseWindow(e *application.WindowEvent) {
 	a.mu.Lock()
 	if a.saveTimer != nil {
 		a.saveTimer.Stop()
 		a.saveTimer = nil
 	}
+	if a.forceClose || a.quitting {
+		a.mu.Unlock()
+		a.saveWindowState()
+		a.mu.Lock()
+		a.window = nil
+		a.mu.Unlock()
+		return
+	}
+
+	quickWakeup := true
+	if a.coreService != nil {
+		quickWakeup = a.coreService.IsQuickWakeupEnabled()
+	}
+
+	if !quickWakeup {
+		a.mu.Unlock()
+		a.saveWindowState()
+		// 未开启快速唤醒：直接销毁窗口与 WebView2，释放全部进程和内存
+		a.mu.Lock()
+		a.window = nil
+		a.mu.Unlock()
+		return
+	}
+
+	win := a.window
 	a.mu.Unlock()
+
 	a.saveWindowState()
-	// Do not cancel the close event. Wails will destroy the window and release
-	// WebView2, including the page's workers, sockets, and graphics resources.
-	a.mu.Lock()
-	a.window = nil
-	a.mu.Unlock()
+	if e != nil {
+		e.Cancel()
+	}
+	if win != nil {
+		win.Hide()
+	}
+
+	// 异步延迟执行内存工作集压缩，释放物理 RAM
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		a.mu.Lock()
+		shouldTrim := a.window != nil && !a.quitting
+		a.mu.Unlock()
+		if shouldTrim {
+			trimProcessTreeMemory()
+		}
+	}()
 }
 
 func (a *App) setupTray() {
@@ -453,10 +495,15 @@ func (a *App) quit() {
 	debugLogf("app", "quitting application")
 	a.mu.Lock()
 	a.quitting = true
+	a.forceClose = true
 	cancelTrayProxy := a.trayProxyCancel
+	win := a.window
 	a.mu.Unlock()
 	if cancelTrayProxy != nil {
 		cancelTrayProxy()
+	}
+	if win != nil {
+		win.Close()
 	}
 	a.app.Quit()
 }
@@ -475,6 +522,9 @@ func (a *App) clearFrontendCache() {
 	}
 	window := a.window
 	wasOpen := window != nil
+	if wasOpen {
+		a.forceClose = true
+	}
 	a.mu.Unlock()
 
 	if wasOpen {
@@ -498,6 +548,10 @@ func (a *App) clearFrontendCache() {
 			debugLogf("app", "removed webview cache dir %q", dir)
 		}
 	}
+
+	a.mu.Lock()
+	a.forceClose = false
+	a.mu.Unlock()
 
 	if wasOpen {
 		a.showWindow()

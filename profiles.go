@@ -17,11 +17,19 @@ type sharedBehaviorConfig struct {
 	AutoStartMihomo  bool  `json:"autoStartMihomo"`
 	BackendDebugLog  bool  `json:"backendDebugLog"`
 	StopCoreOnExit   *bool `json:"stopCoreOnExit,omitempty"`
+	QuickWakeup      *bool `json:"quickWakeup,omitempty"`
 }
 
 func (b sharedBehaviorConfig) shouldStopCoreOnExit() bool {
 	if b.StopCoreOnExit != nil {
 		return *b.StopCoreOnExit
+	}
+	return true
+}
+
+func (b sharedBehaviorConfig) isQuickWakeup() bool {
+	if b.QuickWakeup != nil {
+		return *b.QuickWakeup
 	}
 	return true
 }
@@ -129,10 +137,12 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		stopCoreOnExit := true
+		quickWakeup := true
 		profiles := persistedCoreProfiles{
 			ActiveCore: coreTypeSingBox,
 			Behavior: sharedBehaviorConfig{
 				StopCoreOnExit: &stopCoreOnExit,
+				QuickWakeup:    &quickWakeup,
 			},
 			Profiles: make(map[string]CoreConfig),
 		}
@@ -186,6 +196,7 @@ func applySharedBehavior(config *CoreConfig, behavior sharedBehaviorConfig) {
 	config.AutoStartMihomo = behavior.AutoStartMihomo
 	config.BackendDebugLog = behavior.BackendDebugLog
 	config.StopCoreOnExit = behavior.shouldStopCoreOnExit()
+	config.QuickWakeup = behavior.isQuickWakeup()
 }
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {

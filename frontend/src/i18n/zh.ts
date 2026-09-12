@@ -722,6 +722,7 @@ const zh = {
   autoStartSingBox: '启动程序时开启 sing-box',
   autoStartMihomo: '启动程序时开启 mihomo',
   stopCoreOnExit: '退出程序时关闭核心',
+  quickWakeup: '快速唤醒',
   backendDebugLog: '后端调试日志',
   appUpdate: '应用更新',
   desktopApp: '桌面端',

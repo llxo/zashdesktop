@@ -485,6 +485,20 @@
           </label>
           <label class="setting-item">
             <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+              {{ $t('quickWakeup') }}
+            </span>
+            <div class="flex flex-1 justify-end">
+              <input
+                v-model="behaviorDraft.quickWakeup"
+                class="toggle"
+                type="checkbox"
+                :disabled="isSavingBehavior"
+                @change="saveBehavior()"
+              />
+            </div>
+          </label>
+          <label class="setting-item">
+            <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
               {{ $t('backendDebugLog') }}
             </span>
             <div class="flex flex-1 justify-end">
@@ -692,6 +706,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   autoStartMihomo: false,
   backendDebugLog: false,
   stopCoreOnExit: true,
+  quickWakeup: true,
 })
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 // Polling replaces config every second. Editable controls must bind to drafts.
@@ -702,6 +717,7 @@ const behaviorDraft = reactive({
   autoStartMihomo: false,
   backendDebugLog: false,
   stopCoreOnExit: true,
+  quickWakeup: true,
 })
 const coreType = computed(() => props.coreType)
 const { t } = useI18n()
@@ -808,7 +824,6 @@ const installedVersionLabel = computed(() => {
 const isCoreMaintenanceBusy = computed(
   () => isSaving.value || isDownloading.value,
 )
-let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshRequest = 0
 let checkSequence = 0
 type ConfigRequest = { id: number; coreType: CoreType; allowCoreTypeChange: boolean }
@@ -888,6 +903,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
       behaviorDraft.autoStartSingBox !== next.autoStartSingBox ||
       behaviorDraft.autoStartMihomo !== next.autoStartMihomo ||
       behaviorDraft.stopCoreOnExit !== next.stopCoreOnExit ||
+      behaviorDraft.quickWakeup !== next.quickWakeup ||
       behaviorDraft.backendDebugLog !== next.backendDebugLog
     ) {
       Object.assign(behaviorDraft, {
@@ -896,6 +912,7 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
         autoStartSingBox: next.autoStartSingBox,
         autoStartMihomo: next.autoStartMihomo,
         stopCoreOnExit: next.stopCoreOnExit,
+        quickWakeup: next.quickWakeup,
         backendDebugLog: next.backendDebugLog,
       })
     }
@@ -1258,6 +1275,7 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
       behaviorDraft.autoStartSingBox,
       behaviorDraft.autoStartMihomo,
       behaviorDraft.stopCoreOnExit,
+      behaviorDraft.quickWakeup,
       behaviorDraft.backendDebugLog,
       coreType.value,
     )
@@ -1412,12 +1430,17 @@ onMounted(() => {
       void checkUpdate(false)
     }
   })()
-  refreshTimer = setInterval(() => {
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+const handleVisibilityChange = () => {
+  if (!document.hidden) {
     if (!isRefreshing.value && !isConfigMutationPending.value) {
       void loadConfig()
     }
-  }, 1000)
-})
+  }
+}
 
 watch(
   () => props.coreType,
@@ -1449,9 +1472,6 @@ watch(
 onUnmounted(() => {
   refreshRequest += 1
   isRefreshing.value = false
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = undefined
-  }
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

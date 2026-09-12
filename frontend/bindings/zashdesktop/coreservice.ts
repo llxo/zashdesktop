@@ -65,6 +65,10 @@ export function InstallAppUpdate(): $CancellablePromise<void> {
     return $Call.ByID(1482439629);
 }
 
+export function IsQuickWakeupEnabled(): $CancellablePromise<boolean> {
+    return $Call.ByID(3100513353);
+}
+
 export function ListConfigFiles(rawCoreType: string): $CancellablePromise<string[] | null> {
     return $Call.ByID(2883527251, rawCoreType);
 }
@@ -77,8 +81,8 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartSingBox: boolean, autoStartMihomo: boolean, stopCoreOnExit: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog, rawCoreType);
+export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartSingBox: boolean, autoStartMihomo: boolean, stopCoreOnExit: boolean, quickWakeup: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, quickWakeup, backendDebugLog, rawCoreType);
 }
 
 export function SaveChannel(rawChannel: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
