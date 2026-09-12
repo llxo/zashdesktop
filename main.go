@@ -317,24 +317,41 @@ func cleanExpiredDebugLog() {
 // -----------------------------------------------------------------------------
 
 type App struct {
-	app                      *application.App
-	coreService              *CoreService
-	window                   *application.WebviewWindow
-	tray                     *application.SystemTray
-	launch                   LaunchConfig
-	windowState              windowState
-	windowStatePath          string
-	saveTimer                *time.Timer
-	saveMu                   sync.Mutex
-	trayProxyCancel           context.CancelFunc
-	trayProxyFingerprint      string
-	trayProxyCachedGroups     []trayProxy
-	trayProxyResponseHash     string
-	trayProxyRefreshMu        sync.Mutex
-	clearCacheMu              sync.Mutex
-	forceClose                bool
-	quitting                  bool
-	mu                        sync.Mutex
+	app                   *application.App
+	coreService           *CoreService
+	window                *application.WebviewWindow
+	tray                  *application.SystemTray
+	launch                LaunchConfig
+	windowState           windowState
+	windowStatePath       string
+	saveTimer             *time.Timer
+	saveMu                sync.Mutex
+	freezeTimer           *time.Timer
+	suspendedWebView2PIDs []uint32
+	isWebView2Suspended   bool
+	trayProxyCancel       context.CancelFunc
+	trayProxyFingerprint  string
+	trayProxyCachedGroups []trayProxy
+	trayProxyResponseHash string
+	trayProxyRefreshMu    sync.Mutex
+	clearCacheMu          sync.Mutex
+	forceClose            bool
+	quitting              bool
+	mu                    sync.Mutex
+}
+
+func (a *App) resumeWebView2Locked() {
+	if a.freezeTimer != nil {
+		a.freezeTimer.Stop()
+		a.freezeTimer = nil
+	}
+	if a.isWebView2Suspended {
+		pids := a.suspendedWebView2PIDs
+		a.suspendedWebView2PIDs = nil
+		a.isWebView2Suspended = false
+		resumeWebView2Processes(pids)
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (a *App) showWindow() {
@@ -343,6 +360,7 @@ func (a *App) showWindow() {
 		a.mu.Unlock()
 		return
 	}
+	a.resumeWebView2Locked()
 	window := a.window
 	if window == nil {
 		window = a.createWindowLocked()
@@ -422,24 +440,14 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.saveTimer.Stop()
 		a.saveTimer = nil
 	}
+	if a.freezeTimer != nil {
+		a.freezeTimer.Stop()
+		a.freezeTimer = nil
+	}
 	if a.forceClose || a.quitting {
+		a.resumeWebView2Locked()
 		a.mu.Unlock()
 		a.saveWindowState()
-		a.mu.Lock()
-		a.window = nil
-		a.mu.Unlock()
-		return
-	}
-
-	quickWakeup := true
-	if a.coreService != nil {
-		quickWakeup = a.coreService.IsQuickWakeupEnabled()
-	}
-
-	if !quickWakeup {
-		a.mu.Unlock()
-		a.saveWindowState()
-		// 未开启快速唤醒：直接销毁窗口与 WebView2，释放全部进程和内存
 		a.mu.Lock()
 		a.window = nil
 		a.mu.Unlock()
@@ -457,16 +465,20 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		win.Hide()
 	}
 
-	// 异步延迟执行内存工作集压缩，释放物理 RAM
-	go func() {
-		time.Sleep(300 * time.Millisecond)
+	// 异步延迟执行 WebView2 进程挂起（冻结）与物理内存修剪
+	a.mu.Lock()
+	a.freezeTimer = time.AfterFunc(250*time.Millisecond, func() {
 		a.mu.Lock()
-		shouldTrim := a.window != nil && !a.quitting
-		a.mu.Unlock()
-		if shouldTrim {
-			trimProcessTreeMemory()
+		defer a.mu.Unlock()
+		if a.window == nil || a.quitting || a.forceClose || a.isWebView2Suspended {
+			return
 		}
-	}()
+		a.suspendedWebView2PIDs = suspendWebView2Processes()
+		if len(a.suspendedWebView2PIDs) > 0 {
+			a.isWebView2Suspended = true
+		}
+	})
+	a.mu.Unlock()
 }
 
 func (a *App) setupTray() {
@@ -496,6 +508,7 @@ func (a *App) quit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.forceClose = true
+	a.resumeWebView2Locked()
 	cancelTrayProxy := a.trayProxyCancel
 	win := a.window
 	a.mu.Unlock()
@@ -520,6 +533,7 @@ func (a *App) clearFrontendCache() {
 		a.mu.Unlock()
 		return
 	}
+	a.resumeWebView2Locked()
 	window := a.window
 	wasOpen := window != nil
 	if wasOpen {

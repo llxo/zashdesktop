@@ -728,7 +728,6 @@ const en = {
   autoStartSingBox: 'Launch sing-box on app startup',
   autoStartMihomo: 'Launch mihomo on app startup',
   stopCoreOnExit: 'Stop core on app exit',
-  quickWakeup: 'Fast Wakeup',
   backendDebugLog: 'Backend debug log',
   appUpdate: 'App Update',
   desktopApp: 'Desktop App',

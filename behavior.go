@@ -36,6 +36,9 @@ var (
 	behaviorSetProcessWorkingSetSize              = behaviorKernel32.NewProc("SetProcessWorkingSetSize")
 	behaviorPsapi                                 = windows.NewLazySystemDLL("psapi.dll")
 	behaviorEmptyWorkingSet                       = behaviorPsapi.NewProc("EmptyWorkingSet")
+	behaviorNtdll                                 = windows.NewLazySystemDLL("ntdll.dll")
+	behaviorNtSuspendProcess                      = behaviorNtdll.NewProc("NtSuspendProcess")
+	behaviorNtResumeProcess                       = behaviorNtdll.NewProc("NtResumeProcess")
 )
 
 func readRunAsAdminSetting(applicationPath string) (bool, error) {
@@ -526,7 +529,7 @@ func (s *CoreService) GetSystemFonts() []string {
 }
 
 // -----------------------------------------------------------------------------
-// Process Tree Working Set Memory Trimming (Quick Wakeup Optimization)
+// WebView2 Process Suspend / Resume & Working Set Optimization
 // -----------------------------------------------------------------------------
 
 func trimProcessWorkingSet(h windows.Handle) {
@@ -537,76 +540,88 @@ func trimProcessWorkingSet(h windows.Handle) {
 	}
 }
 
-// trimProcessTreeMemory trims the working set of the current process and all its child processes (e.g. WebView2).
-func trimProcessTreeMemory() {
-	currentPID := uint32(os.Getpid())
-
-	// 1. Trim current process
-	if h, err := windows.GetCurrentProcess(); err == nil {
-		trimProcessWorkingSet(h)
-	}
-
-	// 2. Snapshot processes to discover all children
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+func findWebView2ProcessPIDs() []uint32 {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		debugLogf("app", "create process snapshot failed: %v", err)
-		return
+		return nil
 	}
-	defer windows.CloseHandle(snapshot)
+	defer windows.CloseHandle(snap)
 
 	var entry windows.ProcessEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
-
-	if err := windows.Process32First(snapshot, &entry); err != nil {
-		debugLogf("app", "process32first failed: %v", err)
-		return
+	if err := windows.Process32First(snap, &entry); err != nil {
+		return nil
 	}
 
-	type procInfo struct {
-		pid       uint32
-		parentPid uint32
+	type proc struct {
+		pid, parent uint32
+		isWebView   bool
 	}
-	var allProcs []procInfo
-
+	var procs []proc
 	for {
-		allProcs = append(allProcs, procInfo{
+		name := windows.UTF16ToString(entry.ExeFile[:])
+		procs = append(procs, proc{
 			pid:       entry.ProcessID,
-			parentPid: entry.ParentProcessID,
+			parent:    entry.ParentProcessID,
+			isWebView: strings.EqualFold(name, "msedgewebview2.exe"),
 		})
-		if err := windows.Process32Next(snapshot, &entry); err != nil {
+		if err := windows.Process32Next(snap, &entry); err != nil {
 			break
 		}
 	}
 
-	pids := make(map[uint32]bool)
-	pids[currentPID] = true
-
-	// Expand to all descendants
-	changed := true
-	for changed {
+	isDescendant := map[uint32]bool{uint32(os.Getpid()): true}
+	for changed := true; changed; {
 		changed = false
-		for _, p := range allProcs {
-			if !pids[p.pid] && pids[p.parentPid] {
-				pids[p.pid] = true
+		for _, p := range procs {
+			if !isDescendant[p.pid] && isDescendant[p.parent] {
+				isDescendant[p.pid] = true
 				changed = true
 			}
 		}
 	}
 
-	const access = windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA
-	trimmedCount := 1 // already trimmed current process
-	for pid := range pids {
-		if pid == currentPID || pid == 0 {
-			continue
+	var webviewPIDs []uint32
+	for _, p := range procs {
+		if p.isWebView && isDescendant[p.pid] {
+			webviewPIDs = append(webviewPIDs, p.pid)
 		}
-		hProcess, err := windows.OpenProcess(access, false, pid)
-		if err != nil {
-			continue
-		}
-		trimProcessWorkingSet(hProcess)
-		windows.CloseHandle(hProcess)
-		trimmedCount++
 	}
-	debugLogf("app", "trimmed working set for process tree (%d/%d processes)", trimmedCount, len(pids))
+	return webviewPIDs
 }
+
+func suspendWebView2Processes() []uint32 {
+	if behaviorNtSuspendProcess.Find() != nil {
+		return nil
+	}
+	pids := findWebView2ProcessPIDs()
+	const access = 0x0800 | windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA
+	var suspended []uint32
+	for _, pid := range pids {
+		if h, err := windows.OpenProcess(access, false, pid); err == nil {
+			if r, _, _ := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
+				suspended = append(suspended, pid)
+				trimProcessWorkingSet(h)
+			}
+			windows.CloseHandle(h)
+		}
+	}
+	if h, err := windows.GetCurrentProcess(); err == nil {
+		trimProcessWorkingSet(h)
+	}
+	return suspended
+}
+
+func resumeWebView2Processes(pids []uint32) {
+	if len(pids) == 0 || behaviorNtResumeProcess.Find() != nil {
+		return
+	}
+	for _, pid := range pids {
+		if h, err := windows.OpenProcess(0x0800, false, pid); err == nil {
+			behaviorNtResumeProcess.Call(uintptr(h))
+			windows.CloseHandle(h)
+		}
+	}
+}
+
 

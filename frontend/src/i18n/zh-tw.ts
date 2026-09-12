@@ -714,7 +714,6 @@ const zhTW: LANG_MESSAGE = {
   autoStartSingBox: '啟動程式時開啟 sing-box',
   autoStartMihomo: '啟動程式時開啟 mihomo',
   stopCoreOnExit: '結束程式時關閉核心',
-  quickWakeup: '快速喚醒',
   backendDebugLog: '後端除錯記錄',
   appUpdate: '應用程式更新',
   desktopApp: '桌面端',

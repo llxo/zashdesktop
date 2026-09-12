@@ -62,7 +62,6 @@ type CoreConfig struct {
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
 	StopCoreOnExit    bool   `json:"stopCoreOnExit"`
-	QuickWakeup       bool   `json:"quickWakeup"`
 }
 
 type coreVersionCacheItem struct {
@@ -451,17 +450,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return saved, nil
 }
 
-func (s *CoreService) IsQuickWakeupEnabled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	profiles, err := s.loadProfilesLocked()
-	if err != nil {
-		return true
-	}
-	return profiles.Behavior.isQuickWakeup()
-}
-
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, quickWakeup, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("system", "save behavior failed to normalize core type: %v", err)
@@ -489,7 +478,6 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		AutoStartMihomo:  autoStartMihomo,
 		BackendDebugLog:  backendDebugLog,
 		StopCoreOnExit:   &stopCoreOnExit,
-		QuickWakeup:      &quickWakeup,
 	}
 	if behavior.AutoStartSingBox && behavior.AutoStartMihomo {
 		if coreType == coreTypeMihomo {
@@ -513,7 +501,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t quickWakeup=%t debugLog=%t", runAsAdmin, autoStart, quickWakeup, backendDebugLog)
+	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t debugLog=%t", runAsAdmin, autoStart, backendDebugLog)
 	return config, nil
 }
 
