@@ -87,15 +87,9 @@ const router = createRouter({
   ],
 })
 
-const title = useTitle('zashboard')
-const setTitleByName = (name: string | symbol | undefined) => {
-  if (typeof name === 'string' && activeBackend.value) {
-    const backend = activeBackend.value
-    const prefix = backend.label || `${backend.host}:${backend.port}`
-    title.value = `${prefix} | ${i18n.global.t(name)}`
-  } else {
-    title.value = 'zashboard'
-  }
+const title = useTitle('zashdesktop')
+const setTitleByName = (_name: string | symbol | undefined) => {
+  title.value = 'zashdesktop'
 }
 
 router.beforeEach((to, from) => {

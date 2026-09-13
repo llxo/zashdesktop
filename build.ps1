@@ -89,7 +89,7 @@ try {
 
     $versionedManifestPath = Join-Path $resourceTempDir "wails.exe.manifest"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw
-    $manifest = $manifest -replace '(<assemblyIdentity type="win32" name="com\.singbox\.gui" version=")[^"]+(" processorArchitecture="\*"/>)', "`$1$windowsVersion`$2"
+    $manifest = $manifest -replace '(<assemblyIdentity type="win32" name="com\.wails\.zashdesktop" version=")[^"]+(" processorArchitecture="\*"/>)', "`$1$windowsVersion`$2"
     [System.IO.File]::WriteAllText($versionedManifestPath, $manifest, $utf8NoBom)
 
     if (-not (Test-Path -LiteralPath $binDir)) {
