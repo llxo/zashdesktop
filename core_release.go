@@ -1,9 +1,7 @@
 package main
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -785,7 +783,7 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 		}
 	}
 
-	archivePath, err := s.archiveTools().Download(downloadURL, expectedSHA256)
+	archivePath, err := downloadArchiveWithFallback(downloadURL, expectedSHA256, s.executableDir)
 	if err != nil {
 		return CoreConfig{}, "", "", err
 	}
@@ -794,12 +792,8 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 
 func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, targetVersion string) (CoreConfig, error) {
 	corePath := s.corePathFor(config.CoreType, config.Channel)
-	installed, err := s.archiveTools().Extract(archivePath, corePath, coreArchiveExecutableMatcher(config.CoreType))
-	if err != nil {
+	if err := extractAndReplaceCoreExe(archivePath, corePath, config.CoreType); err != nil {
 		return CoreConfig{}, err
-	}
-	if !installed {
-		return CoreConfig{}, fmt.Errorf("%s core could not be replaced after it stopped", config.CoreType)
 	}
 
 	config.CorePath = corePath
@@ -916,33 +910,6 @@ func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
 // Archive Download, Extraction & Replacement
 // -----------------------------------------------------------------------------
 
-type coreArchiveTools struct {
-	baseDir     string
-	maxDownload int64
-	maxBinary   int64
-	logf        func(string, ...any)
-}
-
-func (s *CoreService) archiveTools() coreArchiveTools {
-	return coreArchiveTools{
-		baseDir:     s.executableDir,
-		maxDownload: maxCoreDownload,
-		maxBinary:   maxCoreBinary,
-		logf:        coreDebugf,
-	}
-}
-
-func coreArchiveExecutableMatcher(coreType string) func(string) bool {
-	prefix := coreExecutableBaseName
-	if normalizedCoreType(coreType) == coreTypeMihomo {
-		prefix = mihomoExecutableName
-	}
-	return func(name string) bool {
-		name = strings.ToLower(strings.TrimSuffix(filepath.Base(name), ".exe"))
-		return name == prefix || strings.HasPrefix(name, prefix+"-") || strings.HasPrefix(name, prefix+"_")
-	}
-}
-
 func coreExecutableNameFor(coreType, channel string) string {
 	baseName := coreExecutableBaseName
 	if normalizedCoreType(coreType) == coreTypeMihomo {
@@ -954,20 +921,23 @@ func coreExecutableNameFor(coreType, channel string) string {
 	return baseName + ".exe"
 }
 
-func (t coreArchiveTools) debugf(format string, args ...any) {
-	if t.logf != nil {
-		t.logf(format, args...)
+func isCoreArchiveExecutable(name, coreType string) bool {
+	prefix := coreExecutableBaseName
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		prefix = mihomoExecutableName
 	}
+	clean := strings.ToLower(strings.TrimSuffix(filepath.Base(name), ".exe"))
+	return clean == prefix || strings.HasPrefix(clean, prefix+"-") || strings.HasPrefix(clean, prefix+"_")
 }
 
-func (t coreArchiveTools) Download(downloadURL, expectedSHA256 string) (string, error) {
+func downloadArchiveWithFallback(downloadURL, expectedSHA256, baseDir string) (string, error) {
 	var lastErr error
 	for _, candidate := range buildGitHubCandidateURLs(downloadURL) {
-		path, err := t.downloadSingle(candidate, expectedSHA256)
+		path, err := downloadSingleArchive(candidate, expectedSHA256, baseDir)
 		if err == nil {
 			return path, nil
 		}
-		t.debugf("candidate download failed: url=%q err=%v", candidate, err)
+		coreDebugf("candidate download failed: url=%q err=%v", candidate, err)
 		lastErr = err
 	}
 	if lastErr != nil {
@@ -976,8 +946,8 @@ func (t coreArchiveTools) Download(downloadURL, expectedSHA256 string) (string, 
 	return "", errors.New("download failed from all sources")
 }
 
-func (t coreArchiveTools) downloadSingle(downloadURL, expectedSHA256 string) (string, error) {
-	t.debugf("HTTP download start: url=%q checksum=%t", downloadURL, expectedSHA256 != "")
+func downloadSingleArchive(downloadURL, expectedSHA256, baseDir string) (string, error) {
+	coreDebugf("HTTP download start: url=%q checksum=%t", downloadURL, expectedSHA256 != "")
 	client := newCoreHTTPClient(20 * time.Minute)
 	resp, err := client.Get(downloadURL)
 	if err != nil {
@@ -988,21 +958,11 @@ func (t coreArchiveTools) downloadSingle(downloadURL, expectedSHA256 string) (st
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return "", fmt.Errorf("download core: server returned %s", resp.Status)
 	}
-	if resp.ContentLength > t.maxDownload {
+	if resp.ContentLength > maxCoreDownload {
 		return "", errors.New("core archive is too large")
 	}
 
-	suffix := ".archive"
-	if parsed, parseErr := url.Parse(downloadURL); parseErr == nil {
-		lowerPath := strings.ToLower(parsed.Path)
-		switch {
-		case strings.HasSuffix(lowerPath, ".tar.gz"):
-			suffix = ".tar.gz"
-		case strings.HasSuffix(lowerPath, ".zip"):
-			suffix = ".zip"
-		}
-	}
-	temp, err := os.CreateTemp(t.baseDir, ".core-download-*"+suffix)
+	temp, err := os.CreateTemp(baseDir, ".core-download-*.zip")
 	if err != nil {
 		return "", fmt.Errorf("create core archive: %w", err)
 	}
@@ -1010,6 +970,7 @@ func (t coreArchiveTools) downloadSingle(downloadURL, expectedSHA256 string) (st
 	defer func() {
 		if temp != nil {
 			_ = temp.Close()
+			_ = os.Remove(path)
 		}
 	}()
 
@@ -1018,152 +979,111 @@ func (t coreArchiveTools) downloadSingle(downloadURL, expectedSHA256 string) (st
 	if expectedSHA256 != "" {
 		writer = io.MultiWriter(temp, digest)
 	}
-	written, err := io.Copy(writer, io.LimitReader(resp.Body, t.maxDownload+1))
-	if err != nil || written > t.maxDownload {
-		_ = temp.Close()
-		_ = os.Remove(path)
+
+	written, err := io.Copy(writer, io.LimitReader(resp.Body, maxCoreDownload+1))
+	if err != nil || written > maxCoreDownload {
 		if err != nil {
 			return "", fmt.Errorf("save core archive: %w", err)
 		}
 		return "", errors.New("core archive is too large")
 	}
+
 	if err := temp.Close(); err != nil {
-		_ = os.Remove(path)
 		return "", fmt.Errorf("close core archive: %w", err)
 	}
 	if expectedSHA256 != "" {
 		actualSHA256 := hex.EncodeToString(digest.Sum(nil))
 		if !strings.EqualFold(actualSHA256, expectedSHA256) {
-			_ = os.Remove(path)
 			return "", errors.New("core archive checksum does not match the release digest")
 		}
 	}
 	temp = nil
-	t.debugf("HTTP download complete: path=%q bytes=%d", path, written)
+	coreDebugf("HTTP download complete: path=%q bytes=%d", path, written)
 	return path, nil
 }
 
-func (t coreArchiveTools) Extract(archivePath, targetPath string, isExecutable func(string) bool) (bool, error) {
-	t.debugf("extract archive start: archive=%q target=%q", archivePath, targetPath)
-	if isExecutable == nil {
-		return false, errors.New("archive executable matcher is not configured")
-	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return false, fmt.Errorf("create core directory: %w", err)
-	}
-	if strings.HasSuffix(strings.ToLower(archivePath), ".tar.gz") {
-		return t.extractTarGZ(archivePath, targetPath, isExecutable)
-	}
-	return t.extractZIP(archivePath, targetPath, isExecutable)
-}
-
-func (t coreArchiveTools) extractZIP(archivePath, targetPath string, isExecutable func(string) bool) (bool, error) {
+func extractAndReplaceCoreExe(archivePath, targetPath, coreType string) error {
 	archive, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return false, fmt.Errorf("open core ZIP archive: %w", err)
+		return fmt.Errorf("open core ZIP archive: %w", err)
 	}
 	defer archive.Close()
 
 	var selected *zip.File
 	for _, entry := range archive.File {
-		name := filepath.Base(strings.ReplaceAll(entry.Name, "\\", "/"))
-		if !isExecutable(name) || entry.FileInfo().IsDir() || entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > uint64(t.maxBinary) {
+		if entry.FileInfo().IsDir() || entry.FileInfo().Mode()&os.ModeSymlink != 0 || entry.UncompressedSize64 > uint64(maxCoreBinary) {
 			continue
 		}
-		if selected == nil || strings.Count(entry.Name, "/") < strings.Count(selected.Name, "/") {
-			selected = entry
+		if isCoreArchiveExecutable(entry.Name, coreType) {
+			if selected == nil || strings.Count(entry.Name, "/") < strings.Count(selected.Name, "/") {
+				selected = entry
+			}
 		}
 	}
 	if selected == nil {
-		return false, errors.New("core executable was not found in the ZIP archive")
+		return fmt.Errorf("core executable not found in ZIP archive for %s", coreType)
 	}
 
 	reader, err := selected.Open()
 	if err != nil {
-		return false, fmt.Errorf("read core executable: %w", err)
+		return fmt.Errorf("read core executable from zip: %w", err)
 	}
 	defer reader.Close()
-	return t.installExecutable(reader, targetPath)
-}
 
-func (t coreArchiveTools) extractTarGZ(archivePath, targetPath string, isExecutable func(string) bool) (bool, error) {
-	archiveFile, err := os.Open(archivePath)
-	if err != nil {
-		return false, fmt.Errorf("open core TAR.GZ archive: %w", err)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("create core directory: %w", err)
 	}
-	defer archiveFile.Close()
 
-	gzipReader, err := gzip.NewReader(archiveFile)
+	temp, err := os.CreateTemp(filepath.Dir(targetPath), ".core-executable-*.exe")
 	if err != nil {
-		return false, fmt.Errorf("open core gzip archive: %w", err)
-	}
-	defer gzipReader.Close()
-
-	tarReader := tar.NewReader(gzipReader)
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return false, fmt.Errorf("read core TAR archive: %w", err)
-		}
-		if (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) || header.Size <= 0 || header.Size > t.maxBinary {
-			continue
-		}
-		name := filepath.Base(strings.ReplaceAll(header.Name, "\\", "/"))
-		if !isExecutable(name) {
-			continue
-		}
-		return t.installExecutable(io.LimitReader(tarReader, header.Size), targetPath)
-	}
-	return false, errors.New("core executable was not found in the TAR.GZ archive")
-}
-
-func (t coreArchiveTools) installExecutable(reader io.Reader, targetPath string) (bool, error) {
-	temp, err := os.CreateTemp(filepath.Dir(targetPath), ".core-executable-*"+filepath.Ext(targetPath))
-	if err != nil {
-		return false, fmt.Errorf("create core file: %w", err)
+		return fmt.Errorf("create temp core executable: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-
-	written, err := io.Copy(temp, io.LimitReader(reader, t.maxBinary+1))
-	if err != nil || written == 0 || written > t.maxBinary {
-		_ = temp.Close()
-		if err != nil {
-			return false, fmt.Errorf("extract core executable: %w", err)
+	defer func() {
+		if temp != nil {
+			_ = temp.Close()
+			_ = os.Remove(tempPath)
 		}
-		return false, errors.New("core executable is invalid or too large")
+	}()
+
+	written, err := io.Copy(temp, io.LimitReader(reader, maxCoreBinary+1))
+	if err != nil || written == 0 || written > maxCoreBinary {
+		if err != nil {
+			return fmt.Errorf("extract core executable: %w", err)
+		}
+		return errors.New("core executable is invalid or too large")
 	}
 	_ = temp.Chmod(0o755)
 	if err := temp.Close(); err != nil {
-		return false, err
+		return err
 	}
-	return t.replaceExecutable(tempPath, targetPath)
+	temp = nil
+
+	return replaceExecutable(tempPath, targetPath)
 }
 
-func (t coreArchiveTools) replaceExecutable(sourcePath, targetPath string) (bool, error) {
+func replaceExecutable(sourcePath, targetPath string) error {
+	defer os.Remove(sourcePath)
 	previousPath := targetPath + ".replacing"
 	_ = os.Remove(previousPath)
 	if fileExists(targetPath) {
 		if err := os.Rename(targetPath, previousPath); err != nil {
 			if isFileLockedError(err) {
-				t.debugf("target file %q is locked (sharing/lock violation)", targetPath)
-				return false, nil
+				coreDebugf("target file %q is locked (sharing violation)", targetPath)
+				return fmt.Errorf("target core executable is locked: %w", err)
 			}
-			t.debugf("backup target file %q to %q failed: %v", targetPath, previousPath, err)
-			return false, fmt.Errorf("prepare core replacement: %w", err)
+			coreDebugf("backup target file %q failed: %v", targetPath, err)
+			return fmt.Errorf("prepare core replacement: %w", err)
 		}
 	}
 	if err := os.Rename(sourcePath, targetPath); err != nil {
-		t.debugf("move source file %q to %q failed: %v", sourcePath, targetPath, err)
+		coreDebugf("move source file %q to %q failed: %v", sourcePath, targetPath, err)
 		if fileExists(previousPath) {
 			_ = os.Rename(previousPath, targetPath)
 		}
-		return false, fmt.Errorf("replace core executable: %w", err)
+		return fmt.Errorf("replace core executable: %w", err)
 	}
 	_ = os.Remove(previousPath)
-	t.debugf("successfully replaced core binary at %q", targetPath)
-	return true, nil
+	coreDebugf("successfully replaced core binary at %q", targetPath)
+	return nil
 }
