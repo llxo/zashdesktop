@@ -36,7 +36,6 @@ const (
 
 type CoreConfig struct {
 	CoreType         string `json:"coreType"`
-	URLTemplate      string `json:"urlTemplate"`
 	Version          string `json:"version"`
 	VersionDetail     string `json:"versionDetail"`
 	Channel           string `json:"channel"`
@@ -329,44 +328,6 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveURL(rawURL, rawCoreType string) (CoreConfig, error) {
-	coreType, err := normalizeCoreType(rawCoreType)
-	if err != nil {
-		debugLogf("core", "save URL failed: %v", err)
-		return CoreConfig{}, err
-	}
-	cleanURL := strings.TrimSpace(rawURL)
-	if cleanURL != "" {
-		if err := validateHTTPURL(cleanURL, "核心下载地址"); err != nil {
-			debugLogf("core", "save URL failed invalid url: %v", err)
-			return CoreConfig{}, err
-		}
-		if _, _, err := githubRepository(cleanURL); err != nil {
-			debugLogf("core", "save URL failed invalid github repo: %v", err)
-			return CoreConfig{}, err
-		}
-	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("core", "save URL failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-	config.URLTemplate = cleanURL
-	config.LatestVersion = ""
-	config.UpdateAvailable = false
-
-	saved, err := s.commitConfigUpdate(config, generation)
-	if err != nil {
-		debugLogf("core", "save URL failed: %v", err)
-		return CoreConfig{}, err
-	}
-	if owner, repository, repoErr := githubRepository(saved.URLTemplate); repoErr == nil {
-		s.clearCachedLatestRelease(owner, repository, saved.Channel)
-	}
-	debugLogf("core", "save URL success: type=%s urlTemplate=%q", saved.CoreType, saved.URLTemplate)
-	return saved, nil
-}
-
 func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, error) {
 	channel, err := normalizeCoreChannel(rawChannel)
 	if err != nil {
@@ -398,9 +359,7 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
 	}
-	if owner, repository, repoErr := githubRepository(saved.URLTemplate); repoErr == nil {
-		s.clearCachedLatestRelease(owner, repository, channel)
-	}
+	s.clearRemoteReleaseCache()
 	debugLogf("core", "save channel success: type=%s channel=%s installed=%t version=%s", saved.CoreType, saved.Channel, saved.Installed, saved.Version)
 	return saved, nil
 }

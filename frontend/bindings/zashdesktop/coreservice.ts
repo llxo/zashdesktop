@@ -17,8 +17,8 @@ export function CheckAppUpdate(): $CancellablePromise<$models.AppUpdateInfo> {
     return $Call.ByID(957133460);
 }
 
-export function CheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(2721282167, currentVersion, rawCoreType);
+export function CheckUpdate(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2721282167, rawURL, rawCoreType);
 }
 
 export function DeleteConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
@@ -29,12 +29,12 @@ export function DownloadConfig(rawURL: string, rawCoreType: string): $Cancellabl
     return $Call.ByID(3689975968, rawURL, rawCoreType);
 }
 
-export function DownloadCore(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(2731700857, currentVersion, rawCoreType);
+export function DownloadCore(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(2731700857, rawURL, rawCoreType);
 }
 
-export function ForceCheckUpdate(currentVersion: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(1671274230, currentVersion, rawCoreType);
+export function ForceCheckUpdate(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(1671274230, rawURL, rawCoreType);
 }
 
 export function GetAppUpdateInfo(): $CancellablePromise<$models.AppUpdateInfo> {
@@ -95,10 +95,6 @@ export function SaveCoreType(rawCoreType: string): $CancellablePromise<$models.C
 
 export function SaveRunArgs(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1182958737, rawArgs, rawCoreType);
-}
-
-export function SaveURL(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(3210647596, rawURL, rawCoreType);
 }
 
 export function SelectConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {

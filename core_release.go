@@ -124,6 +124,12 @@ func (s *CoreService) clearCachedLatestRelease(owner, repository, channel string
 	}
 }
 
+func (s *CoreService) clearRemoteReleaseCache() {
+	s.remoteReleaseMu.Lock()
+	defer s.remoteReleaseMu.Unlock()
+	s.remoteReleaseCache = make(map[string]remoteReleaseCacheItem)
+}
+
 func (s *CoreService) getCachedCoreVersion(coreType, channel string) (coreVersionCacheItem, bool) {
 	s.versionCacheMu.RLock()
 	defer s.versionCacheMu.RUnlock()
@@ -336,26 +342,6 @@ func githubRepository(template string) (string, string, error) {
 	return segments[0], segments[1], nil
 }
 
-func canonicalMihomoURLTemplate(config CoreConfig) string {
-	if normalizedCoreType(config.CoreType) != coreTypeMihomo {
-		return config.URLTemplate
-	}
-	owner, repository, err := githubRepository(config.URLTemplate)
-	if err != nil || !strings.EqualFold(repository, "mihomo") {
-		return config.URLTemplate
-	}
-	if strings.EqualFold(owner, "vernesong") {
-		return mihomoSmartTestURLTemplate
-	}
-	if strings.EqualFold(owner, "MetaCubeX") {
-		if config.Channel == coreChannelTest {
-			return mihomoMetaTestURLTemplate
-		}
-		return mihomoMetaStableURLTemplate
-	}
-	return config.URLTemplate
-}
-
 func isMihomoTestPlaceholderVersion(config CoreConfig, version string) bool {
 	return normalizedCoreType(config.CoreType) == coreTypeMihomo && config.Channel == coreChannelTest && !testVerPattern.MatchString(strings.TrimSpace(version))
 }
@@ -560,12 +546,12 @@ func releaseVersion(release githubRelease) string {
 	return tagVer
 }
 
-func findLatestReleaseForConfig(config CoreConfig) (string, error) {
-	owner, repository, err := githubRepository(config.URLTemplate)
+func findLatestReleaseForURL(downloadURLTemplate, channel string) (string, error) {
+	owner, repository, err := githubRepository(downloadURLTemplate)
 	if err != nil {
 		return "", err
 	}
-	return findLatestRelease(owner, repository, config.Channel)
+	return findLatestRelease(owner, repository, channel)
 }
 
 func findReleaseAssetDigest(owner, repository, version, downloadURL string) (string, error) {
@@ -629,15 +615,15 @@ func findReleaseAssetDigest(owner, repository, version, downloadURL string) (str
 // Service Update & Download Methods
 // -----------------------------------------------------------------------------
 
-func (s *CoreService) CheckUpdate(currentVersion, rawCoreType string) (CoreConfig, error) {
-	return s.checkUpdateInternal(currentVersion, rawCoreType, false)
+func (s *CoreService) CheckUpdate(rawURL, rawCoreType string) (CoreConfig, error) {
+	return s.checkUpdateInternal(rawURL, rawCoreType, false)
 }
 
-func (s *CoreService) ForceCheckUpdate(currentVersion, rawCoreType string) (CoreConfig, error) {
-	return s.checkUpdateInternal(currentVersion, rawCoreType, true)
+func (s *CoreService) ForceCheckUpdate(rawURL, rawCoreType string) (CoreConfig, error) {
+	return s.checkUpdateInternal(rawURL, rawCoreType, true)
 }
 
-func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, force bool) (CoreConfig, error) {
+func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("release", "check update normalize coreType failed: %v", err)
@@ -648,16 +634,16 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 		debugLogf("release", "check update loadConfigSnapshot failed: %v", err)
 		return CoreConfig{}, err
 	}
-	s.applyCurrentVersion(&config, currentVersion)
-	if config.URLTemplate == "" {
-		config.URLTemplate = defaultCoreURLTemplate(config.CoreType, config.Channel)
-	} else {
-		config.URLTemplate = canonicalMihomoURLTemplate(config)
+	s.applyCurrentVersion(&config, "")
+
+	downloadURL := strings.TrimSpace(rawURL)
+	if downloadURL == "" {
+		downloadURL = defaultCoreURLTemplate(config.CoreType, config.Channel)
 	}
 
-	owner, repository, err := githubRepository(config.URLTemplate)
+	owner, repository, err := githubRepository(downloadURL)
 	if err != nil {
-		debugLogf("release", "parse github repository from %q failed: %v", config.URLTemplate, err)
+		debugLogf("release", "parse github repository from %q failed: %v", downloadURL, err)
 		return CoreConfig{}, err
 	}
 
@@ -682,8 +668,8 @@ func (s *CoreService) checkUpdateInternal(currentVersion, rawCoreType string, fo
 	return s.saveCheckedConfig(config, generation)
 }
 
-func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConfig, error) {
-	coreDebugf("download request: currentVersion=%q coreType=%q", currentVersion, rawCoreType)
+func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, error) {
+	coreDebugf("download request: rawURL=%q coreType=%q", rawURL, rawCoreType)
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err
@@ -693,7 +679,7 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 		return CoreConfig{}, err
 	}
 
-	config, archivePath, targetVersion, err := s.downloadCoreArchive(currentVersion, config)
+	config, archivePath, targetVersion, err := s.downloadCoreArchive(rawURL, config)
 	if err != nil {
 		coreDebugf("download request failed: err=%v", err)
 		return CoreConfig{}, err
@@ -762,12 +748,12 @@ func (s *CoreService) DownloadCore(currentVersion, rawCoreType string) (CoreConf
 	return config, err
 }
 
-func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConfig) (CoreConfig, string, string, error) {
-	s.applyCurrentVersion(&config, currentVersion)
-	if config.URLTemplate == "" {
-		config.URLTemplate = defaultCoreURLTemplate(config.CoreType, config.Channel)
-	} else {
-		config.URLTemplate = canonicalMihomoURLTemplate(config)
+func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (CoreConfig, string, string, error) {
+	s.applyCurrentVersion(&config, "")
+
+	downloadURLTemplate := strings.TrimSpace(rawURL)
+	if downloadURLTemplate == "" {
+		downloadURLTemplate = defaultCoreURLTemplate(config.CoreType, config.Channel)
 	}
 
 	targetVersion := normalizeCoreVersion(config.LatestVersion)
@@ -776,7 +762,7 @@ func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConf
 	}
 	if targetVersion == "" {
 		var err error
-		targetVersion, err = findLatestReleaseForConfig(config)
+		targetVersion, err = findLatestReleaseForURL(downloadURLTemplate, config.Channel)
 		if err != nil {
 			return CoreConfig{}, "", "", err
 		}
@@ -786,14 +772,14 @@ func (s *CoreService) downloadCoreArchive(currentVersion string, config CoreConf
 		return CoreConfig{}, "", "", errors.New("无法确定要下载的核心版本")
 	}
 
-	downloadURL := strings.ReplaceAll(config.URLTemplate, "{version}", targetVersion)
+	downloadURL := strings.ReplaceAll(downloadURLTemplate, "{version}", targetVersion)
 	parsedURL, err := url.Parse(downloadURL)
 	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		return CoreConfig{}, "", "", errors.New("core download URL is invalid")
 	}
 
 	expectedSHA256 := ""
-	if owner, repo, err := githubRepository(config.URLTemplate); err == nil {
+	if owner, repo, err := githubRepository(downloadURLTemplate); err == nil {
 		if digest, dErr := findReleaseAssetDigest(owner, repo, targetVersion, downloadURL); dErr == nil {
 			expectedSHA256 = digest
 		}

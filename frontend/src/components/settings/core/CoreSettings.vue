@@ -153,7 +153,7 @@
                 type="button"
                 :aria-label="$t('checkUpdate')"
                 :title="$t('checkUpdate')"
-                :disabled="isChecking || isDownloading || isSaving"
+                :disabled="isChecking || isDownloading"
                 @click="checkUpdate(true, true)"
               >
                 <span
@@ -177,7 +177,7 @@
               class="flex flex-1 justify-end"
               :class="{
                 'pointer-events-none opacity-60':
-                  isSavingChannel || isSaving || isDownloading,
+                  isSavingChannel || isDownloading,
               }"
             >
               <SegmentedControl
@@ -195,16 +195,16 @@
             </span>
             <div class="join flex-1 min-w-0">
               <select
-                v-model="selectedSourceURL"
+                v-model="selectedSourceLabel"
                 class="join-item select select-sm flex-1 min-w-0"
                 :aria-label="$t('coreDownloadSource')"
-                :disabled="isSaving || isDownloading"
-                @change="selectDownloadSource"
+                :disabled="isDownloading"
+                @change="handleSourceChange"
               >
                 <option
                   v-for="source in sourceOptions"
-                  :key="source.url"
-                  :value="sourceURL(source)"
+                  :key="source.label"
+                  :value="source.label"
                 >
                   {{ source.label }}
                 </option>
@@ -666,7 +666,6 @@ const emit = defineEmits<{
 
 const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   coreType,
-  urlTemplate: '',
   version: '',
   versionDetail: '',
   channel: '',
@@ -716,7 +715,6 @@ const defaultConfigFileName = computed(() =>
   coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
 )
 const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml' : '.json'))
-const selectedSourceURL = ref('')
 const runArgsInput = ref('')
 const configURLInput = ref('')
 const configFileNameInput = ref('')
@@ -744,7 +742,6 @@ const commitDraftSave = (key: DraftKey, revision: number) => {
 const resetDraft = (key: DraftKey) => {
   draftState[key].dirty = false
 }
-const isSaving = ref(false)
 const isSavingChannel = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
@@ -784,7 +781,6 @@ const appUpdateInfo = reactive<AppUpdateInfo>({
 })
 const isConfigMutationPending = computed(
   () =>
-    isSaving.value ||
     isSavingChannel.value ||
     isDownloading.value ||
     isStarting.value ||
@@ -806,7 +802,7 @@ const installedVersionLabel = computed(() => {
   return config.installedVersion || config.version || t('coreInstalled')
 })
 const isCoreMaintenanceBusy = computed(
-  () => isSaving.value || isDownloading.value,
+  () => isDownloading.value,
 )
 let refreshRequest = 0
 let checkSequence = 0
@@ -828,26 +824,37 @@ const sourceOptions = computed(() => builtInDownloadSources[coreType.value])
 const sourceURL = (source: DownloadSource, channel = currentChannel.value) =>
   source.channelURLs?.[channel] ?? source.url
 
-const findMatchingDownloadSource = (url: string) => {
-  if (!url) return undefined
-  const normalized = url.trim().toLowerCase()
-  for (const source of sourceOptions.value) {
-    if (sourceURL(source).toLowerCase() === normalized || source.url.toLowerCase() === normalized) {
-      return source
+const sourceStorageKey = computed(() => `core-download-source:${coreType.value}`)
+const selectedSourceLabel = ref('')
+
+const loadSavedSource = () => {
+  try {
+    const saved = localStorage.getItem(sourceStorageKey.value)
+    if (saved && sourceOptions.value.some((s) => s.label === saved)) {
+      selectedSourceLabel.value = saved
+      return
     }
-    for (const channelURL of Object.values(source.channelURLs ?? {})) {
-      if (channelURL.toLowerCase() === normalized) return source
-    }
-  }
-  if (coreType.value === 'mihomo') {
-    if (normalized.includes('vernesong')) {
-      return builtInDownloadSources.mihomo.find((s) => s.label.includes('Smart'))
-    }
-    if (normalized.includes('metacubex')) {
-      return builtInDownloadSources.mihomo.find((s) => s.label.includes('官方'))
-    }
-  }
-  return undefined
+  } catch {}
+  selectedSourceLabel.value = sourceOptions.value[0]?.label || ''
+}
+
+const currentSource = computed(() => {
+  return (
+    sourceOptions.value.find((s) => s.label === selectedSourceLabel.value) ||
+    sourceOptions.value[0]
+  )
+})
+
+const currentDownloadURL = computed(() => {
+  if (!currentSource.value) return ''
+  return sourceURL(currentSource.value, currentChannel.value)
+})
+
+const handleSourceChange = () => {
+  try {
+    localStorage.setItem(sourceStorageKey.value, selectedSourceLabel.value)
+  } catch {}
+  void checkUpdate(false)
 }
 
 const applyConfig = (next: CoreConfig, forceDrafts = false) => {
@@ -856,11 +863,6 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
   const syncAllDrafts = forceDrafts || coreChanged
   Object.assign(config, next)
   if (coreChanged) emit('update:coreType', nextCoreType)
-  const matchSource = findMatchingDownloadSource(next.urlTemplate)
-  const matchURL = matchSource ? sourceURL(matchSource) : (sourceOptions.value[0] ? sourceURL(sourceOptions.value[0]) : '')
-  if (selectedSourceURL.value !== matchURL) {
-    selectedSourceURL.value = matchURL
-  }
   if (syncAllDrafts || !draftState.runArgs.dirty) {
     if (runArgsInput.value !== next.runArgs) {
       runArgsInput.value = next.runArgs
@@ -1008,28 +1010,13 @@ const undoDeleteConfigFile = async () => {
   }
 }
 
-const selectDownloadSource = async () => {
-  if (selectedSourceURL.value) {
-    await saveURL(selectedSourceURL.value)
-  }
-}
-
 const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
   const request = beginConfigRequest()
   try {
-    let next = await CoreService.SaveChannel(rawChannel, coreType.value)
+    const next = await CoreService.SaveChannel(rawChannel, coreType.value)
     if (!isCurrentConfigRequest(request)) return
-    const currentSource =
-      findMatchingDownloadSource(config.urlTemplate) ||
-      builtInDownloadSources[coreType.value][0]
-    if (currentSource) {
-      const newURL = sourceURL(currentSource, rawChannel as CoreChannel)
-      if (newURL && newURL !== next.urlTemplate) {
-        next = await CoreService.SaveURL(newURL, coreType.value)
-      }
-    }
     applyCurrentConfig(request, next)
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -1273,37 +1260,16 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
 }
 
-const saveURL = async (targetURL: string, refreshRemote = true) => {
-  if (isSaving.value || !targetURL.trim()) return false
-  isSaving.value = true
-  const request = beginConfigRequest()
-  try {
-    const next = await CoreService.SaveURL(targetURL.trim(), coreType.value)
-    if (!isCurrentConfigRequest(request)) return false
-    applyCurrentConfig(request, next)
-    return true
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
-    return false
-  } finally {
-    isSaving.value = false
-    if (refreshRemote) {
-      void checkUpdate(false)
-    }
-  }
-}
-
 const checkUpdate = async (notifyError = true, force = false) => {
   if (isChecking.value) return null
   const sequence = ++checkSequence
   const targetCoreType = coreType.value
   isChecking.value = true
   try {
+    const downloadURL = currentDownloadURL.value
     const next = force
-      ? await CoreService.ForceCheckUpdate('', targetCoreType)
-      : await CoreService.CheckUpdate('', targetCoreType)
+      ? await CoreService.ForceCheckUpdate(downloadURL, targetCoreType)
+      : await CoreService.CheckUpdate(downloadURL, targetCoreType)
     if (sequence === checkSequence && coreType.value === targetCoreType) {
       config.latestVersion = next.latestVersion
       config.updateAvailable = next.updateAvailable
@@ -1332,7 +1298,7 @@ const downloadCore = async () => {
   isDownloading.value = true
   const request = beginConfigRequest()
   try {
-    const next = await CoreService.DownloadCore('', request.coreType)
+    const next = await CoreService.DownloadCore(currentDownloadURL.value, request.coreType)
     if (applyCurrentConfig(request, next)) {
       showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
     }
@@ -1393,6 +1359,7 @@ const installAppUpdate = async () => {
 }
 
 onMounted(() => {
+  loadSavedSource()
   void (async () => {
     try {
       const v = await CoreService.GetAppVersion()
@@ -1439,7 +1406,7 @@ watch(
     resetDraft('configURL')
     resetDraft('configFileName')
     resetDraft('behavior')
-    selectedSourceURL.value = ''
+    loadSavedSource()
     void (async () => {
       if (await loadConfig(false, true)) {
         void scanConfigFiles(false)

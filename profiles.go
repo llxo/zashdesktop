@@ -252,7 +252,6 @@ func (s *CoreService) writeProfilesLocked(profiles persistedCoreProfiles) error 
 
 type persistedProfileClean struct {
 	CoreType         string `json:"coreType,omitempty"`
-	URLTemplate      string `json:"urlTemplate,omitempty"`
 	Version          string `json:"version,omitempty"`
 	VersionDetail    string `json:"versionDetail,omitempty"`
 	Channel          string `json:"channel,omitempty"`
@@ -276,7 +275,6 @@ func marshalPersistedCoreProfiles(profiles persistedCoreProfiles) ([]byte, error
 	for key, p := range profiles.Profiles {
 		clean.Profiles[key] = persistedProfileClean{
 			CoreType:         p.CoreType,
-			URLTemplate:      p.URLTemplate,
 			Version:          p.Version,
 			VersionDetail:    p.VersionDetail,
 			Channel:          p.Channel,
