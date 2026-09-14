@@ -627,7 +627,7 @@ func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool
 		debugLogf("release", "check update normalize coreType failed: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("release", "check update loadConfigSnapshot failed: %v", err)
 		return CoreConfig{}, err
@@ -663,7 +663,7 @@ func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool
 	config.LatestVersion = latest
 	config.UpdateAvailable = isCoreUpdateAvailable(latest, config.Version, config.Channel)
 	debugLogf("release", "check update result: type=%s current=%s latest=%s updateAvailable=%t", coreType, config.Version, config.LatestVersion, config.UpdateAvailable)
-	return s.saveCheckedConfig(config, generation)
+	return s.applyCheckedConfig(config)
 }
 
 func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, error) {

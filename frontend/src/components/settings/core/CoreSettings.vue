@@ -1261,17 +1261,26 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
 }
 
+let activeCheckKey = ''
+
 const checkUpdate = async (notifyError = true, force = false) => {
-  if (isChecking.value) return null
-  const sequence = ++checkSequence
   const targetCoreType = coreType.value
+  const targetChannel = currentChannel.value
+  const checkKey = `${targetCoreType}:${targetChannel}`
+  if (isChecking.value && activeCheckKey === checkKey && !force) return null
+  activeCheckKey = checkKey
+  const sequence = ++checkSequence
   isChecking.value = true
   try {
     const downloadURL = currentDownloadURL.value
     const next = force
       ? await CoreService.ForceCheckUpdate(downloadURL, targetCoreType)
       : await CoreService.CheckUpdate(downloadURL, targetCoreType)
-    if (sequence === checkSequence && coreType.value === targetCoreType) {
+    if (
+      sequence === checkSequence &&
+      coreType.value === targetCoreType &&
+      currentChannel.value === targetChannel
+    ) {
       config.latestVersion = next.latestVersion
       config.updateAvailable = next.updateAvailable
       if (next.installedVersion) {
@@ -1283,13 +1292,19 @@ const checkUpdate = async (notifyError = true, force = false) => {
     }
     return next
   } catch (error) {
-    if (notifyError && sequence === checkSequence && coreType.value === targetCoreType) {
+    if (
+      notifyError &&
+      sequence === checkSequence &&
+      coreType.value === targetCoreType &&
+      currentChannel.value === targetChannel
+    ) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
     return null
   } finally {
     if (sequence === checkSequence) {
       isChecking.value = false
+      activeCheckKey = ''
     }
   }
 }
@@ -1419,6 +1434,7 @@ watch(
   () => {
     refreshRequest += 1
     checkSequence += 1
+    activeCheckKey = ''
     isChecking.value = false
     isRefreshing.value = false
     availableConfigFiles.value = []

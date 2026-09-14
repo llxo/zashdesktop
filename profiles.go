@@ -64,10 +64,14 @@ func (s *CoreService) loadConfigForTypeLocked(coreType string) (CoreConfig, erro
 
 func (s *CoreService) loadConfigSnapshot(coreType string) (CoreConfig, uint64, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	generation := s.configGeneration
 	config, err := s.loadConfigForTypeLocked(coreType)
-	return config, generation, err
+	s.mu.Unlock()
+	if err != nil {
+		return CoreConfig{}, generation, err
+	}
+	s.applyCurrentVersion(&config, "")
+	return config, generation, nil
 }
 
 func (s *CoreService) commitConfigUpdate(config CoreConfig, generation uint64) (CoreConfig, error) {
@@ -83,8 +87,11 @@ func (s *CoreService) commitConfigUpdate(config CoreConfig, generation uint64) (
 	return config, nil
 }
 
-func (s *CoreService) saveCheckedConfig(config CoreConfig, generation uint64) (CoreConfig, error) {
-	return s.commitConfigUpdate(config, generation)
+func (s *CoreService) applyCheckedConfig(config CoreConfig) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.applyRuntimeState(&config)
+	return config, nil
 }
 
 func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles, coreType string) (CoreConfig, error) {
@@ -115,7 +122,11 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	config.Installed = fileExists(config.CorePath)
-	s.applyCurrentVersion(&config, "")
+	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok {
+		config.Version = cached.version
+		config.VersionDetail = cached.detail
+		config.InstalledVersion = cached.version
+	}
 	return config, nil
 }
 

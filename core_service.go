@@ -314,12 +314,15 @@ func (s *CoreService) notifyStateChangeLocked() {
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	config, err := s.loadConfigLocked()
 	if err != nil {
+		s.mu.Unlock()
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	s.mu.Unlock()
+
+	s.applyCurrentVersion(&config, "")
 	return config, nil
 }
 
@@ -329,12 +332,15 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 		return CoreConfig{}, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
+		s.mu.Unlock()
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	s.mu.Unlock()
+
+	s.applyCurrentVersion(&config, "")
 	return config, nil
 }
 
@@ -369,7 +375,6 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
 	}
-	s.clearRemoteReleaseCache()
 	debugLogf("core", "save channel success: type=%s channel=%s installed=%t version=%s", saved.CoreType, saved.Channel, saved.Installed, saved.Version)
 	return saved, nil
 }
