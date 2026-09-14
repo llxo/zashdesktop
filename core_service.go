@@ -286,20 +286,30 @@ func (s *CoreService) setOnStateChange(cb func()) {
 	s.mu.Unlock()
 }
 
+func (s *CoreService) emitStateChangeEvent(app *application.App) {
+	if app != nil && app.Event != nil {
+		go app.Event.Emit("core:state-changed")
+	}
+}
+
 func (s *CoreService) notifyStateChange() {
 	s.mu.Lock()
 	cb := s.onStateChange
+	app := s.app
 	s.mu.Unlock()
 	if cb != nil {
 		go cb()
 	}
+	s.emitStateChangeEvent(app)
 }
 
 func (s *CoreService) notifyStateChangeLocked() {
-	if s.onStateChange != nil {
-		cb := s.onStateChange
+	cb := s.onStateChange
+	app := s.app
+	if cb != nil {
 		go cb()
 	}
+	s.emitStateChangeEvent(app)
 }
 
 func (s *CoreService) GetConfig() (CoreConfig, error) {

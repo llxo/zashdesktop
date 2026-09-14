@@ -586,6 +586,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { Events } from '@wailsio/runtime'
 
 type CoreType = 'sing-box' | 'mihomo'
 type CoreTab = 'sing-box' | 'mihomo' | 'settings'
@@ -1379,8 +1380,31 @@ onMounted(() => {
     }
   })()
 
+  unsubStateChange = Events.On('core:state-changed', handleCoreStateChanged)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
+
+let unsubStateChange: (() => void) | undefined
+let stateChangeTimer: ReturnType<typeof setTimeout> | undefined
+
+const handleCoreStateChanged = () => {
+  if (stateChangeTimer) {
+    clearTimeout(stateChangeTimer)
+    stateChangeTimer = undefined
+  }
+  if (isConfigMutationPending.value) {
+    stateChangeTimer = setTimeout(() => {
+      stateChangeTimer = undefined
+      if (!isConfigMutationPending.value) {
+        void loadConfig()
+      }
+    }, 150)
+    return
+  }
+  if (!isRefreshing.value) {
+    void loadConfig()
+  }
+}
 
 const handleVisibilityChange = () => {
   if (!document.hidden) {
@@ -1420,6 +1444,14 @@ watch(
 onUnmounted(() => {
   refreshRequest += 1
   isRefreshing.value = false
+  if (unsubStateChange) {
+    unsubStateChange()
+    unsubStateChange = undefined
+  }
+  if (stateChangeTimer) {
+    clearTimeout(stateChangeTimer)
+    stateChangeTimer = undefined
+  }
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
