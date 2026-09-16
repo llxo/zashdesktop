@@ -688,6 +688,8 @@ const zh = {
 
   // 桌面核心设置(项目私有)
   coreSettings: '核心',
+  coreVersion: '核心版本',
+  upToDate: '已是最新',
   coreRun: '运行核心',
   coreRunStatus: '运行状态',
   coreRunning: '运行中',
@@ -726,7 +728,6 @@ const zh = {
   appUpdate: '应用更新',
   desktopApp: '桌面端',
   updateApp: '更新应用',
-  appUpToDate: '当前已是最新版本',
   appUpdating: '正在更新应用...',
   appUpdateSuccess: '更新已完成，正在重启应用...',
   coreActiveConfig: '生效配置',

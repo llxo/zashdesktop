@@ -696,6 +696,8 @@ const ru: LANG_MESSAGE = {
 
   // Настройки ядра для десктопа
   coreSettings: 'Ядро',
+  coreVersion: 'Версия ядра',
+  upToDate: 'Актуально',
   coreRun: 'Запуск ядра',
   coreRunStatus: 'Статус',
   coreRunning: 'Работает',
@@ -734,7 +736,6 @@ const ru: LANG_MESSAGE = {
   appUpdate: 'Обновление приложения',
   desktopApp: 'Десктоп-версия',
   updateApp: 'Обновить приложение',
-  appUpToDate: 'Установлена последняя версия',
   appUpdating: 'Обновление приложения...',
   appUpdateSuccess: 'Обновление завершено, перезапуск...',
   coreActiveConfig: 'Активный конфиг',

@@ -680,6 +680,8 @@ const zhTW: LANG_MESSAGE = {
 
   // 桌面核心設定(項目私有)
   coreSettings: '核心',
+  coreVersion: '核心版本',
+  upToDate: '已是最新',
   coreRun: '執行核心',
   coreRunStatus: '執行狀態',
   coreRunning: '執行中',
@@ -718,7 +720,6 @@ const zhTW: LANG_MESSAGE = {
   appUpdate: '應用程式更新',
   desktopApp: '桌面端',
   updateApp: '更新應用程式',
-  appUpToDate: '目前已是最新版本',
   appUpdating: '正在更新應用程式...',
   appUpdateSuccess: '更新已完成，正在重啟應用程式...',
   coreActiveConfig: '生效設定',

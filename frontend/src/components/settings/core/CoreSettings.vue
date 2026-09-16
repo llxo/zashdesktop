@@ -125,9 +125,9 @@
           <!-- 核心版本 -->
           <div class="setting-item">
             <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
-              {{ $t('coreSettings') }}
+              {{ $t('coreVersion') }}
             </span>
-            <div class="flex flex-1 items-center justify-end gap-2">
+            <div class="flex flex-1 items-center justify-end gap-2.5">
               <span
                 class="badge badge-sm badge-ghost font-mono whitespace-nowrap"
                 :class="{ 'opacity-60': !config.installed }"
@@ -143,9 +143,10 @@
                 </template>
                 <span
                   v-else-if="config.installed"
-                  class="text-base-content/60 text-xs font-mono whitespace-nowrap"
+                  class="text-success/90 inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
                 >
-                  {{ $t('appUpToDate') }}
+                  <span class="bg-success inline-block h-1.5 w-1.5 rounded-full"></span>
+                  <span>{{ $t('upToDate') }}</span>
                 </span>
               </template>
               <button
@@ -1349,7 +1350,7 @@ const checkAppUpdate = async (notify = true) => {
       if (info.updateAvailable) {
         showNotification({ content: 'coreUpdateAvailable', type: 'alert-info' })
       } else {
-        showNotification({ content: 'appUpToDate', type: 'alert-success' })
+        showNotification({ content: 'upToDate', type: 'alert-success' })
       }
     }
   } catch (error) {

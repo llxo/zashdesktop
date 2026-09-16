@@ -694,6 +694,8 @@ const en = {
 
   // Desktop Core Settings (Desktop Private)
   coreSettings: 'Core',
+  coreVersion: 'Core Version',
+  upToDate: 'Up to date',
   coreRun: 'Run Core',
   coreRunStatus: 'Status',
   coreRunning: 'Running',
@@ -732,7 +734,6 @@ const en = {
   appUpdate: 'App Update',
   desktopApp: 'Desktop App',
   updateApp: 'Update App',
-  appUpToDate: 'You are on the latest version',
   appUpdating: 'Updating app...',
   appUpdateSuccess: 'Update completed, restarting app...',
   coreActiveConfig: 'Active config',
