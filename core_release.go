@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -67,11 +68,78 @@ func buildGitHubCandidateURLs(rawURL string) []string {
 	return urls
 }
 
-var sharedCoreTransport = func() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = systemProxy
-	return t
-}()
+type fallbackTransport struct {
+	proxyTransport  *http.Transport
+	directTransport *http.Transport
+}
+
+func newFallbackTransport() *fallbackTransport {
+	pt := http.DefaultTransport.(*http.Transport).Clone()
+	pt.Proxy = systemProxy
+
+	dt := http.DefaultTransport.(*http.Transport).Clone()
+	dt.Proxy = nil
+
+	return &fallbackTransport{
+		proxyTransport:  pt,
+		directTransport: dt,
+	}
+}
+
+var sharedCoreTransport = newFallbackTransport()
+
+func isProxyFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "proxyconnect") ||
+		strings.Contains(msg, "proxy error") ||
+		strings.Contains(msg, "actively refused") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "socks connect") ||
+		strings.Contains(msg, "connectex")
+}
+
+func (f *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	proxyURL, err := systemProxy(req)
+	if err != nil || proxyURL == nil {
+		return f.directTransport.RoundTrip(req)
+	}
+
+	var bodyBytes []byte
+	if req.Body != nil && req.GetBody == nil {
+		var readErr error
+		bodyBytes, readErr = io.ReadAll(req.Body)
+		_ = req.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
+	}
+
+	resp, proxyErr := f.proxyTransport.RoundTrip(req)
+	if proxyErr == nil {
+		return resp, nil
+	}
+
+	if isProxyFailure(proxyErr) {
+		debugLogf("system", "system proxy %s connection failed (%v), silently falling back to direct connection for %s", proxyURL, proxyErr, req.URL.Redacted())
+		invalidateProxySettingsCache()
+		if req.GetBody != nil {
+			newBody, getBodyErr := req.GetBody()
+			if getBodyErr == nil {
+				req.Body = newBody
+			}
+		}
+		return f.directTransport.RoundTrip(req)
+	}
+
+	return nil, proxyErr
+}
 
 func newCoreHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: sharedCoreTransport}

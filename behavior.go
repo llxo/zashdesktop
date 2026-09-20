@@ -351,7 +351,7 @@ type winHTTPCurrentUserIEProxyConfig struct {
 	lpszProxyBypass   *uint16
 }
 
-const proxySettingsCacheTTL = 60 * time.Second
+const proxySettingsCacheTTL = 2 * time.Second
 
 type cachedProxySettings struct {
 	enabled   bool
@@ -363,6 +363,12 @@ type cachedProxySettings struct {
 var proxySettingsCache struct {
 	sync.Mutex
 	settings cachedProxySettings
+}
+
+func invalidateProxySettingsCache() {
+	proxySettingsCache.Lock()
+	proxySettingsCache.settings = cachedProxySettings{}
+	proxySettingsCache.Unlock()
 }
 
 func readCachedProxySettings() (enabled bool, server, override string) {

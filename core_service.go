@@ -622,6 +622,7 @@ func (s *CoreService) stopCore() (CoreConfig, error) {
 	if err := s.stopCoreProcess(); err != nil {
 		return CoreConfig{}, err
 	}
+	invalidateProxySettingsCache()
 
 	config, err := s.loadConfigLocked()
 	if err != nil {
@@ -860,6 +861,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 	}
 	s.mu.Unlock()
 	close(done)
+	invalidateProxySettingsCache()
 	s.notifyStateChange()
 }
 
