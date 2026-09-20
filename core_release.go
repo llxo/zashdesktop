@@ -60,11 +60,11 @@ func buildGitHubCandidateURLs(rawURL string) []string {
 	if !strings.HasPrefix(rawURL, "https://github.com/") && !strings.HasPrefix(rawURL, "http://github.com/") {
 		return []string{rawURL}
 	}
-	urls := make([]string, 1, 1+len(githubProxies))
-	urls[0] = rawURL
+	urls := make([]string, 0, 1+len(githubProxies))
 	for _, proxy := range githubProxies {
 		urls = append(urls, strings.TrimRight(proxy, "/")+"/"+rawURL)
 	}
+	urls = append(urls, rawURL)
 	return urls
 }
 
