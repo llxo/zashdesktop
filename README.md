@@ -1,80 +1,82 @@
 # zashdesktop
 
-面向 Windows 的轻量级 sing-box / mihomo 桌面管理客户端。前端基于 [zashboard](https://github.com/Zephyruso/zashboard) 深度定制与移植，结合 Wails v3 与系统 WebView2 构建原生桌面能力，集成双内核管理、订阅维护与系统托盘，后台极低内存常驻，秒开不卡顿。
+[English](./README.md) | [简体中文](./README_zh.md)
 
-## 功能特性
+A lightweight desktop client for raw sing-box and mihomo cores on Windows. Unlike traditional heavy GUI wrappers, it focuses on providing a clean desktop shell for bare cores: frontend deeply customized and ported from [zashboard](https://github.com/Zephyruso/zashboard), combined with Wails v3 and the system WebView2 runtime to deliver native desktop capabilities. It integrates dual-core management, subscription maintenance, and system tray control, with ultra-low background memory usage and instant wake-up.
 
-- **双核心管理**：原生支持 sing-box 与 mihomo，核心与配置完全独立隔离。
-- **在线更新核心**：内置多镜像加速源，支持稳定版/测试版一键检测与更新。
-- **配置导入与切换**：支持订阅链接一键下载或本地导入配置，支持多配置下拉即时切换。
-- **低内存后台挂起**：关闭窗口后挂起渲染进程并修剪物理工作集（常驻约 20-40 MB），呼出秒级响应。
-- **托盘快捷控制**：托盘右键支持打开面板、清理缓存、启停/重启核心与快速切换代理组节点。
-- **开机与随行自启**：支持开机自启（基于 Windows 任务计划程序）、随程序启停核心、管理员权限运行。
-- **客户端一键更新**：在设置页内即可在线检测并一键更新桌面客户端。
-- **成熟仪表盘体验**：前端基于优秀的 [zashboard](https://github.com/Zephyruso/zashboard) 定制了部分功能，全面支持代理组节点管理、测速、连接监控、分流规则与多语言。
+## Features
 
-## 资源占用
+- **Dual-Core Management**: Native support for both sing-box and mihomo bare cores, with core binaries and configurations completely isolated and untouched.
+- **Online Core Updates**: Built-in accelerated mirror sources with one-click checking and updating for stable and beta channels.
+- **Config Import & Switching**: One-click subscription downloading or local file importing, with instant multi-profile switching via a dropdown menu.
+- **Low Memory Background Suspension**: Automatically suspends the rendering process and trims the physical working set when the window is closed (idle memory ~20–40 MB), with instantaneous response on call.
+- **System Tray Controls**: Quick tray menu actions to open dashboard, clear cache, start/stop/restart cores, and switch proxy nodes.
+- **Auto-Start & Process Companion**: Supports auto-start on boot (via Windows Task Scheduler), core lifecycle synchronization with the app, and running as administrator.
+- **Client One-Click Updates**: Check and update the zashdesktop client directly from the settings page.
+- **Polished Dashboard Experience**: Frontend based on the excellent [zashboard](https://github.com/Zephyruso/zashboard) with custom adaptations, offering proxy group management, latency testing, connection tracking, routing rules, and multi-language support.
 
-| 状态 | 内存占用 | 说明 |
+## Resource Usage
+
+| State | Memory Usage | Notes |
 | :--- | :---: | :--- |
-| **打开窗口** | 约 100-300 MB | 调用系统 WebView2 渲染界面 |
-| **关闭窗口（托盘后台）** | 约 20-40 MB | 挂起渲染进程并压缩释放物理工作集 |
+| **Window Open** | ~100–300 MB | Rendered via system WebView2 runtime |
+| **Window Closed (Tray Background)** | ~20–40 MB | Suspends rendering process and releases physical working set |
 
 > [!NOTE]
-> 以上为客户端管理程序占用，不含代理核心自身内存。
+> The figures above apply to the desktop client shell only, excluding the proxy core's own memory.
 
-## 快速上手
+## Quick Start
 
-首次使用进入底栏「**核心**」页面即可完成配置与启动：
+On first launch, navigate to the **"Core"** tab in the bottom bar to configure and start your core:
 
-1. **准备核心**：选择对应标签页（`sing-box` 或 `mihomo`），在「下载核心」中选择渠道（稳定版/测试版）与下载源，点击 **「更新」** 自动下载安装。
-2. **导入配置**：在「配置文件」中粘贴订阅链接点击 **「下载」**，或点击 **「导入」** 选择本地文件；在「生效配置」下拉框选中对应配置。
-3. **启动运行**：点击 **「启动」** 即可运行核心；支持自定义命令行参数（默认 `run -c "config.json" -D .`）。
-4. **自动化设置**：切换至「**设置**」标签页，按需开启：
-   - **以管理员身份运行**：需要 TUN 虚拟网卡等高级功能时开启。
-   - **自启动 (需要管理员)**：开机自动后台静默启动客户端。
-   - **随程序启停**：按需开启「启动程序时开启 sing-box / mihomo」与「退出程序时关闭核心」。
-   - **应用更新**：一键检测并更新 zashdesktop 客户端。
+1. **Prepare the Core**: Select the desired tab (`sing-box` or `mihomo`), choose the channel (Release / Pre-release) and download mirror under "Download Core", then click **"Update"** to automatically download and install.
+2. **Import Configuration**: Paste your subscription link under "Configuration" and click **"Download"**, or click **"Import"** to choose a local file. Select the active configuration in the "Active Profile" dropdown.
+3. **Start the Core**: Click **"Start"** to launch the core. Custom command-line arguments are supported (default: `run -c "config.json" -D .`).
+4. **Automation Settings**: Switch to the **"Settings"** tab to configure as needed:
+   - **Run as Administrator**: Enable if you need TUN virtual network adapter or privileged network features.
+   - **Start on Boot (Admin Required)**: Silently launch the client in the background on system boot.
+   - **Companion Lifecycle**: Optionally enable "Start sing-box / mihomo on app launch" and "Stop core on app exit".
+   - **Client Updates**: Check for updates and upgrade the zashdesktop client with one click.
 
 > [!TIP]
-> 客户端默认代理管理地址为 `http://127.0.0.1:9090`。如需修改端口或密钥，可在底栏「**设置**」->「**后端**」中调整。
+> The default proxy controller address is `http://127.0.0.1:9090`. To change the port or secret, configure them in the bottom bar under **"Settings"** -> **"Backend"**.
 
-## 手动添加核心与目录结构
+## Directory Structure & Manual Core Setup
 
-程序所在目录结构如下，支持直接手动拷贝放置二进制与配置文件：
+The application directory structure is outlined below. It supports direct manual copying and replacement of binaries and configuration files:
 
 ```text
 zashdesktop/
 ├─ mihomo/
-│  ├─ mihomo.exe       # mihomo 核心
-│  └─ config.yaml      # 配置文件
+│  ├─ mihomo.exe       # mihomo core executable
+│  └─ config.yaml      # configuration file
 ├─ sing-box/
-│  ├─ sing-box.exe     # sing-box 核心
-│  └─ config.json      # 配置文件
-├─ profiles.json       # 配置与应用设置记录
-└─ zashdesktop.exe     # 客户端主程序
+│  ├─ sing-box.exe     # sing-box core executable
+│  └─ config.json      # configuration file
+├─ profiles.json       # configuration and app profile state
+└─ zashdesktop.exe     # main client executable
 ```
 
-## 常见排错
+## Troubleshooting
 
-- **核心启动失败**：点击界面弹出的「查看日志」查看具体报错；检查配置文件语法是否正确。
-- **TUN 模式报错**：在「核心」->「设置」中开启「以管理员身份运行」。
-- **后台排查**：在「核心」->「设置」中开启「后端调试日志」，查看程序目录下的 `debug.log`。
+- **Core Failed to Start**: Click "View Logs" in the notification prompt to inspect detailed errors; verify that your configuration syntax is valid.
+- **TUN Mode Errors**: Turn on "Run as Administrator" in "Core" -> "Settings".
+- **Backend Diagnosis**: Enable "Backend Debug Log" in "Core" -> "Settings", and check `debug.log` in the application directory.
 
-## 卸载与清理残留
+## Uninstallation & Cache Cleanup
 
-删除程序后，若需彻底清理本地窗口状态及 WebView2 缓存残留，可删除对应目录：
+If you want to completely remove the application along with saved window states and WebView2 cache data, delete the following directory:
 
-- 路径：`%APPDATA%\zashdesktop`（即 `C:\Users\<用户名>\AppData\Roaming\zashdesktop`）
+- Path: `%APPDATA%\zashdesktop` (i.e. `C:\Users\<Username>\AppData\Roaming\zashdesktop`)
 
-## 本地编译
+## Building from Source
 
-环境要求：Go 1.22+、Node.js (pnpm)、Wails v3 CLI。
+Prerequisites: Go 1.22+, Node.js (pnpm), Wails v3 CLI.
 
-在 Windows PowerShell 中执行一键构建：
+Run the one-click build script in Windows PowerShell:
 
 ```powershell
 .\build.ps1
 ```
 
-编译生成文件位于 `build/bin/zashdesktop.exe`。
+The compiled binary will be located at `build/bin/zashdesktop.exe`.
