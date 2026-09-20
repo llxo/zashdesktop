@@ -33,7 +33,6 @@ var (
 	behaviorWinHttpGetIEProxyConfigForCurrentUser = behaviorWinHTTP.NewProc("WinHttpGetIEProxyConfigForCurrentUser")
 	behaviorKernel32                              = windows.NewLazySystemDLL("kernel32.dll")
 	behaviorGlobalFree                            = behaviorKernel32.NewProc("GlobalFree")
-	behaviorSetProcessWorkingSetSize              = behaviorKernel32.NewProc("SetProcessWorkingSetSize")
 	behaviorPsapi                                 = windows.NewLazySystemDLL("psapi.dll")
 	behaviorEmptyWorkingSet                       = behaviorPsapi.NewProc("EmptyWorkingSet")
 	behaviorNtdll                                 = windows.NewLazySystemDLL("ntdll.dll")
@@ -529,16 +528,8 @@ func (s *CoreService) GetSystemFonts() []string {
 }
 
 // -----------------------------------------------------------------------------
-// WebView2 Process Suspend / Resume & Working Set Optimization
+// WebView2 Process Suspend / Resume
 // -----------------------------------------------------------------------------
-
-func trimProcessWorkingSet(h windows.Handle) {
-	if behaviorEmptyWorkingSet.Find() == nil {
-		behaviorEmptyWorkingSet.Call(uintptr(h))
-	} else if behaviorSetProcessWorkingSetSize.Find() == nil {
-		behaviorSetProcessWorkingSetSize.Call(uintptr(h), ^uintptr(0), ^uintptr(0))
-	}
-}
 
 func findWebView2ProcessPIDs() []uint32 {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
@@ -626,6 +617,12 @@ func getProcessCommandLine(h windows.Handle) string {
 	return string(utf16.Decode(slice))
 }
 
+func trimProcessWorkingSet(h windows.Handle) {
+	if behaviorEmptyWorkingSet.Find() == nil {
+		behaviorEmptyWorkingSet.Call(uintptr(h))
+	}
+}
+
 func suspendWebView2Processes() []uint32 {
 	if behaviorNtSuspendProcess.Find() != nil {
 		return nil
@@ -643,17 +640,14 @@ func suspendWebView2Processes() []uint32 {
 				if r, _, callErr := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
 					suspended = append(suspended, pid)
 					debugLogf("window", "suspended webview2 renderer process (pid=%d)", pid)
+					// 定向工作集修剪：仅对已挂起的沙盒渲染进程修剪物理工作集，坚决放行主 Browser 进程、GPU 进程与主程序自身
+					trimProcessWorkingSet(h)
 				} else {
 					debugLogf("window", "failed to suspend webview2 renderer process (pid=%d, status=0x%x): %v", pid, r, callErr)
 				}
 			}
-			// 对所有 WebView2 相关子进程修剪物理工作集，释放 RAM
-			trimProcessWorkingSet(h)
 			windows.CloseHandle(h)
 		}
-	}
-	if h, err := windows.GetCurrentProcess(); err == nil {
-		trimProcessWorkingSet(h)
 	}
 	return suspended
 }
@@ -678,4 +672,22 @@ func resumeWebView2Processes(pids []uint32) {
 	}
 }
 
+// trimAllWebView2WorkingSets 深度睡眠阶段：修剪全部 WebView2 子进程（含 GPU、Browser、Utility）及主程序自身的物理工作集。
+// 这些进程不被挂起，仍在运行状态，唤醒时由操作系统自然按需回页。
+func trimAllWebView2WorkingSets() {
+	pids := findWebView2ProcessPIDs()
+	const access = windows.PROCESS_SET_QUOTA | windows.PROCESS_QUERY_LIMITED_INFORMATION
+	trimmed := 0
+	for _, pid := range pids {
+		if h, err := windows.OpenProcess(access, false, pid); err == nil {
+			trimProcessWorkingSet(h)
+			windows.CloseHandle(h)
+			trimmed++
+		}
+	}
+	if h, err := windows.GetCurrentProcess(); err == nil {
+		trimProcessWorkingSet(h)
+	}
+	debugLogf("window", "deep sleep: trimmed working set of %d webview2 processes + main process", trimmed)
+}
 

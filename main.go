@@ -57,6 +57,12 @@ func main() {
 		Windows: application.WindowsOptions{
 			DisableQuitOnLastWindowClosed: !launch.NoTray,
 			WebviewUserDataPath:           userDataPath,
+			AdditionalBrowserArgs: []string{
+				"--js-flags=--max-old-space-size=128",
+				"--disable-component-update",
+				"--disable-background-networking",
+				"--renderer-process-limit=1",
+			},
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: singleInstanceID(launch),
@@ -330,6 +336,7 @@ type App struct {
 	suspendedWebView2PIDs []uint32
 	isWebView2Suspended   bool
 	isFreezing            bool
+	freezeDone            chan struct{}
 	needResume            bool
 	trayProxyCancel       context.CancelFunc
 	trayProxyFingerprint  string
@@ -342,13 +349,14 @@ type App struct {
 	mu                    sync.Mutex
 }
 
-func (a *App) resumeWebView2Locked() (resumed bool) {
+func (a *App) resumeWebView2Locked() (resumed bool, waitChan <-chan struct{}) {
 	if a.freezeTimer != nil {
 		a.freezeTimer.Stop()
 		a.freezeTimer = nil
 	}
 	if a.isFreezing {
 		a.needResume = true
+		waitChan = a.freezeDone
 	}
 	if a.isWebView2Suspended {
 		pids := a.suspendedWebView2PIDs
@@ -357,7 +365,7 @@ func (a *App) resumeWebView2Locked() (resumed bool) {
 		resumeWebView2Processes(pids)
 		resumed = true
 	}
-	return resumed
+	return resumed, waitChan
 }
 
 func (a *App) showWindow() {
@@ -366,16 +374,27 @@ func (a *App) showWindow() {
 		a.mu.Unlock()
 		return
 	}
-	resumed := a.resumeWebView2Locked()
+	_, waitChan := a.resumeWebView2Locked()
+	a.mu.Unlock()
+
+	if waitChan != nil {
+		select {
+		case <-waitChan:
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	a.resumeWebView2Locked()
 	window := a.window
 	if window == nil {
 		window = a.createWindowLocked()
 	}
 	a.mu.Unlock()
-
-	if resumed {
-		time.Sleep(20 * time.Millisecond)
-	}
 
 	if window.IsMinimised() {
 		window.Restore()
@@ -455,10 +474,13 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.freezeTimer = nil
 	}
 	if a.forceClose || a.quitting {
-		resumed := a.resumeWebView2Locked()
+		_, waitChan := a.resumeWebView2Locked()
 		a.mu.Unlock()
-		if resumed {
-			time.Sleep(10 * time.Millisecond)
+		if waitChan != nil {
+			select {
+			case <-waitChan:
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 		a.saveWindowState()
 		a.mu.Lock()
@@ -478,7 +500,7 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		win.Hide()
 	}
 
-	// 异步延迟执行 WebView2 进程挂起（冻结）与物理内存修剪
+	// 异步延迟 250 毫秒执行 WebView2 渲染进程挂起与全量子进程/主程序物理工作集修剪
 	a.mu.Lock()
 	a.freezeTimer = time.AfterFunc(250*time.Millisecond, func() {
 		a.mu.Lock()
@@ -487,6 +509,8 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 			return
 		}
 		a.isFreezing = true
+		done := make(chan struct{})
+		a.freezeDone = done
 		a.mu.Unlock()
 
 		pids := suspendWebView2Processes()
@@ -494,6 +518,8 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.isFreezing = false
+		a.freezeDone = nil
+		close(done)
 		if a.window == nil || a.quitting || a.forceClose || a.needResume {
 			a.needResume = false
 			if len(pids) > 0 {
@@ -505,6 +531,9 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		if len(pids) > 0 {
 			a.isWebView2Suspended = true
 		}
+
+		// 直接执行全量子进程与主程序物理工作集修剪（极低内存驻留）
+		trimAllWebView2WorkingSets()
 	})
 	a.mu.Unlock()
 }
@@ -536,12 +565,15 @@ func (a *App) quit() {
 	a.mu.Lock()
 	a.quitting = true
 	a.forceClose = true
-	resumed := a.resumeWebView2Locked()
+	_, waitChan := a.resumeWebView2Locked()
 	cancelTrayProxy := a.trayProxyCancel
 	win := a.window
 	a.mu.Unlock()
-	if resumed {
-		time.Sleep(10 * time.Millisecond)
+	if waitChan != nil {
+		select {
+		case <-waitChan:
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	if cancelTrayProxy != nil {
 		cancelTrayProxy()
@@ -564,7 +596,7 @@ func (a *App) clearFrontendCache() {
 		a.mu.Unlock()
 		return
 	}
-	resumed := a.resumeWebView2Locked()
+	_, waitChan := a.resumeWebView2Locked()
 	window := a.window
 	wasOpen := window != nil
 	if wasOpen {
@@ -572,8 +604,11 @@ func (a *App) clearFrontendCache() {
 	}
 	a.mu.Unlock()
 
-	if resumed {
-		time.Sleep(10 * time.Millisecond)
+	if waitChan != nil {
+		select {
+		case <-waitChan:
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 
 	if wasOpen {
