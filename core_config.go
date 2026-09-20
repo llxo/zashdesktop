@@ -30,7 +30,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 		debugLogf("config", "download config failed: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("config", "download config failed to load snapshot: %v", err)
 		return CoreConfig{}, err
@@ -74,9 +74,8 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.configGeneration != generation {
-		debugLogf("config", "download config failed: config generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
 	}
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		debugLogf("config", "create core directory failed: %v", err)
@@ -89,12 +88,19 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 	}
 
 	config.ConfigURL = rawURL
+	fileName, err := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
+	if err != nil {
+		fileName = defaultConfigFileName(config.CoreType)
+	}
+	config.ActiveConfigFile = fileName
+	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, config.CoreType)
+
 	if err := s.saveConfigLocked(config); err != nil {
 		debugLogf("config", "save config after download failed: %v", err)
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("config", "download config success: type=%s target=%q size=%d", config.CoreType, targetPath, len(data))
+	debugLogf("config", "download config success: type=%s target=%q size=%d runArgs=%q", config.CoreType, targetPath, len(data), config.RunArgs)
 	return config, nil
 }
 
@@ -104,7 +110,8 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		debugLogf("config", "import config failed: %v", err)
 		return CoreConfig{}, err
 	}
-	if _, err := normalizeConfigFileName(sourceFileName, coreType); err != nil {
+	fileName, err := normalizeConfigFileName(filepath.Base(sourceFileName), coreType)
+	if err != nil {
 		debugLogf("config", "import config invalid filename %q: %v", sourceFileName, err)
 		return CoreConfig{}, err
 	}
@@ -118,26 +125,33 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
 	}
 
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("config", "import config failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.configGeneration != generation {
-		debugLogf("config", "import config failed: config generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while importing; please retry")
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
 	}
 	if err := os.MkdirAll(s.coreDirFor(config.CoreType), 0o755); err != nil {
 		debugLogf("config", "create core directory failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	targetPath := s.saveConfigFilePath(config)
+	targetPath := filepath.Join(s.coreDirFor(config.CoreType), fileName)
 	if err := writeFileAtomically(targetPath, data, 0o600); err != nil {
 		debugLogf("config", "write imported config to %q failed: %v", targetPath, err)
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
 	}
+
+	isCoreRunning := (s.process != nil && normalizedCoreType(s.processCoreType) == coreType) ||
+		(s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType)
+	if !isCoreRunning {
+		config.ActiveConfigFile = fileName
+		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
+	}
+
 	if err := s.saveConfigLocked(config); err != nil {
 		debugLogf("config", "save config after import failed: %v", err)
 		return CoreConfig{}, err
@@ -158,13 +172,13 @@ func (s *CoreService) SaveConfigFileName(rawFileName, rawCoreType string) (CoreC
 		debugLogf("config", "invalid config file name %q: %v", rawFileName, err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("config", "save config file name failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	config.ConfigFileName = fileName
-	saved, err := s.commitConfigUpdate(config, generation)
+	saved, err := s.commitConfigUpdate(config)
 	if err != nil {
 		debugLogf("config", "save config file name failed: %v", err)
 		return CoreConfig{}, err
@@ -235,12 +249,6 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 		return CoreConfig{}, errors.New("配置文件名无效")
 	}
 
-	config, generation, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("config", "select config file failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
@@ -251,9 +259,11 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 		debugLogf("config", "select config file failed: core is currently running (external pid=%d)", s.externalProcess.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法修改生效配置")
 	}
-	if s.configGeneration != generation {
-		debugLogf("config", "select config file failed: config generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		debugLogf("config", "select config file failed to load: %v", err)
+		return CoreConfig{}, err
 	}
 
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
@@ -284,12 +294,6 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		return CoreConfig{}, errors.New("配置文件名无效")
 	}
 
-	config, generation, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		coreDebugf("delete config file failed: loadConfigSnapshot err=%v", err)
-		return CoreConfig{}, err
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
@@ -300,9 +304,11 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		coreDebugf("delete config file failed: core is running (external pid=%d)", s.externalProcess.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法删除配置")
 	}
-	if s.configGeneration != generation {
-		coreDebugf("delete config file failed: config generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		coreDebugf("delete config file failed: loadConfigForTypeLocked err=%v", err)
+		return CoreConfig{}, err
 	}
 
 	dir := s.coreDirFor(coreType)
@@ -366,11 +372,6 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 		return CoreConfig{}, err
 	}
 
-	config, generation, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		return CoreConfig{}, err
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
@@ -379,8 +380,10 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 	if s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType {
 		return CoreConfig{}, errors.New("核心运行中，无法撤销删除")
 	}
-	if s.configGeneration != generation {
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		return CoreConfig{}, err
 	}
 
 	if s.lastDeletedFiles == nil {
@@ -450,8 +453,8 @@ func normalizeConfigFileName(rawFileName, coreType string) (string, error) {
 	}
 	extension := strings.ToLower(filepath.Ext(fileName))
 	if normalizedCoreType(coreType) == coreTypeMihomo {
-		if extension != ".yaml" {
-			return "", errors.New("mihomo 配置文件名必须以 .yaml 结尾")
+		if extension != ".yaml" && extension != ".yml" {
+			return "", errors.New("mihomo 配置文件名必须以 .yaml 或 .yml 结尾")
 		}
 	} else if extension != ".json" {
 		return "", errors.New("sing-box 配置文件名必须以 .json 结尾")

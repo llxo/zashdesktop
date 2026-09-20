@@ -716,7 +716,7 @@ const defaultRunArgsPlaceholder = computed(() =>
 const defaultConfigFileName = computed(() =>
   coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
 )
-const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml' : '.json'))
+const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml,.yml' : '.json'))
 const runArgsInput = ref('')
 const configURLInput = ref('')
 const configFileNameInput = ref('')
@@ -1143,6 +1143,7 @@ const downloadConfig = async () => {
     const next = await CoreService.DownloadConfig(configURLInput.value, coreType.value)
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('configURL', draftRevision)
+    resetDraft('runArgs')
     applyCurrentConfig(request, next)
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
@@ -1197,6 +1198,7 @@ const importConfig = async (event: Event) => {
     request = beginConfigRequest()
     const next = await CoreService.ImportConfig(await file.text(), file.name, request.coreType)
     if (!applyCurrentConfig(request, next)) return
+    resetDraft('runArgs')
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
   } catch (error) {

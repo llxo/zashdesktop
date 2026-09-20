@@ -74,12 +74,9 @@ func (s *CoreService) loadConfigSnapshot(coreType string) (CoreConfig, uint64, e
 	return config, generation, nil
 }
 
-func (s *CoreService) commitConfigUpdate(config CoreConfig, generation uint64) (CoreConfig, error) {
+func (s *CoreService) commitConfigUpdate(config CoreConfig) (CoreConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.configGeneration != generation {
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
-	}
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}

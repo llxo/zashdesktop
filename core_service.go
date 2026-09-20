@@ -355,7 +355,7 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("core", "save channel failed to load snapshot: %v", err)
 		return CoreConfig{}, err
@@ -370,7 +370,7 @@ func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, e
 	config.LatestVersion = ""
 	config.UpdateAvailable = false
 
-	saved, err := s.commitConfigUpdate(config, generation)
+	saved, err := s.commitConfigUpdate(config)
 	if err != nil {
 		debugLogf("core", "save channel failed: %v", err)
 		return CoreConfig{}, err
@@ -385,13 +385,13 @@ func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, erro
 		debugLogf("core", "save run args failed: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("core", "save run args failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 	config.RunArgs = strings.TrimSpace(rawArgs)
-	saved, err := s.commitConfigUpdate(config, generation)
+	saved, err := s.commitConfigUpdate(config)
 	if err != nil {
 		debugLogf("core", "save run args failed: %v", err)
 		return CoreConfig{}, err
@@ -406,7 +406,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 		debugLogf("core", "save core type failed: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("core", "save core type failed to load snapshot: %v", err)
 		return CoreConfig{}, err
@@ -415,7 +415,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 		config.RunArgs = defaultRunArgs(coreType)
 	}
 	config.CoreType = coreType
-	saved, err := s.commitConfigUpdate(config, generation)
+	saved, err := s.commitConfigUpdate(config)
 	if err != nil {
 		debugLogf("core", "save core type failed: %v", err)
 		return CoreConfig{}, err
@@ -430,7 +430,7 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 		debugLogf("system", "save behavior failed to normalize core type: %v", err)
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		debugLogf("system", "save behavior failed to load snapshot: %v", err)
 		return CoreConfig{}, err
@@ -463,9 +463,9 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 	applySharedBehavior(&config, behavior)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.configGeneration != generation {
-		debugLogf("system", "save behavior failed: config generation mismatch")
-		return CoreConfig{}, errors.New("core configuration changed while saving; please retry")
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
+		applySharedBehavior(&config, behavior)
 	}
 	if err := s.saveBehaviorLocked(config, behavior); err != nil {
 		debugLogf("system", "save behavior failed to write profiles: %v", err)

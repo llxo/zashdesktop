@@ -672,7 +672,7 @@ func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, erro
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	config, generation, err := s.loadConfigSnapshot(coreType)
+	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
 		return CoreConfig{}, err
 	}
@@ -691,9 +691,8 @@ func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, erro
 		s.mu.Unlock()
 		return CoreConfig{}, errors.New("core service is shutting down")
 	}
-	if s.configGeneration != generation {
-		s.mu.Unlock()
-		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
 	}
 	s.detectExternalProcessLocked(config.CoreType)
 	runningType := ""
@@ -718,12 +717,8 @@ func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, erro
 		s.mu.Unlock()
 		return CoreConfig{}, errors.New("core service is shutting down")
 	}
-	if s.configGeneration != generation {
-		s.mu.Unlock()
-		if wasRunning {
-			_, _ = s.startCore("", coreType, false)
-		}
-		return CoreConfig{}, errors.New("core configuration changed while downloading; please retry")
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
 	}
 	config, err = s.installCoreArchiveLocked(config, archivePath, targetVersion)
 	s.mu.Unlock()
