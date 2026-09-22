@@ -402,6 +402,29 @@ func (a *App) showWindow() {
 	window.Show().Focus()
 }
 
+func (a *App) hideWindow() {
+	a.releaseWindow(nil)
+}
+
+func (a *App) toggleWindow() {
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	win := a.window
+	a.mu.Unlock()
+
+	if win != nil && win.IsVisible() && !win.IsMinimised() {
+		debugLogf("app", "tray clicked: window is visible, closing window")
+		a.hideWindow()
+		return
+	}
+
+	debugLogf("app", "tray clicked: window not visible or minimised, showing window")
+	a.showWindow()
+}
+
 func (a *App) createWindow() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -556,7 +579,7 @@ func (a *App) setupTray() {
 	}
 
 	a.setTrayMenu(initialConfig, nil)
-	tray.OnClick(a.showWindow)
+	tray.OnClick(a.toggleWindow)
 	a.startTrayProxyRefresh()
 }
 
