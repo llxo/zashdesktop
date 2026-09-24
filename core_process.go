@@ -84,7 +84,7 @@ func findInheritedCoreProcess(coreType, expectedPath string) (*os.Process, error
 	currentPID := uint32(os.Getpid())
 	for {
 		processName := strings.ToLower(windows.UTF16ToString(entry.ExeFile[:]))
-		if (processName == stableName || processName == testName) && entry.ProcessID != currentPID && entry.ProcessID > 0 {
+		if (processName == stableName || processName == testName) && entry.ProcessID != currentPID && entry.ProcessID > 0 && entry.ParentProcessID != currentPID {
 			if cleanExpected != "" {
 				imagePath, err := getProcessImagePath(entry.ProcessID)
 				if err == nil && imagePath != "" {

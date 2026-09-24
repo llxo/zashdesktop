@@ -929,11 +929,15 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	}
 	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
 	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running
+	stateChanged := s.stateLogged && (s.lastRunning != config.Running || s.lastPID != config.PID)
 	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
 		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
 		s.stateLogged = true
 		s.lastRunning = config.Running
 		s.lastPID = config.PID
+	}
+	if stateChanged {
+		s.notifyStateChangeLocked()
 	}
 	if config.Running {
 		config.ClashAPIURL = s.runningClashAPIURL
