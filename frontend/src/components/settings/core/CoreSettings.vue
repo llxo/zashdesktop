@@ -261,20 +261,17 @@
             </span>
             <div class="join flex-1 min-w-0">
               <input
-                v-model="configFileNameInput"
+                v-model="saveTargetFileName"
                 class="join-item input input-sm flex-1 min-w-0 font-mono"
                 type="text"
                 :aria-label="$t('coreConfigSaveTo')"
                 :placeholder="defaultConfigFileName"
-                :disabled="isSavingConfigFileName || isDownloadingConfig || isImportingConfig"
-                @input="touchDraft('configFileName')"
-                @change="saveConfigFileName()"
-                @keydown.enter.prevent="saveConfigFileName()"
+                :disabled="isDownloadingConfig || isImportingConfig"
               />
               <button
                 class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 type="button"
-                :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim()"
+                :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim() || !saveTargetFileName.trim()"
                 @click="downloadConfig"
               >
                 <span
@@ -290,7 +287,7 @@
               <button
                 class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 type="button"
-                :disabled="isDownloadingConfig || isImportingConfig || !configFileNameInput.trim()"
+                :disabled="isDownloadingConfig || isImportingConfig || !saveTargetFileName.trim()"
                 @click="openConfigFilePicker"
               >
                 <span
@@ -594,7 +591,7 @@ import { Events } from '@wailsio/runtime'
 type CoreType = 'sing-box' | 'mihomo'
 type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 type CoreChannel = 'stable' | 'test'
-type DraftKey = 'runArgs' | 'configURL' | 'configFileName' | 'behavior'
+type DraftKey = 'runArgs' | 'configURL' | 'behavior'
 
 type DownloadSource = {
   label: string
@@ -722,15 +719,23 @@ const defaultConfigFileName = computed(() =>
   coreType.value === 'mihomo' ? 'config.yaml' : 'config.json',
 )
 const configFileAccept = computed(() => (coreType.value === 'mihomo' ? '.yaml,.yml' : '.json'))
+const saveTargetFileNameMap = reactive<Record<CoreType, string>>({
+  'sing-box': 'config.json',
+  'mihomo': 'config.yaml',
+})
+const saveTargetFileName = computed({
+  get: () => saveTargetFileNameMap[coreType.value] || defaultConfigFileName.value,
+  set: (val: string) => {
+    saveTargetFileNameMap[coreType.value] = val
+  },
+})
 const runArgsInput = ref('')
 const configURLInput = ref('')
-const configFileNameInput = ref('')
 const configFileInput = ref<HTMLInputElement | null>(null)
 // A response may only clean the exact draft revision that it submitted.
 const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
   runArgs: { dirty: false, revision: 0 },
   configURL: { dirty: false, revision: 0 },
-  configFileName: { dirty: false, revision: 0 },
   behavior: { dirty: false, revision: 0 },
 })
 const touchDraft = (key: DraftKey) => {
@@ -762,7 +767,6 @@ const showCoreLogError = computed(
 )
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
-const isSavingConfigFileName = ref(false)
 const isImportingConfig = ref(false)
 const isSavingBehavior = ref(false)
 const isRefreshing = ref(false)
@@ -881,13 +885,6 @@ const applyConfig = (next: CoreConfig, forceDrafts = false) => {
       configURLInput.value = next.configURL
     }
     resetDraft('configURL')
-  }
-  if (syncAllDrafts || !draftState.configFileName.dirty) {
-    const expectedName = next.configFileName || defaultConfigFileName.value
-    if (configFileNameInput.value !== expectedName) {
-      configFileNameInput.value = expectedName
-    }
-    resetDraft('configFileName')
   }
   if (syncAllDrafts || !draftState.behavior.dirty) {
     if (
@@ -1144,17 +1141,18 @@ const downloadConfig = async () => {
     isDownloadingConfig.value ||
     isImportingConfig.value ||
     !configURLInput.value.trim() ||
-    (draftState.configFileName.dirty && !(await saveConfigFileName()))
+    !saveTargetFileName.value.trim()
   )
     return
+  if (draftState.configURL.dirty && !(await saveConfigURL())) return
   isDownloadingConfig.value = true
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('configURL')
   try {
-    const next = await CoreService.DownloadConfig(configURLInput.value, coreType.value)
+    const targetFileName = saveTargetFileName.value.trim()
+    const next = await CoreService.DownloadConfig(configURLInput.value, targetFileName, coreType.value)
     if (!isCurrentConfigRequest(request)) return
     commitDraftSave('configURL', draftRevision)
-    resetDraft('runArgs')
     applyCurrentConfig(request, next)
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
@@ -1167,33 +1165,6 @@ const downloadConfig = async () => {
   }
 }
 
-let configFileNameSavePromise: Promise<boolean> | null = null
-const saveConfigFileName = () => {
-  if (configFileNameSavePromise) return configFileNameSavePromise
-  if (!configFileNameInput.value.trim()) return Promise.resolve(false)
-  isSavingConfigFileName.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('configFileName')
-  configFileNameSavePromise = (async () => {
-    try {
-      const next = await CoreService.SaveConfigFileName(configFileNameInput.value, request.coreType)
-      if (!isCurrentConfigRequest(request)) return false
-      commitDraftSave('configFileName', draftRevision)
-      applyCurrentConfig(request, next)
-      return true
-    } catch (error) {
-      if (isCurrentConfigRequest(request)) {
-        showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-      }
-      return false
-    } finally {
-      isSavingConfigFileName.value = false
-      configFileNameSavePromise = null
-    }
-  })()
-  return configFileNameSavePromise
-}
-
 const openConfigFilePicker = () => {
   configFileInput.value?.click()
 }
@@ -1204,12 +1175,11 @@ const importConfig = async (event: Event) => {
   if (!file) return
   let request: ConfigRequest | null = null
   try {
-    if (draftState.configFileName.dirty && !(await saveConfigFileName())) return
     isImportingConfig.value = true
     request = beginConfigRequest()
-    const next = await CoreService.ImportConfig(await file.text(), file.name, request.coreType)
+    const targetFileName = saveTargetFileName.value.trim() || file.name
+    const next = await CoreService.ImportConfig(await file.text(), targetFileName, request.coreType)
     if (!applyCurrentConfig(request, next)) return
-    resetDraft('runArgs')
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
   } catch (error) {
@@ -1458,7 +1428,6 @@ watch(
     Object.assign(config, emptyCoreConfig(props.coreType))
     resetDraft('runArgs')
     resetDraft('configURL')
-    resetDraft('configFileName')
     resetDraft('behavior')
     loadSavedSource()
     void (async () => {

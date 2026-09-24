@@ -26,7 +26,7 @@ type deletedConfigFile struct {
 	Content  []byte
 }
 
-func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("config", "download config failed: %v", err)
@@ -42,8 +42,13 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 		debugLogf("config", "download config invalid URL %q: %v", rawURL, err)
 		return CoreConfig{}, err
 	}
+	targetFileName, err := normalizeConfigFileName(rawFileName, coreType)
+	if err != nil {
+		debugLogf("config", "download config invalid file name %q: %v", rawFileName, err)
+		return CoreConfig{}, err
+	}
 
-	debugLogf("config", "downloading config from %s for core %s", rawURL, coreType)
+	debugLogf("config", "downloading config from %s to %s for core %s", rawURL, targetFileName, coreType)
 	client := newCoreHTTPClient(5 * time.Minute)
 	response, err := client.Get(rawURL)
 	if err != nil {
@@ -83,26 +88,24 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 		debugLogf("config", "create core directory failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	targetPath := s.configFilePath(config)
+	targetPath := filepath.Join(s.coreDirFor(config.CoreType), targetFileName)
 	if err := writeFileAtomically(targetPath, data, 0o600); err != nil {
 		debugLogf("config", "write config atomically to %q failed: %v", targetPath, err)
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
 	}
 
 	config.ConfigURL = rawURL
-	fileName, err := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
-	if err != nil {
-		fileName = defaultConfigFileName(config.CoreType)
+	if strings.TrimSpace(config.ConfigFileName) == "" {
+		config.ConfigFileName = targetFileName
+		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, targetFileName, config.CoreType)
 	}
-	config.ConfigFileName = fileName
-	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, config.CoreType)
 
 	if err := s.saveConfigLocked(config); err != nil {
 		debugLogf("config", "save config after download failed: %v", err)
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("config", "download config success: type=%s target=%q size=%d runArgs=%q", config.CoreType, targetPath, len(data), config.RunArgs)
+	debugLogf("config", "download config success: type=%s target=%q size=%d (activeConfig=%q)", config.CoreType, targetPath, len(data), config.ConfigFileName)
 	return config, nil
 }
 
@@ -147,9 +150,7 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
 	}
 
-	isCoreRunning := (s.process != nil && normalizedCoreType(s.processCoreType) == coreType) ||
-		(s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType)
-	if !isCoreRunning {
+	if strings.TrimSpace(config.ConfigFileName) == "" {
 		config.ConfigFileName = fileName
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
 	}
@@ -159,7 +160,7 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	debugLogf("config", "import config success: type=%s file=%q size=%d", config.CoreType, targetPath, len(data))
+	debugLogf("config", "import config success: type=%s file=%q size=%d (activeConfig=%q)", config.CoreType, targetPath, len(data), config.ConfigFileName)
 	return config, nil
 }
 

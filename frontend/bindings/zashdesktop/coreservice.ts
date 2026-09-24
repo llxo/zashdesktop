@@ -25,8 +25,8 @@ export function DeleteConfigFile(rawFileName: string, rawCoreType: string): $Can
     return $Call.ByID(2839170645, rawFileName, rawCoreType);
 }
 
-export function DownloadConfig(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(3689975968, rawURL, rawCoreType);
+export function DownloadConfig(rawURL: string, rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(3689975968, rawURL, rawFileName, rawCoreType);
 }
 
 export function DownloadCore(rawURL: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
