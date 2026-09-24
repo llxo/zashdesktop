@@ -160,8 +160,10 @@ const checkRunningCore = async () => {
     if (isRunning) {
       if (!lastCoreRunning) {
         lastCoreRunning = true
-        syncManagedBackendFromCore(config)
-        void startBackendSession()
+        const isManagedActive = syncManagedBackendFromCore(config)
+        if (isManagedActive) {
+          void startBackendSession()
+        }
       }
     } else {
       lastCoreRunning = false
@@ -175,6 +177,7 @@ let unsubCoreState: (() => void) | undefined
 
 onMounted(async () => {
   setThemeColor()
+  autoSwitchToURLBackendIfExists()
   await checkRunningCore()
   unsubCoreState = Events.On('core:state-changed', () => {
     void checkRunningCore()

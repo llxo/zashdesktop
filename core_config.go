@@ -83,7 +83,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 		debugLogf("config", "create core directory failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("create core directory: %w", err)
 	}
-	targetPath := s.saveConfigFilePath(config)
+	targetPath := s.configFilePath(config)
 	if err := writeFileAtomically(targetPath, data, 0o600); err != nil {
 		debugLogf("config", "write config atomically to %q failed: %v", targetPath, err)
 		return CoreConfig{}, fmt.Errorf("write %s config: %w", config.CoreType, err)
@@ -94,7 +94,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawCoreType string) (CoreConfig, er
 	if err != nil {
 		fileName = defaultConfigFileName(config.CoreType)
 	}
-	config.ActiveConfigFile = fileName
+	config.ConfigFileName = fileName
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, config.CoreType)
 
 	if err := s.saveConfigLocked(config); err != nil {
@@ -150,7 +150,7 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 	isCoreRunning := (s.process != nil && normalizedCoreType(s.processCoreType) == coreType) ||
 		(s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType)
 	if !isCoreRunning {
-		config.ActiveConfigFile = fileName
+		config.ConfigFileName = fileName
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
 	}
 
@@ -269,7 +269,7 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 	}
 
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
-	config.ActiveConfigFile = fileName
+	config.ConfigFileName = fileName
 
 	debugLogf("config", "select config file: type=%s file=%q", coreType, fileName)
 	if err := s.saveConfigLocked(config); err != nil {
@@ -356,8 +356,8 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		nextFile = defaultName
 	}
 
-	if strings.EqualFold(config.ActiveConfigFile, fileName) {
-		config.ActiveConfigFile = nextFile
+	if strings.EqualFold(config.ConfigFileName, fileName) {
+		config.ConfigFileName = nextFile
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, nextFile, coreType)
 		if err := s.saveConfigLocked(config); err != nil {
 			return CoreConfig{}, err
@@ -409,7 +409,7 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 	delete(s.lastDeletedFiles, coreType)
 	coreDebugf("undo delete success: type=%s name=%q", coreType, deleted.FileName)
 
-	config.ActiveConfigFile = deleted.FileName
+	config.ConfigFileName = deleted.FileName
 	config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, deleted.FileName, coreType)
 
 	if err := s.saveConfigLocked(config); err != nil {
@@ -493,8 +493,9 @@ func isDefaultCoreRunArgs(raw string) bool {
 }
 
 var (
-	mihomoControllerRegex  = regexp.MustCompile(`(?mi)^\s*external-controller:\s*['"]?([^'"\s]+)['"]?`)
-	mihomoSecretRegex      = regexp.MustCompile(`(?mi)^\s*secret:\s*['"]?([^'"#\r\n]*)['"]?`)
+	mihomoControllerRegex  = regexp.MustCompile(`(?mi)^[ \t]*external-controller:\s*['"]?([^'"\s#]+)['"]?`)
+	mihomoSecretRegex      = regexp.MustCompile(`(?mi)^[ \t]{0,2}secret:\s*['"]?([^'"#\r\n]*)['"]?`)
+	singboxClashBlockRegex = regexp.MustCompile(`(?s)"clash_api"\s*:\s*\{([^}]+)\}`)
 	singboxControllerRegex = regexp.MustCompile(`"external_controller"\s*:\s*"([^"]+)"`)
 	singboxSecretRegex     = regexp.MustCompile(`"secret"\s*:\s*"([^"]*)"`)
 )
@@ -505,7 +506,12 @@ func (s *CoreService) extractClashAPIFromConfig(config *CoreConfig) {
 	defaultSecret := ""
 
 	configPath := config.ConfigPath
-	if configPath == "" || !fileExists(configPath) {
+	if configPath == "" {
+		configPath = s.configFilePath(*config)
+		config.ConfigPath = configPath
+	}
+	if !fileExists(configPath) {
+		debugLogf("core", "clash API extraction skipped: config file %q does not exist", configPath)
 		config.ClashAPIHost = defaultHost
 		config.ClashAPIPort = defaultPort
 		config.ClashAPISecret = defaultSecret
@@ -515,6 +521,7 @@ func (s *CoreService) extractClashAPIFromConfig(config *CoreConfig) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil || len(data) == 0 {
+		debugLogf("core", "read config file %q for clash API failed: %v", configPath, err)
 		config.ClashAPIHost = defaultHost
 		config.ClashAPIPort = defaultPort
 		config.ClashAPISecret = defaultSecret
@@ -545,10 +552,14 @@ func (s *CoreService) extractClashAPIFromConfig(config *CoreConfig) {
 			rawController = strings.TrimSpace(parsed.Experimental.ClashAPI.ExternalController)
 			rawSecret = strings.TrimSpace(parsed.Experimental.ClashAPI.Secret)
 		} else {
-			if match := singboxControllerRegex.FindSubmatch(data); len(match) > 1 {
+			searchBlock := data
+			if blockMatch := singboxClashBlockRegex.FindSubmatch(data); len(blockMatch) > 1 {
+				searchBlock = blockMatch[1]
+			}
+			if match := singboxControllerRegex.FindSubmatch(searchBlock); len(match) > 1 {
 				rawController = strings.TrimSpace(string(match[1]))
 			}
-			if match := singboxSecretRegex.FindSubmatch(data); len(match) > 1 {
+			if match := singboxSecretRegex.FindSubmatch(searchBlock); len(match) > 1 {
 				rawSecret = strings.TrimSpace(string(match[1]))
 			}
 		}
@@ -586,6 +597,11 @@ func (s *CoreService) extractClashAPIFromConfig(config *CoreConfig) {
 	config.ClashAPIHost = host
 	config.ClashAPIPort = port
 	config.ClashAPISecret = rawSecret
-	config.ClashAPIURL = fmt.Sprintf("http://%s:%s", host, port)
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		config.ClashAPIURL = fmt.Sprintf("http://[%s]:%s", host, port)
+	} else {
+		config.ClashAPIURL = fmt.Sprintf("http://%s:%s", host, port)
+	}
+	debugLogf("core", "extracted clash API from %q: url=%s hasSecret=%t", configPath, config.ClashAPIURL, config.ClashAPISecret != "")
 }
 

@@ -175,11 +175,14 @@ export const removeBackend = (uuid: string) => {
   })
 }
 
-export const syncManagedBackendFromCore = (coreConfig: {
-  clashApiHost?: string
-  clashApiPort?: string
-  clashApiSecret?: string
-}) => {
+export const syncManagedBackendFromCore = (
+  coreConfig: {
+    clashApiHost?: string
+    clashApiPort?: string
+    clashApiSecret?: string
+  },
+  forceActivate = false,
+): boolean => {
   const host = coreConfig.clashApiHost || '127.0.0.1'
   const port = coreConfig.clashApiPort || '9090'
   const password = coreConfig.clashApiSecret || ''
@@ -208,8 +211,11 @@ export const syncManagedBackendFromCore = (coreConfig: {
       password,
       label: MANAGED_BACKEND_LABEL,
     })
-    setActiveBackend(id)
-    return
+    if (!activeUuid.value || forceActivate) {
+      setActiveBackend(id)
+      return true
+    }
+    return false
   }
 
   // 4. 检查是否需要更新（端口、密码、地址、标签等）
@@ -232,8 +238,10 @@ export const syncManagedBackendFromCore = (coreConfig: {
   }
 
   // 5. 确保如果当前没有激活的后端，或者当前处于专属后端，激活它
-  if (!activeUuid.value || activeUuid.value === target.uuid) {
+  if (!activeUuid.value || activeUuid.value === target.uuid || forceActivate) {
     setActiveBackend(target.uuid)
+    return true
   }
+  return false
 }
 

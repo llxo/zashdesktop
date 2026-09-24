@@ -47,7 +47,6 @@ type CoreConfig struct {
 	RunArgs           string `json:"runArgs"`
 	ConfigURL         string `json:"configURL"`
 	ConfigFileName    string `json:"configFileName"`
-	ActiveConfigFile  string `json:"activeConfigFile"`
 	Running           bool   `json:"running"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
