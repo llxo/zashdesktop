@@ -38,9 +38,6 @@ On first launch, navigate to the **"Core"** tab in the bottom bar to configure a
    - **Companion Lifecycle**: Optionally enable "Start sing-box / mihomo on app launch" and "Stop core on app exit".
    - **Client Updates**: Check for updates and upgrade the zashdesktop client with one click.
 
-> [!TIP]
-> The default proxy controller address is `http://127.0.0.1:9090`. To change the port or secret, configure them in the bottom bar under **"Settings"** -> **"Backend"**.
-
 ## Directory Structure & Manual Core Setup
 
 The application directory structure is outlined below. It supports direct manual copying and replacement of binaries and configuration files:
