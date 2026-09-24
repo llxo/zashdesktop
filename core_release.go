@@ -762,12 +762,12 @@ func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, erro
 	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
 		config = currentConfig
 	}
-	s.detectExternalProcessLocked(config.CoreType)
+	s.detectInheritedProcessLocked(config.CoreType)
 	runningType := ""
 	if s.process != nil {
 		runningType = normalizedCoreType(s.processCoreType)
-	} else if s.externalProcess != nil {
-		runningType = normalizedCoreType(s.externalCoreType)
+	} else if s.inheritedProcess != nil {
+		runningType = normalizedCoreType(s.inheritedCoreType)
 	}
 	wasRunning := runningType == config.CoreType
 	runArgs := config.RunArgs

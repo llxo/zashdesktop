@@ -50,6 +50,8 @@ if (backendList.value.some((item) => !item.type || 'singboxChannel' in item)) {
   backendList.value = migrateBackendList(backendList.value as LegacyBackend[])
 }
 
+export const MANAGED_BACKEND_LABEL = 'ZashCore'
+
 if (backendList.value.length === 0) {
   const defaultUuid = uuid()
   backendList.value = [
@@ -61,7 +63,7 @@ if (backendList.value.length === 0) {
       port: '9090',
       secondaryPath: '',
       password: '',
-      label: 'Default',
+      label: MANAGED_BACKEND_LABEL,
     },
   ]
 }
@@ -172,3 +174,66 @@ export const removeBackend = (uuid: string) => {
     }
   })
 }
+
+export const syncManagedBackendFromCore = (coreConfig: {
+  clashApiHost?: string
+  clashApiPort?: string
+  clashApiSecret?: string
+}) => {
+  const host = coreConfig.clashApiHost || '127.0.0.1'
+  const port = coreConfig.clashApiPort || '9090'
+  const password = coreConfig.clashApiSecret || ''
+
+  // 1. 查找是否已有专属标签的后端
+  let target = backendList.value.find((b) => b.label === MANAGED_BACKEND_LABEL)
+
+  // 2. 如果没找到专属标签，检查是否有默认模板的 'Default' 项（或者纯本地无标签的初始项），直接升级迁移
+  if (!target) {
+    const defaultBackend = backendList.value.find(
+      (b) => b.label === 'Default' || (!b.label && (b.host === '127.0.0.1' || b.host === 'localhost')),
+    )
+    if (defaultBackend) {
+      target = defaultBackend
+    }
+  }
+
+  // 3. 如果依然没有，新建一个专属标签后端
+  if (!target) {
+    const id = addBackend({
+      type: 'clash',
+      protocol: 'http',
+      host,
+      port,
+      secondaryPath: '',
+      password,
+      label: MANAGED_BACKEND_LABEL,
+    })
+    setActiveBackend(id)
+    return
+  }
+
+  // 4. 检查是否需要更新（端口、密码、地址、标签等）
+  const needUpdate =
+    target.host !== host ||
+    target.port !== port ||
+    target.password !== password ||
+    target.label !== MANAGED_BACKEND_LABEL ||
+    target.type !== 'clash'
+
+  if (needUpdate) {
+    updateBackend(target.uuid, {
+      ...target,
+      host,
+      port,
+      password,
+      label: MANAGED_BACKEND_LABEL,
+      type: 'clash',
+    })
+  }
+
+  // 5. 确保如果当前没有激活的后端，或者当前处于专属后端，激活它
+  if (!activeUuid.value || activeUuid.value === target.uuid) {
+    setActiveBackend(target.uuid)
+  }
+}
+

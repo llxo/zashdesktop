@@ -573,6 +573,8 @@ import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { AppUpdateInfo, CoreConfig } from '../../../../bindings/zashdesktop/models'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
+import { syncManagedBackendFromCore } from '@/store/setup'
+import { startBackendSession } from '@/assembly/session'
 import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
@@ -693,6 +695,10 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   autoStartMihomo: false,
   backendDebugLog: false,
   stopCoreOnExit: true,
+  clashApiUrl: '',
+  clashApiHost: '127.0.0.1',
+  clashApiPort: '9090',
+  clashApiSecret: '',
 })
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 // Polling replaces config every second. Editable controls must bind to drafts.
@@ -1064,6 +1070,9 @@ const startCore = async () => {
     applyCurrentConfig(request, next)
     if (!next.running && next.coreLogError) {
       hasCoreLogError.value = true
+    } else if (next.running && next.clashApiUrl) {
+      syncManagedBackendFromCore(next)
+      void startBackendSession()
     }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
@@ -1105,6 +1114,9 @@ const restartCore = async () => {
     applyCurrentConfig(request, next)
     if (!next.running && next.coreLogError) {
       hasCoreLogError.value = true
+    } else if (next.running && next.clashApiUrl) {
+      syncManagedBackendFromCore(next)
+      void startBackendSession()
     }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {

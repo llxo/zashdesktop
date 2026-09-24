@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // 后端会话(内核探测 + 首屏数据 + 常驻流)自己跟着 activeBackend 走,
 // 这里只需保证模块被加载,不依赖任何页面挂载。
-import './assembly/session'
-import { computed, onMounted, ref, type Ref, watch } from 'vue'
+import { startBackendSession } from './assembly/session'
+import { computed, onMounted, onUnmounted, ref, type Ref, watch } from 'vue'
 import { RouterView } from 'vue-router'
+import { Events } from '@wailsio/runtime'
+import * as CoreService from '../bindings/zashdesktop/coreservice'
 import BackendSwitchToast from './components/common/BackendSwitchToast.vue'
 import BackendManager from './components/settings/backend/BackendManager.vue'
 import UpdateConfigModal from './components/settings/backend/UpdateConfigModal.vue'
@@ -23,7 +25,7 @@ import { backgroundImage } from './helper/indexeddb'
 import { initNotification } from './helper/notification'
 import { getBackendFromUrl, isPreferredDark } from './helper/utils'
 import { disablePullToRefresh, emoji, font, theme } from './store/settings'
-import { addBackend, backendList, setActiveBackend } from './store/setup'
+import { addBackend, backendList, setActiveBackend, syncManagedBackendFromCore } from './store/setup'
 import type { Backend } from './types'
 
 const app = ref<HTMLElement>()
@@ -149,10 +151,34 @@ const autoSwitchToURLBackendIfExists = () => {
   }
 }
 
-autoSwitchToURLBackendIfExists()
+let lastCoreRunning = false
+
+const checkRunningCore = async () => {
+  try {
+    const config = await CoreService.GetConfig()
+    const isRunning = Boolean(config?.running && config.clashApiUrl)
+    if (isRunning) {
+      if (!lastCoreRunning) {
+        lastCoreRunning = true
+        syncManagedBackendFromCore(config)
+        void startBackendSession()
+      }
+    } else {
+      lastCoreRunning = false
+    }
+  } catch (e) {
+    console.error('Failed to check running core:', e)
+  }
+}
+
+let unsubCoreState: (() => void) | undefined
 
 onMounted(async () => {
   setThemeColor()
+  await checkRunningCore()
+  unsubCoreState = Events.On('core:state-changed', () => {
+    void checkRunningCore()
+  })
 
   if (autoImportSettings.value) {
     await importSettingsFromUrl()
@@ -165,6 +191,10 @@ onMounted(async () => {
       console.error('Failed to auto-sync settings on app load:', e)
     }
   }
+})
+
+onUnmounted(() => {
+  if (unsubCoreState) unsubCoreState()
 })
 
 useAppearanceVars()

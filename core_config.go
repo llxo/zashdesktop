@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -146,7 +148,7 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 	}
 
 	isCoreRunning := (s.process != nil && normalizedCoreType(s.processCoreType) == coreType) ||
-		(s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType)
+		(s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType)
 	if !isCoreRunning {
 		config.ActiveConfigFile = fileName
 		config.RunArgs = updateRunArgsWithConfigFile(config.RunArgs, fileName, coreType)
@@ -255,8 +257,8 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 		debugLogf("config", "select config file failed: core is currently running (managed pid=%d)", s.process.Process.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法修改生效配置")
 	}
-	if s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType {
-		debugLogf("config", "select config file failed: core is currently running (external pid=%d)", s.externalProcess.Pid)
+	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
+		debugLogf("config", "select config file failed: core is currently running (inherited pid=%d)", s.inheritedProcess.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法修改生效配置")
 	}
 
@@ -300,8 +302,8 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 		coreDebugf("delete config file failed: core is running (managed pid=%d)", s.process.Process.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法删除配置")
 	}
-	if s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType {
-		coreDebugf("delete config file failed: core is running (external pid=%d)", s.externalProcess.Pid)
+	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
+		coreDebugf("delete config file failed: core is running (inherited pid=%d)", s.inheritedProcess.Pid)
 		return CoreConfig{}, errors.New("核心运行中，无法删除配置")
 	}
 
@@ -377,7 +379,7 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
 		return CoreConfig{}, errors.New("核心运行中，无法撤销删除")
 	}
-	if s.externalProcess != nil && normalizedCoreType(s.externalCoreType) == coreType {
+	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
 		return CoreConfig{}, errors.New("核心运行中，无法撤销删除")
 	}
 
@@ -489,3 +491,101 @@ func isDefaultCoreRunArgs(raw string) bool {
 	return runArgs == defaultCoreRunArgs || runArgs == defaultMihomoRunArgs ||
 		runArgs == "run -c config.json -D ." || runArgs == "-d . -f config.yaml"
 }
+
+var (
+	mihomoControllerRegex  = regexp.MustCompile(`(?mi)^\s*external-controller:\s*['"]?([^'"\s]+)['"]?`)
+	mihomoSecretRegex      = regexp.MustCompile(`(?mi)^\s*secret:\s*['"]?([^'"#\r\n]*)['"]?`)
+	singboxControllerRegex = regexp.MustCompile(`"external_controller"\s*:\s*"([^"]+)"`)
+	singboxSecretRegex     = regexp.MustCompile(`"secret"\s*:\s*"([^"]*)"`)
+)
+
+func (s *CoreService) extractClashAPIFromConfig(config *CoreConfig) {
+	defaultHost := "127.0.0.1"
+	defaultPort := "9090"
+	defaultSecret := ""
+
+	configPath := config.ConfigPath
+	if configPath == "" || !fileExists(configPath) {
+		config.ClashAPIHost = defaultHost
+		config.ClashAPIPort = defaultPort
+		config.ClashAPISecret = defaultSecret
+		config.ClashAPIURL = fmt.Sprintf("http://%s:%s", defaultHost, defaultPort)
+		return
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil || len(data) == 0 {
+		config.ClashAPIHost = defaultHost
+		config.ClashAPIPort = defaultPort
+		config.ClashAPISecret = defaultSecret
+		config.ClashAPIURL = fmt.Sprintf("http://%s:%s", defaultHost, defaultPort)
+		return
+	}
+
+	var rawController, rawSecret string
+
+	if normalizedCoreType(config.CoreType) == coreTypeMihomo {
+		if match := mihomoControllerRegex.FindSubmatch(data); len(match) > 1 {
+			rawController = strings.TrimSpace(string(match[1]))
+		}
+		if match := mihomoSecretRegex.FindSubmatch(data); len(match) > 1 {
+			rawSecret = strings.TrimSpace(string(match[1]))
+		}
+	} else {
+		type singboxClashAPI struct {
+			Experimental struct {
+				ClashAPI struct {
+					ExternalController string `json:"external_controller"`
+					Secret             string `json:"secret"`
+				} `json:"clash_api"`
+			} `json:"experimental"`
+		}
+		var parsed singboxClashAPI
+		if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr == nil {
+			rawController = strings.TrimSpace(parsed.Experimental.ClashAPI.ExternalController)
+			rawSecret = strings.TrimSpace(parsed.Experimental.ClashAPI.Secret)
+		} else {
+			if match := singboxControllerRegex.FindSubmatch(data); len(match) > 1 {
+				rawController = strings.TrimSpace(string(match[1]))
+			}
+			if match := singboxSecretRegex.FindSubmatch(data); len(match) > 1 {
+				rawSecret = strings.TrimSpace(string(match[1]))
+			}
+		}
+	}
+
+	host := defaultHost
+	port := defaultPort
+
+	if rawController != "" {
+		if strings.Contains(rawController, ":") {
+			h, p, splitErr := net.SplitHostPort(rawController)
+			if splitErr == nil {
+				if h != "" && h != "0.0.0.0" && h != "::" {
+					host = h
+				}
+				if p != "" {
+					port = p
+				}
+			} else {
+				parts := strings.Split(rawController, ":")
+				if len(parts) == 2 {
+					if parts[0] != "" && parts[0] != "0.0.0.0" && parts[0] != "::" {
+						host = parts[0]
+					}
+					if parts[1] != "" {
+						port = parts[1]
+					}
+				}
+			}
+		} else {
+			port = rawController
+		}
+	}
+
+	config.ClashAPIHost = host
+	config.ClashAPIPort = port
+	config.ClashAPISecret = rawSecret
+	config.ClashAPIURL = fmt.Sprintf("http://%s:%s", host, port)
+}
+

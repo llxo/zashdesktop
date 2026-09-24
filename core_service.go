@@ -61,6 +61,10 @@ type CoreConfig struct {
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
 	StopCoreOnExit    bool   `json:"stopCoreOnExit"`
+	ClashAPIURL       string `json:"clashApiUrl"`
+	ClashAPIHost      string `json:"clashApiHost"`
+	ClashAPIPort      string `json:"clashApiPort"`
+	ClashAPISecret    string `json:"clashApiSecret"`
 }
 
 type coreVersionCacheItem struct {
@@ -82,15 +86,18 @@ type CoreService struct {
 	process            *exec.Cmd
 	processDone        chan struct{}
 	processCoreType    string
-	externalProcess    *os.Process
-	externalCoreType   string
+	// inheritedProcess: 上次应用退出时保留运行（stopCoreOnExit 为 false）的核心进程，新应用启动后接管
+	inheritedProcess   *os.Process
+	inheritedCoreType  string
 	stateLogged        bool
 	lastRunning        bool
 	lastPID            int
-	trayAPIURL         string
-	trayAPISecret      string
-	keepCoreOnShutdown bool
-	onStateChange      func()
+	runningClashAPIURL    string
+	runningClashAPIHost   string
+	runningClashAPIPort   string
+	runningClashAPISecret string
+	keepCoreOnShutdown    bool
+	onStateChange         func()
 	stoppingPids       map[int]bool
 	coreLogError       map[string]bool
 
@@ -479,27 +486,6 @@ func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, auto
 	return config, nil
 }
 
-func (s *CoreService) SetTrayAPI(rawURL, rawSecret string) error {
-	normalizedURL, err := normalizeTrayAPIURL(rawURL)
-	if err != nil {
-		debugLogf("tray", "set tray API invalid url %q: %v", rawURL, err)
-		return err
-	}
-	secret := strings.TrimSpace(rawSecret)
-
-	s.mu.Lock()
-	changed := s.trayAPIURL != normalizedURL || s.trayAPISecret != secret
-	s.trayAPIURL = normalizedURL
-	s.trayAPISecret = secret
-	s.mu.Unlock()
-
-	if changed {
-		debugLogf("tray", "set tray API updated: url=%s hasSecret=%t", normalizedURL, secret != "")
-		s.notifyStateChange()
-	}
-	return nil
-}
-
 func (s *CoreService) StartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
@@ -514,9 +500,9 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	s.detectAnyExternalProcessLocked()
-	if s.externalProcess != nil {
-		return CoreConfig{}, fmt.Errorf("%s core is already running (PID %d)", s.externalCoreType, s.externalProcess.Pid)
+	s.detectAnyInheritedProcessLocked()
+	if s.inheritedProcess != nil {
+		return CoreConfig{}, fmt.Errorf("%s core is already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
 	}
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -599,6 +585,11 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	s.processDone = done
 	s.processCoreType = coreType
 	s.coreLogError[config.CoreType] = false
+	s.extractClashAPIFromConfig(&config)
+	s.runningClashAPIURL = config.ClashAPIURL
+	s.runningClashAPIHost = config.ClashAPIHost
+	s.runningClashAPIPort = config.ClashAPIPort
+	s.runningClashAPISecret = config.ClashAPISecret
 	go s.waitForCore(command, logFile, done, config.CoreType, isPanelStart)
 
 	go func(appPath string) {
@@ -644,7 +635,7 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 		return CoreConfig{}, err
 	}
 	s.mu.Lock()
-	s.detectAnyExternalProcessLocked()
+	s.detectAnyInheritedProcessLocked()
 	managedProcessAlive := false
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -662,8 +653,8 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 		s.mu.Unlock()
 		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
 	}
-	if s.externalProcess != nil && s.externalCoreType != coreType {
-		runningCoreType := s.externalCoreType
+	if s.inheritedProcess != nil && s.inheritedCoreType != coreType {
+		runningCoreType := s.inheritedCoreType
 		s.mu.Unlock()
 		return CoreConfig{}, fmt.Errorf("%s core is already running", runningCoreType)
 	}
@@ -690,16 +681,16 @@ func (s *CoreService) stopCoreProcess() error {
 	s.mu.Lock()
 	process := s.process
 	done := s.processDone
-	external := s.externalProcess
+	inherited := s.inheritedProcess
 	s.mu.Unlock()
-	if process == nil && external == nil {
+	if process == nil && inherited == nil {
 		coreDebugf("stop request: no core process")
 		return nil
 	}
 	if process != nil {
 		return s.stopManagedProcess(process, done)
 	}
-	return s.stopExternalProcess(external)
+	return s.stopInheritedProcess(inherited)
 }
 
 func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) error {
@@ -766,36 +757,36 @@ func (s *CoreService) stopManagedProcess(process *exec.Cmd, done chan struct{}) 
 	}
 }
 
-func (s *CoreService) stopExternalProcess(process *os.Process) error {
+func (s *CoreService) stopInheritedProcess(process *os.Process) error {
 	if process == nil {
 		return nil
 	}
 	alive, statusErr := coreProcessAlive(process)
-	coreDebugf("stop external request: pid=%d alive=%t checkErr=%v", process.Pid, alive, statusErr)
+	coreDebugf("stop inherited request: pid=%d alive=%t checkErr=%v", process.Pid, alive, statusErr)
 	if statusErr == nil && !alive {
-		s.clearExternalProcess(process)
+		s.clearInheritedProcess(process)
 		return nil
 	}
 	if err := requestCoreStop(process); err != nil {
-		coreDebugf("external graceful stop signal failed: pid=%d err=%v", process.Pid, err)
+		coreDebugf("inherited graceful stop signal failed: pid=%d err=%v", process.Pid, err)
 	} else {
-		coreDebugf("external graceful stop signal sent: pid=%d", process.Pid)
+		coreDebugf("inherited graceful stop signal sent: pid=%d", process.Pid)
 	}
 	if waitErr := waitForCoreProcessExit(process, 5*time.Second); waitErr == nil {
-		coreDebugf("external core exited after graceful stop: pid=%d", process.Pid)
-		s.clearExternalProcess(process)
+		coreDebugf("inherited core exited after graceful stop: pid=%d", process.Pid)
+		s.clearInheritedProcess(process)
 		return nil
 	}
 
-	coreDebugf("external graceful stop timed out, forcing kill: pid=%d", process.Pid)
+	coreDebugf("inherited graceful stop timed out, forcing kill: pid=%d", process.Pid)
 	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return fmt.Errorf("stop external core: %w", err)
+		return fmt.Errorf("stop inherited core: %w", err)
 	}
 	if err := waitForCoreProcessExit(process, 5*time.Second); err != nil {
-		coreDebugf("external core stop timed out: pid=%d", process.Pid)
+		coreDebugf("inherited core stop timed out: pid=%d", process.Pid)
 		return err
 	}
-	s.clearExternalProcess(process)
+	s.clearInheritedProcess(process)
 	return nil
 }
 
@@ -814,18 +805,24 @@ func waitForCoreProcessExit(process *os.Process, timeout time.Duration) error {
 		}
 		select {
 		case <-deadline.C:
-			return errors.New("timed out waiting for external core to stop")
+			return errors.New("timed out waiting for inherited core to stop")
 		case <-ticker.C:
 		}
 	}
 }
 
-func (s *CoreService) clearExternalProcess(process *os.Process) {
+func (s *CoreService) clearInheritedProcess(process *os.Process) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.externalProcess == process {
-		s.externalProcess = nil
-		s.externalCoreType = ""
+	if s.inheritedProcess == process {
+		s.inheritedProcess = nil
+		s.inheritedCoreType = ""
+		if s.process == nil {
+			s.runningClashAPIURL = ""
+			s.runningClashAPIHost = ""
+			s.runningClashAPIPort = ""
+			s.runningClashAPISecret = ""
+		}
 	}
 }
 
@@ -853,6 +850,10 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 		s.process = nil
 		s.processDone = nil
 		s.processCoreType = ""
+		s.runningClashAPIURL = ""
+		s.runningClashAPIHost = ""
+		s.runningClashAPIPort = ""
+		s.runningClashAPISecret = ""
 	}
 
 	if !wasStopping && isPanelStart {
@@ -867,7 +868,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 
 func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.CoreType = normalizedCoreType(config.CoreType)
-	s.detectExternalProcessLocked(config.CoreType)
+	s.detectInheritedProcessLocked(config.CoreType)
 	config.Running = false
 	config.PID = 0
 	config.LogPath = s.logFilePath(config.CoreType)
@@ -884,16 +885,16 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 		}
 		config.Running = err == nil && alive
 	}
-	if !config.Running && s.externalProcess != nil && s.externalCoreType == config.CoreType {
-		alive, err := coreProcessAlive(s.externalProcess)
+	if !config.Running && s.inheritedProcess != nil && s.inheritedCoreType == config.CoreType {
+		alive, err := coreProcessAlive(s.inheritedProcess)
 		if err != nil {
-			coreDebugf("external runtime status check failed: pid=%d err=%v", s.externalProcess.Pid, err)
+			coreDebugf("inherited runtime status check failed: pid=%d err=%v", s.inheritedProcess.Pid, err)
 		} else if alive {
 			config.Running = true
-			config.PID = s.externalProcess.Pid
+			config.PID = s.inheritedProcess.Pid
 		} else {
-			s.externalProcess = nil
-			s.externalCoreType = ""
+			s.inheritedProcess = nil
+			s.inheritedCoreType = ""
 		}
 	}
 	if config.Running && s.process != nil && s.processCoreType == config.CoreType {
@@ -907,20 +908,37 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 		s.lastRunning = config.Running
 		s.lastPID = config.PID
 	}
+	if config.Running {
+		config.ClashAPIURL = s.runningClashAPIURL
+		config.ClashAPIHost = s.runningClashAPIHost
+		config.ClashAPIPort = s.runningClashAPIPort
+		config.ClashAPISecret = s.runningClashAPISecret
+	} else {
+		config.ClashAPIURL = ""
+		config.ClashAPIHost = ""
+		config.ClashAPIPort = ""
+		config.ClashAPISecret = ""
+	}
 }
 
-func (s *CoreService) detectExternalProcessLocked(coreType string) {
+func (s *CoreService) detectInheritedProcessLocked(coreType string) {
 	if s.process != nil {
 		return
 	}
-	if s.externalProcess != nil {
-		alive, err := coreProcessAlive(s.externalProcess)
+	if s.inheritedProcess != nil {
+		alive, err := coreProcessAlive(s.inheritedProcess)
 		if err == nil && alive {
 			return
 		}
-		coreDebugf("external core process no longer available: pid=%d err=%v", s.externalProcess.Pid, err)
-		s.externalProcess = nil
-		s.externalCoreType = ""
+		coreDebugf("inherited core process no longer available: pid=%d err=%v", s.inheritedProcess.Pid, err)
+		s.inheritedProcess = nil
+		s.inheritedCoreType = ""
+		if s.process == nil {
+			s.runningClashAPIURL = ""
+			s.runningClashAPIHost = ""
+			s.runningClashAPIPort = ""
+			s.runningClashAPISecret = ""
+		}
 	}
 	channel := coreChannelStable
 	if s.cachedProfiles != nil {
@@ -928,25 +946,34 @@ func (s *CoreService) detectExternalProcessLocked(coreType string) {
 			channel = p.Channel
 		}
 	}
-	process, err := findExternalCoreProcess(coreType, s.corePathFor(coreType, channel))
+	process, err := findInheritedCoreProcess(coreType, s.corePathFor(coreType, channel))
 	if err != nil {
-		coreDebugf("external core detection failed: type=%s err=%v", coreType, err)
+		coreDebugf("inherited core detection failed: type=%s err=%v", coreType, err)
 		return
 	}
 	if process != nil {
-		s.externalProcess = process
-		s.externalCoreType = coreType
-		coreDebugf("external core process detected: type=%s pid=%d", coreType, process.Pid)
+		s.inheritedProcess = process
+		s.inheritedCoreType = coreType
+		coreDebugf("inherited core process detected: type=%s pid=%d", coreType, process.Pid)
+		if s.runningClashAPIURL == "" {
+			if cfg, err := s.loadConfigForTypeLocked(coreType); err == nil {
+				s.extractClashAPIFromConfig(&cfg)
+				s.runningClashAPIURL = cfg.ClashAPIURL
+				s.runningClashAPIHost = cfg.ClashAPIHost
+				s.runningClashAPIPort = cfg.ClashAPIPort
+				s.runningClashAPISecret = cfg.ClashAPISecret
+			}
+		}
 	}
 }
 
-func (s *CoreService) detectAnyExternalProcessLocked() {
+func (s *CoreService) detectAnyInheritedProcessLocked() {
 	if s.process != nil {
 		return
 	}
-	s.detectExternalProcessLocked(coreTypeSingBox)
-	if s.externalProcess == nil {
-		s.detectExternalProcessLocked(coreTypeMihomo)
+	s.detectInheritedProcessLocked(coreTypeSingBox)
+	if s.inheritedProcess == nil {
+		s.detectInheritedProcessLocked(coreTypeMihomo)
 	}
 }
 

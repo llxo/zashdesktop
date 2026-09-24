@@ -39,4 +39,8 @@ export interface CoreConfig {
     "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
     "stopCoreOnExit": boolean;
+    "clashApiUrl": string;
+    "clashApiHost": string;
+    "clashApiPort": string;
+    "clashApiSecret": string;
 }

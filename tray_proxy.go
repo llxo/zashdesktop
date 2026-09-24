@@ -438,7 +438,7 @@ func setTrayProxyAuthorization(request *http.Request, secret string) {
 func (a *App) trayAPIURL() string {
 	if a.coreService != nil {
 		a.coreService.mu.Lock()
-		apiURL := a.coreService.trayAPIURL
+		apiURL := a.coreService.runningClashAPIURL
 		a.coreService.mu.Unlock()
 		if apiURL != "" {
 			return apiURL
@@ -450,23 +450,11 @@ func (a *App) trayAPIURL() string {
 func (a *App) trayAPISecret() string {
 	if a.coreService != nil {
 		a.coreService.mu.Lock()
-		secret := a.coreService.trayAPISecret
+		secret := a.coreService.runningClashAPISecret
 		a.coreService.mu.Unlock()
 		if secret != "" {
 			return secret
 		}
 	}
 	return a.launch.APISecret
-}
-
-func normalizeTrayAPIURL(rawURL string) (string, error) {
-	trimmed := strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	if trimmed == "" {
-		return defaultTrayAPIURL, nil
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", fmt.Errorf("请输入有效的托盘 API 地址")
-	}
-	return trimmed, nil
 }

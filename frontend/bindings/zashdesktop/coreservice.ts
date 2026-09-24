@@ -101,10 +101,6 @@ export function SelectConfigFile(rawFileName: string, rawCoreType: string): $Can
     return $Call.ByID(1276464918, rawFileName, rawCoreType);
 }
 
-export function SetTrayAPI(rawURL: string, rawSecret: string): $CancellablePromise<void> {
-    return $Call.ByID(879970318, rawURL, rawSecret);
-}
-
 export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(879345873, rawArgs, rawCoreType);
 }

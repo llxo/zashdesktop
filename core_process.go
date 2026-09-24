@@ -54,7 +54,7 @@ func getProcessImagePath(pid uint32) (string, error) {
 	return windows.UTF16ToString(buf[:size]), nil
 }
 
-func findExternalCoreProcess(coreType, expectedPath string) (*os.Process, error) {
+func findInheritedCoreProcess(coreType, expectedPath string) (*os.Process, error) {
 	stableName := strings.ToLower(coreExecutableNameFor(coreType, coreChannelStable))
 	testName := strings.ToLower(coreExecutableNameFor(coreType, coreChannelTest))
 	expectedName := stableName
