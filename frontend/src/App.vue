@@ -152,21 +152,23 @@ const autoSwitchToURLBackendIfExists = () => {
 }
 
 let lastCoreRunning = false
+let lastCorePID = 0
 
 const checkRunningCore = async () => {
   try {
     const config = await CoreService.GetConfig()
     const isRunning = Boolean(config?.running && config.clashApiUrl)
+    const pid = config?.pid || 0
     if (isRunning) {
-      if (!lastCoreRunning) {
+      if (!lastCoreRunning || lastCorePID !== pid) {
         lastCoreRunning = true
-        const isManagedActive = syncManagedBackendFromCore(config)
-        if (isManagedActive) {
-          void startBackendSession()
-        }
+        lastCorePID = pid
+        syncManagedBackendFromCore(config)
+        void startBackendSession()
       }
     } else {
       lastCoreRunning = false
+      lastCorePID = 0
     }
   } catch (e) {
     console.error('Failed to check running core:', e)

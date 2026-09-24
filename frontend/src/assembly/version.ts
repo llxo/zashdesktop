@@ -103,18 +103,31 @@ const probeBackend = async (backend: Backend) => {
   const startAt = Date.now()
   let data
 
-  try {
-    ;({ data } = await fetchVersionAPI())
-  } catch (e) {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      ;({ data } = await fetchVersionAPI())
+      lastError = undefined
+      break
+    } catch (e) {
+      lastError = e
+      if (attempt < 2 && activeBackend.value?.uuid === backend.uuid) {
+        await new Promise((resolve) => setTimeout(resolve, 150))
+      }
+    }
+  }
+
+  if (lastError !== undefined) {
     if (activeBackend.value?.uuid === backend.uuid) {
       backendProbe.value = {
         uuid: backend.uuid,
         status: 'failed',
         latency: 0,
-        message: getRequestErrorMessage(e),
+        message: getRequestErrorMessage(lastError),
       }
     }
-    throw e
+    throw lastError
   }
 
   // 探测期间用户可能又切了后端,过期结果直接丢弃。

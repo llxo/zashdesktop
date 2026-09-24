@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -597,9 +598,36 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 		}
 	}(s.applicationPath)
 
+	if config.ClashAPIPort != "" {
+		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 2*time.Second, done)
+		debugLogf("core", "clash API port readiness check: host=%s port=%s ready=%t", config.ClashAPIHost, config.ClashAPIPort, ready)
+	}
+
 	s.applyRuntimeState(&config)
 	s.notifyStateChangeLocked()
 	return config, nil
+}
+
+func waitForPortReady(host, port string, timeout time.Duration, done chan struct{}) bool {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	target := net.JoinHostPort(host, port)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-done:
+			return false
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 func (s *CoreService) StopCore() (CoreConfig, error) {

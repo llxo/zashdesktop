@@ -1070,7 +1070,7 @@ const startCore = async () => {
     if (!next.running && next.coreLogError) {
       hasCoreLogError.value = true
     } else if (next.running && next.clashApiUrl) {
-      syncManagedBackendFromCore(next, true)
+      syncManagedBackendFromCore(next)
       void startBackendSession()
     }
   } catch (error) {
@@ -1114,7 +1114,7 @@ const restartCore = async () => {
     if (!next.running && next.coreLogError) {
       hasCoreLogError.value = true
     } else if (next.running && next.clashApiUrl) {
-      syncManagedBackendFromCore(next, true)
+      syncManagedBackendFromCore(next)
       void startBackendSession()
     }
   } catch (error) {

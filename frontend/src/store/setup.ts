@@ -175,17 +175,26 @@ export const removeBackend = (uuid: string) => {
   })
 }
 
-export const syncManagedBackendFromCore = (
-  coreConfig: {
-    clashApiHost?: string
-    clashApiPort?: string
-    clashApiSecret?: string
-  },
-  forceActivate = false,
-): boolean => {
+export const syncManagedBackendFromCore = (coreConfig: {
+  clashApiHost?: string
+  clashApiPort?: string
+  clashApiSecret?: string
+}) => {
   const host = coreConfig.clashApiHost || '127.0.0.1'
   const port = coreConfig.clashApiPort || '9090'
   const password = coreConfig.clashApiSecret || ''
+
+  const composed: Omit<Backend, 'uuid'> = {
+    type: 'clash',
+    protocol: 'http',
+    host,
+    port,
+    secondaryPath: '',
+    password,
+    label: MANAGED_BACKEND_LABEL,
+    disableUpgradeCore: false,
+    disableTunMode: false,
+  }
 
   // 1. 查找是否已有专属标签的后端
   let target = backendList.value.find((b) => b.label === MANAGED_BACKEND_LABEL)
@@ -200,48 +209,14 @@ export const syncManagedBackendFromCore = (
     }
   }
 
-  // 3. 如果依然没有，新建一个专属标签后端
+  // 3. 核心启动时调用保存配置（如同修改后端配置弹窗点击保存）并激活
   if (!target) {
-    const id = addBackend({
-      type: 'clash',
-      protocol: 'http',
-      host,
-      port,
-      secondaryPath: '',
-      password,
-      label: MANAGED_BACKEND_LABEL,
-    })
-    if (!activeUuid.value || forceActivate) {
-      setActiveBackend(id)
-      return true
-    }
-    return false
-  }
-
-  // 4. 检查是否需要更新（端口、密码、地址、标签等）
-  const needUpdate =
-    target.host !== host ||
-    target.port !== port ||
-    target.password !== password ||
-    target.label !== MANAGED_BACKEND_LABEL ||
-    target.type !== 'clash'
-
-  if (needUpdate) {
-    updateBackend(target.uuid, {
-      ...target,
-      host,
-      port,
-      password,
-      label: MANAGED_BACKEND_LABEL,
-      type: 'clash',
-    })
-  }
-
-  // 5. 确保如果当前没有激活的后端，或者当前处于专属后端，激活它
-  if (!activeUuid.value || activeUuid.value === target.uuid || forceActivate) {
+    const id = addBackend(composed)
+    setActiveBackend(id)
+  } else {
+    updateBackend(target.uuid, composed)
     setActiveBackend(target.uuid)
-    return true
   }
-  return false
 }
+
 
