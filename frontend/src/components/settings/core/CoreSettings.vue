@@ -760,10 +760,9 @@ const isDownloading = ref(false)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const isRestarting = ref(false)
-const hasCoreLogError = ref(false)
 const isOpeningLog = ref(false)
 const showCoreLogError = computed(
-  () => !config.running && (hasCoreLogError.value || Boolean(config.coreLogError)),
+  () => !config.running && Boolean(config.coreLogError),
 )
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
@@ -816,6 +815,7 @@ const isCoreMaintenanceBusy = computed(
   () => isDownloading.value,
 )
 let refreshRequest = 0
+let appliedRequestId = 0
 let checkSequence = 0
 type ConfigRequest = { id: number; coreType: CoreType; allowCoreTypeChange: boolean }
 const beginConfigRequest = (allowCoreTypeChange = false): ConfigRequest => {
@@ -825,9 +825,10 @@ const beginConfigRequest = (allowCoreTypeChange = false): ConfigRequest => {
 const isCurrentConfigRequest = (request: ConfigRequest) =>
   request.id === refreshRequest && request.coreType === coreType.value
 const applyCurrentConfig = (request: ConfigRequest, next: CoreConfig, forceDrafts = false) => {
-  if (!isCurrentConfigRequest(request)) return false
+  if (request.id < appliedRequestId) return false
   const responseCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
   if (!request.allowCoreTypeChange && responseCoreType !== request.coreType) return false
+  appliedRequestId = request.id
   applyConfig(next, forceDrafts)
   return true
 }
@@ -1056,7 +1057,6 @@ const saveRunArgs = async () => {
 const startCore = async () => {
   if (isStarting.value || config.running) return
   isStarting.value = true
-  hasCoreLogError.value = false
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('runArgs')
   try {
@@ -1065,14 +1065,13 @@ const startCore = async () => {
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
     if (!next.running && next.coreLogError) {
-      hasCoreLogError.value = true
+      showNotification({ content: t('coreStartFailed'), type: 'alert-error', timeout: 5000 })
     } else if (next.running && next.clashApiUrl) {
       syncManagedBackendFromCore(next)
       void startBackendSession()
     }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
-      hasCoreLogError.value = true
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
@@ -1083,7 +1082,6 @@ const startCore = async () => {
 const stopCore = async () => {
   if (isStopping.value || !config.running) return
   isStopping.value = true
-  hasCoreLogError.value = false
   const request = beginConfigRequest()
   try {
     const next = await CoreService.StopCore()
@@ -1102,7 +1100,6 @@ const stopCore = async () => {
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
-  hasCoreLogError.value = false
   const request = beginConfigRequest()
   const draftRevision = beginDraftSave('runArgs')
   try {
@@ -1111,14 +1108,13 @@ const restartCore = async () => {
     commitDraftSave('runArgs', draftRevision)
     applyCurrentConfig(request, next)
     if (!next.running && next.coreLogError) {
-      hasCoreLogError.value = true
+      showNotification({ content: t('coreStartFailed'), type: 'alert-error', timeout: 5000 })
     } else if (next.running && next.clashApiUrl) {
       syncManagedBackendFromCore(next)
       void startBackendSession()
     }
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
-      hasCoreLogError.value = true
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
@@ -1208,9 +1204,7 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
     }
     return false
   } finally {
-    if (isCurrentConfigRequest(request)) {
-      isRefreshing.value = false
-    }
+    isRefreshing.value = false
   }
 }
 
@@ -1391,27 +1385,16 @@ let stateChangeTimer: ReturnType<typeof setTimeout> | undefined
 const handleCoreStateChanged = () => {
   if (stateChangeTimer) {
     clearTimeout(stateChangeTimer)
+  }
+  stateChangeTimer = setTimeout(() => {
     stateChangeTimer = undefined
-  }
-  if (isConfigMutationPending.value) {
-    stateChangeTimer = setTimeout(() => {
-      stateChangeTimer = undefined
-      if (!isConfigMutationPending.value) {
-        void loadConfig()
-      }
-    }, 150)
-    return
-  }
-  if (!isRefreshing.value) {
     void loadConfig()
-  }
+  }, 50)
 }
 
 const handleVisibilityChange = () => {
   if (!document.hidden) {
-    if (!isRefreshing.value && !isConfigMutationPending.value) {
-      void loadConfig()
-    }
+    void loadConfig()
   }
 }
 
@@ -1426,7 +1409,6 @@ watch(
     availableConfigFiles.value = []
     activeConfigFile.value = ''
     canUndoDelete.value = false
-    hasCoreLogError.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
     resetDraft('runArgs')
     resetDraft('configURL')

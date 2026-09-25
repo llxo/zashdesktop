@@ -691,6 +691,7 @@ const zhTW: LANG_MESSAGE = {
   coreStop: '停止',
   coreRestart: '重啟',
   coreOpenLog: '開啟日誌',
+  coreStartFailed: '核心啟動失敗，請開啟日誌檢視',
   coreConfigURLPlaceholder: '貼上設定檔下載網址',
   downloadConfig: '下載',
   coreConfig: '設定檔',

@@ -599,7 +599,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	}(s.applicationPath)
 
 	if config.ClashAPIPort != "" {
-		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 2*time.Second, done)
+		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 300*time.Millisecond, done)
 		debugLogf("core", "clash API port readiness check: host=%s port=%s ready=%t", config.ClashAPIHost, config.ClashAPIPort, ready)
 	}
 
@@ -625,7 +625,11 @@ func waitForPortReady(host, port string, timeout time.Duration, done chan struct
 			_ = conn.Close()
 			return true
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-done:
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	return false
 }
