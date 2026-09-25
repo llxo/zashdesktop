@@ -13,9 +13,22 @@
     >
       <ProxiesCtrl />
       <FolderTopBar v-if="foldersUiVisible" />
+      <!-- 加载中状态 -->
+      <div
+        v-if="isInitialLoading"
+        class="flex flex-col items-center justify-center p-6 text-center"
+        style="min-height: 50vh;"
+      >
+        <div class="flex flex-col items-center gap-3">
+          <span class="loading loading-spinner loading-md text-primary"></span>
+          <span class="text-base-content/60 text-xs">
+            {{ $t('backendConnecting') }}
+          </span>
+        </div>
+      </div>
       <!-- 空状态引导 -->
       <div
-        v-if="!isInitialLoading && renderPageItems.length === 0"
+        v-else-if="renderPageItems.length === 0"
         class="flex flex-col items-center justify-center p-6 text-center"
         style="min-height: 50vh;"
       >
@@ -83,6 +96,7 @@
 
 <script setup lang="ts">
 import { fetchProxies, proxiesTabShow } from '@/assembly/proxies'
+import { backendProbe } from '@/assembly/version'
 import ProxiesCtrl from '@/components/controls/ProxiesCtrl'
 import FolderManagerPanel from '@/components/proxies/folders/FolderManagerPanel.vue'
 import FolderTopBar from '@/components/proxies/folders/FolderTopBar.vue'
@@ -174,7 +188,27 @@ watch(
   },
 )
 
+let fallbackTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(
+  () => backendProbe.value?.status,
+  async (status) => {
+    if (status === 'connected') {
+      try {
+        await fetchProxies()
+      } finally {
+        isInitialLoading.value = false
+        if (fallbackTimer) clearTimeout(fallbackTimer)
+      }
+    }
+  },
+)
+
 onMounted(() => {
+  fallbackTimer = setTimeout(() => {
+    isInitialLoading.value = false
+  }, 1500)
+
   setTimeout(async () => {
     isProxiesPageMounted.value = true
     nextTick(() => {
@@ -182,8 +216,12 @@ onMounted(() => {
     })
     try {
       await fetchProxies()
-    } finally {
-      isInitialLoading.value = false
+      if (renderPageItems.value.length > 0) {
+        isInitialLoading.value = false
+        clearTimeout(fallbackTimer)
+      }
+    } catch {
+      // 冷启动时内核尚在拉起，静默保持 loading 态，等待 core 就绪事件触发拉取
     }
   })
 })
