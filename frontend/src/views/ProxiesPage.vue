@@ -177,37 +177,35 @@ watch(proxiesTabShow, () =>
 )
 
 isProxiesPageMounted.value = false
-const isInitialLoading = ref(renderProxiesPageItems.value.length === 0)
+const isInitialLoading = ref(
+  renderProxiesPageItems.value.length === 0 && backendProbe.value?.status !== 'failed',
+)
+
+const finishLoading = () => {
+  isInitialLoading.value = false
+  if (fallbackTimer) clearTimeout(fallbackTimer)
+}
 
 watch(
   () => renderPageItems.value.length,
   (len) => {
-    if (len > 0) {
-      isInitialLoading.value = false
-    }
+    if (len > 0) finishLoading()
   },
 )
 
 let fallbackTimer: ReturnType<typeof setTimeout> | undefined
 
+// 探测态变化只决定是否继续展示 loading；
+// 数据拉取由 session 层的 startBackendSession 统一驱动,此处不重复调用 fetchProxies。
 watch(
   () => backendProbe.value?.status,
-  async (status) => {
-    if (status === 'connected') {
-      try {
-        await fetchProxies()
-      } finally {
-        isInitialLoading.value = false
-        if (fallbackTimer) clearTimeout(fallbackTimer)
-      }
-    }
+  (status) => {
+    if (status === 'failed') finishLoading()
   },
 )
 
 onMounted(() => {
-  fallbackTimer = setTimeout(() => {
-    isInitialLoading.value = false
-  }, 1500)
+  fallbackTimer = setTimeout(finishLoading, 1500)
 
   setTimeout(async () => {
     isProxiesPageMounted.value = true
@@ -216,12 +214,10 @@ onMounted(() => {
     })
     try {
       await fetchProxies()
-      if (renderPageItems.value.length > 0) {
-        isInitialLoading.value = false
-        clearTimeout(fallbackTimer)
-      }
+      if (renderPageItems.value.length > 0) finishLoading()
     } catch {
-      // 冷启动时内核尚在拉起，静默保持 loading 态，等待 core 就绪事件触发拉取
+      // 冷启动时内核尚在拉起，静默保持 loading 态，等待 core 就绪事件触发拉取；若已确认断开则直接解除
+      if (backendProbe.value?.status === 'failed') finishLoading()
     }
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 后端会话(内核探测 + 首屏数据 + 常驻流)自己跟着 activeBackend 走,
 // 这里只需保证模块被加载,不依赖任何页面挂载。
-import { startBackendSession } from './assembly/session'
+import { startBackendSession, stopBackendSession } from './assembly/session'
 import { computed, onMounted, onUnmounted, ref, type Ref, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { Events } from '@wailsio/runtime'
@@ -167,6 +167,9 @@ const checkRunningCore = async () => {
         void startBackendSession()
       }
     } else {
+      if (lastCoreRunning) {
+        stopBackendSession()
+      }
       lastCoreRunning = false
       lastCorePID = 0
     }

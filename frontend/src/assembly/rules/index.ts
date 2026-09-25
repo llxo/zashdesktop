@@ -39,6 +39,11 @@ export const renderRulesProvider = computed(() => {
 
 const load = () => (channel.value === Channel.Singbox ? import('./singbox') : import('./clash'))
 
+export const resetRules = () => {
+  rules.value = []
+  ruleProviderList.value = []
+}
+
 export const fetchRules = async () => (await load()).fetchRules()
 
 // 规则启用切换在 Clash 通道上有两套端点:sing-box 的规则带稳定 uuid(PUT /rules/{uuid}),

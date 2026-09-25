@@ -16,10 +16,36 @@ import { watch } from 'vue'
 import { fetchConfigs } from './config'
 import { initLogs, stopLogs } from './logs'
 import { fetchProxies, proxiesTabShow, resetProxies } from './proxies'
-import { fetchRules, rulesTabShow } from './rules'
-import { probeActiveBackend } from './version'
+import { fetchRules, resetRules, rulesTabShow } from './rules'
+import { backendProbe, probeActiveBackend } from './version'
 
 let generation = 0
+
+// 三条常驻流 + 代理/规则状态的统一拆卸。
+// stop 与 start 共用,避免停流序列散落两处。
+const teardownStreams = () => {
+  stopConnections()
+  stopLogs()
+  stopSatistic()
+  resetRules()
+}
+
+// 桌面端核心停止或连接明确断开时立即调用：
+// 递增 generation 废止在途旧会话，立即切断常驻流并清空数据，
+// 同步将探测态标为 failed，绝不向关闭的端口发起无谓的网络连接与重连循环。
+export const stopBackendSession = () => {
+  ++generation
+  teardownStreams()
+  void resetProxies()
+  if (activeBackend.value) {
+    backendProbe.value = {
+      uuid: activeBackend.value.uuid,
+      status: 'failed',
+      latency: 0,
+      message: 'Core stopped',
+    }
+  }
+}
 
 export const startBackendSession = async () => {
   const current = ++generation
@@ -30,9 +56,7 @@ export const startBackendSession = async () => {
   // watcher,它一让出执行权(await),组件就会带着「新后端 + 旧后端的数据」重绘一帧。
   // 连接尤其致命 —— 字段访问器按当前后端路由,形状对不上会直接把渲染打崩
   // (详见 store/connections 的注释);日志与统计则是安静地冒充新后端的数据。
-  stopConnections()
-  stopLogs()
-  stopSatistic()
+  teardownStreams()
   await resetProxies()
 
   if (current !== generation) return

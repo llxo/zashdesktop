@@ -571,7 +571,7 @@ import type { AppUpdateInfo, CoreConfig } from '../../../../bindings/zashdesktop
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
 import { syncManagedBackendFromCore } from '@/store/setup'
-import { startBackendSession } from '@/assembly/session'
+import { startBackendSession, stopBackendSession } from '@/assembly/session'
 import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
@@ -1087,7 +1087,9 @@ const stopCore = async () => {
   const request = beginConfigRequest()
   try {
     const next = await CoreService.StopCore()
+    if (!isCurrentConfigRequest(request)) return
     applyCurrentConfig(request, next)
+    stopBackendSession()
   } catch (error) {
     if (isCurrentConfigRequest(request)) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })

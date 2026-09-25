@@ -172,8 +172,11 @@ export const proxyGroupLatencyTest = async (proxyGroupName: string) =>
 
 export const allProxiesLatencyTest = async () => (await load()).allProxiesLatencyTest()
 
-// 后端切换 / 登出时丢弃 sing-box 订阅(clash 无需处理)。
+// 后端切换 / 登出 / 核心停止时清空代理状态并丢弃 sing-box 订阅。
 export const resetProxies = async () => {
+  proxyGroupList.value = []
+  proxyMap.value = {}
+  proxyProviederList.value = []
   const m = await import('./singbox')
   m.resetProxies()
 }
