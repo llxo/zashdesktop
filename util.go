@@ -90,7 +90,7 @@ func (s *CoreService) backendDebugLogPath() string {
 func validateHTTPURL(rawURL, label string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return fmt.Errorf("请输入有效的 HTTP(S) %s", label)
+		return fmt.Errorf("please enter a valid HTTP(S) %s", label)
 	}
 	return nil
 }
@@ -115,7 +115,7 @@ func parseCoreCommandLine(input string) ([]string, error) {
 		char := input[index]
 		switch {
 		case char == 0:
-			return nil, errors.New("命令行参数包含无效字符")
+			return nil, errors.New("command line arguments contain invalid characters")
 		case char == '\\' && index+1 < len(input) && input[index+1] == '"' && !inSingleQuote:
 			current.WriteByte('"')
 			tokenStarted = true
@@ -139,7 +139,7 @@ func parseCoreCommandLine(input string) ([]string, error) {
 	}
 
 	if inSingleQuote || inDoubleQuote {
-		return nil, errors.New("命令行参数包含未闭合的引号")
+		return nil, errors.New("command line arguments contain unclosed quotes")
 	}
 	flush()
 	return args, nil

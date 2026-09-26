@@ -243,7 +243,7 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	privileged, err := isPrivileged()
 	if err != nil || !privileged {
 		debugLogf("system", "write auto start setting failed: administrator privilege required (err=%v)", err)
-		return errors.New("需要管理员权限才能配置自启动任务")
+		return errors.New("administrator privileges required to configure startup task")
 	}
 
 	var args []string

@@ -51,7 +51,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		return CoreConfig{}, err
 	}
 	rawURL = strings.TrimSpace(rawURL)
-	if err := validateHTTPURL(rawURL, "配置下载地址"); err != nil {
+	if err := validateHTTPURL(rawURL, "config download URL"); err != nil {
 		debugLogf("config", "download config invalid URL %q: %v", rawURL, err)
 		return CoreConfig{}, err
 	}
@@ -91,7 +91,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 	contentType := strings.ToLower(response.Header.Get("Content-Type"))
 	if strings.Contains(contentType, "text/html") {
 		debugLogf("config", "download config failed: server returned HTML content-type %q (likely challenge, login, or error page)", contentType)
-		return CoreConfig{}, fmt.Errorf("订阅下载失败: 服务端返回了网页内容 (%s)，可能是防爬验证、登录或错误页面", contentType)
+		return CoreConfig{}, fmt.Errorf("subscription download failed: server returned webpage (%s), possibly anti-bot verification or login page", contentType)
 	}
 
 	if response.ContentLength > maxCoreConfig {
@@ -142,19 +142,19 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 
 func validateConfigFileContent(data []byte, coreType, fileName string) error {
 	if len(data) == 0 {
-		return fmt.Errorf("%s 配置文件内容为空", coreType)
+		return fmt.Errorf("%s configuration content is empty", coreType)
 	}
 	if len(data) > maxCoreConfig {
-		return fmt.Errorf("%s 配置文件大小超过上限 (%d 字节)", coreType, maxCoreConfig)
+		return fmt.Errorf("%s configuration size exceeds limit (%d bytes)", coreType, maxCoreConfig)
 	}
 	if bytes.IndexByte(data, 0) != -1 {
-		return errors.New("配置文件包含二进制字符，非有效文本配置")
+		return errors.New("configuration contains binary characters, not valid text")
 	}
 
 	trimmed := strings.TrimSpace(string(data))
 	lowerTrimmed := strings.ToLower(trimmed)
 	if strings.HasPrefix(lowerTrimmed, "<!doctype html") || strings.HasPrefix(lowerTrimmed, "<html") {
-		return errors.New("配置内容为 HTML 网页，非有效内核配置")
+		return errors.New("configuration content is an HTML webpage, not valid core config")
 	}
 
 	normCore := normalizedCoreType(coreType)
@@ -162,11 +162,11 @@ func validateConfigFileContent(data []byte, coreType, fileName string) error {
 
 	if normCore == coreTypeSingBox || ext == ".json" {
 		if !json.Valid(data) {
-			return errors.New("配置内容不是有效的 JSON 格式，请检查配置或订阅链接是否适用于 Sing-box")
+			return errors.New("configuration content is not valid JSON format, please verify subscription for Sing-box")
 		}
 	} else if normCore == coreTypeMihomo || ext == ".yaml" || ext == ".yml" {
 		if !strings.Contains(trimmed, ":") {
-			return errors.New("配置内容不是有效的 YAML 格式（未检测到键值对冒号，可能是原始节点串或非配置内容）")
+			return errors.New("configuration content is not valid YAML format (no key-value colon detected)")
 		}
 	}
 
@@ -287,11 +287,11 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 	fileName := strings.TrimSpace(rawFileName)
 	if fileName == "" {
 		debugLogf("config", "select config file failed: empty fileName")
-		return CoreConfig{}, errors.New("请选择配置文件")
+		return CoreConfig{}, errors.New("please select a configuration file")
 	}
 	if fileName != filepath.Base(fileName) || strings.ContainsAny(fileName, `<>:"/\|?*`) {
 		debugLogf("config", "select config file failed: invalid fileName %q", fileName)
-		return CoreConfig{}, errors.New("配置文件名无效")
+		return CoreConfig{}, errors.New("invalid configuration file name")
 	}
 
 	s.mu.Lock()
@@ -327,11 +327,11 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 	fileName := strings.TrimSpace(rawFileName)
 	if fileName == "" {
 		coreDebugf("delete config file failed: empty fileName")
-		return CoreConfig{}, errors.New("请选择要删除的配置文件")
+		return CoreConfig{}, errors.New("please select a configuration file to delete")
 	}
 	if fileName != filepath.Base(fileName) || strings.ContainsAny(fileName, `<>:"/\|?*`) {
 		coreDebugf("delete config file failed: invalid fileName=%q", fileName)
-		return CoreConfig{}, errors.New("配置文件名无效")
+		return CoreConfig{}, errors.New("invalid configuration file name")
 	}
 
 	s.mu.Lock()
@@ -351,7 +351,7 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 	content, readErr := os.ReadFile(filePath)
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		coreDebugf("delete config file failed: type=%s name=%q err=%v", coreType, fileName, err)
-		return CoreConfig{}, fmt.Errorf("删除配置文件失败: %w", err)
+		return CoreConfig{}, fmt.Errorf("failed to delete configuration file: %w", err)
 	}
 
 	if s.lastDeletedFiles == nil {
@@ -416,22 +416,22 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 	}
 
 	if s.lastDeletedFiles == nil {
-		return CoreConfig{}, errors.New("没有可撤销删除的配置文件")
+		return CoreConfig{}, errors.New("no deleted configuration file available to undo")
 	}
 	deleted, ok := s.lastDeletedFiles[coreType]
 	if !ok || len(deleted.Content) == 0 {
-		return CoreConfig{}, errors.New("没有可撤销删除的配置文件")
+		return CoreConfig{}, errors.New("no deleted configuration file available to undo")
 	}
 
 	dir := s.coreDirFor(coreType)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		coreDebugf("undo delete create dir failed: type=%s err=%v", coreType, err)
-		return CoreConfig{}, fmt.Errorf("创建核心目录失败: %w", err)
+		return CoreConfig{}, fmt.Errorf("failed to create core directory: %w", err)
 	}
 	filePath := filepath.Join(dir, deleted.FileName)
 	if err := writeFileAtomically(filePath, deleted.Content, 0o600); err != nil {
 		coreDebugf("undo delete write file failed: type=%s name=%q err=%v", coreType, deleted.FileName, err)
-		return CoreConfig{}, fmt.Errorf("恢复配置文件失败: %w", err)
+		return CoreConfig{}, fmt.Errorf("failed to restore configuration file: %w", err)
 	}
 	delete(s.lastDeletedFiles, coreType)
 	coreDebugf("undo delete success: type=%s name=%q", coreType, deleted.FileName)
@@ -470,23 +470,23 @@ func defaultConfigFileName(coreType string) string {
 func normalizeConfigFileName(rawFileName, coreType string) (string, error) {
 	fileName := strings.TrimSpace(rawFileName)
 	if fileName == "" {
-		return "", errors.New("请输入配置文件名")
+		return "", errors.New("please enter configuration file name")
 	}
 	if fileName != filepath.Base(fileName) || strings.ContainsAny(fileName, `<>:"/\|?*`) {
-		return "", errors.New("配置文件名不能包含路径或特殊字符")
+		return "", errors.New("configuration file name cannot contain path or special characters")
 	}
 	for _, character := range fileName {
 		if character < 0x20 {
-			return "", errors.New("配置文件名不能包含控制字符")
+			return "", errors.New("configuration file name cannot contain control characters")
 		}
 	}
 	extension := strings.ToLower(filepath.Ext(fileName))
 	if normalizedCoreType(coreType) == coreTypeMihomo {
 		if extension != ".yaml" && extension != ".yml" {
-			return "", errors.New("mihomo 配置文件名必须以 .yaml 或 .yml 结尾")
+			return "", errors.New("mihomo configuration file must end with .yaml or .yml")
 		}
 	} else if extension != ".json" {
-		return "", errors.New("sing-box 配置文件名必须以 .json 结尾")
+		return "", errors.New("sing-box configuration file must end with .json")
 	}
 	return fileName, nil
 }

@@ -114,7 +114,7 @@ func fetchLatestAppRelease(client *http.Client) (appReleaseTarget, error) {
 
 	if binaryAsset == nil {
 		debugLogf("update", "no windows amd64 binary asset found in release %s", release.TagName)
-		return appReleaseTarget{}, errors.New("GitHub release 中未找到 Windows x64 可执行文件")
+		return appReleaseTarget{}, errors.New("windows x64 executable not found in GitHub release")
 	}
 
 	return appReleaseTarget{
@@ -156,7 +156,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	if s.isUpdatingApp {
 		s.appUpdateMu.Unlock()
 		debugLogf("update", "install app update skipped: update already in progress")
-		return errors.New("更新正在进行中，请稍候")
+		return errors.New("update in progress, please wait")
 	}
 	s.isUpdatingApp = true
 	s.appUpdateMu.Unlock()
@@ -202,7 +202,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	executable, exeDir, err := executablePathAndDir()
 	if err != nil {
 		debugLogf("update", "locate executable failed: %v", err)
-		return fmt.Errorf("无法定位程序路径: %w", err)
+		return fmt.Errorf("unable to locate application path: %w", err)
 	}
 	exeBase := filepath.Base(executable)
 
@@ -210,7 +210,7 @@ func (s *CoreService) InstallAppUpdate() error {
 	tempFile, err := os.CreateTemp(exeDir, fmt.Sprintf(".%s-update-*.tmp", exeBase))
 	if err != nil {
 		debugLogf("update", "create temp file in %q failed: %v", exeDir, err)
-		return fmt.Errorf("创建临时更新文件失败（请确认是否具有写入权限）: %w", err)
+		return fmt.Errorf("failed to create temp update file (please check write permissions): %w", err)
 	}
 	tempFilePath := tempFile.Name()
 	keepTempFile := false
@@ -226,20 +226,20 @@ func (s *CoreService) InstallAppUpdate() error {
 	downloadReq, err := http.NewRequest(http.MethodGet, binaryAsset.BrowserDownloadURL, nil)
 	if err != nil {
 		debugLogf("update", "create download request failed: %v", err)
-		return fmt.Errorf("创建下载请求失败: %w", err)
+		return fmt.Errorf("failed to create download request: %w", err)
 	}
 	downloadReq.Header.Set("User-Agent", "zashdesktop")
 
 	downloadResp, err := downloadClient.Do(downloadReq)
 	if err != nil {
 		debugLogf("update", "download update binary failed: %v", err)
-		return fmt.Errorf("下载安装包失败: %w", err)
+		return fmt.Errorf("failed to download update package: %w", err)
 	}
 	defer downloadResp.Body.Close()
 
 	if downloadResp.StatusCode < http.StatusOK || downloadResp.StatusCode >= http.StatusMultipleChoices {
 		debugLogf("update", "download update binary server returned status %s", downloadResp.Status)
-		return fmt.Errorf("下载安装包失败: 服务器返回 %s", downloadResp.Status)
+		return fmt.Errorf("failed to download update package: server returned %s", downloadResp.Status)
 	}
 
 	hasher := sha256.New()
@@ -248,22 +248,22 @@ func (s *CoreService) InstallAppUpdate() error {
 	n, err := io.Copy(writer, io.LimitReader(downloadResp.Body, maxAppBinaryDownload))
 	if err != nil {
 		debugLogf("update", "save downloaded binary failed: %v", err)
-		return fmt.Errorf("写入更新文件失败: %w", err)
+		return fmt.Errorf("failed to write update file: %w", err)
 	}
 	if n == 0 {
 		debugLogf("update", "downloaded binary is empty")
-		return errors.New("下载的更新文件为空")
+		return errors.New("downloaded update file is empty")
 	}
 
 	if err := tempFile.Close(); err != nil {
 		debugLogf("update", "close temp update file failed: %v", err)
-		return fmt.Errorf("保存更新文件失败: %w", err)
+		return fmt.Errorf("failed to save update file: %w", err)
 	}
 
 	actualSHA := hex.EncodeToString(hasher.Sum(nil))
 	if expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
 		debugLogf("update", "SHA256 checksum mismatch: expected=%s actual=%s", expectedSHA, actualSHA)
-		return fmt.Errorf("SHA256 校验失败: 期望 %s, 实际 %s", expectedSHA, actualSHA)
+		return fmt.Errorf("SHA256 checksum mismatch: expected %s, actual %s", expectedSHA, actualSHA)
 	}
 	debugLogf("update", "binary downloaded and verified successfully (bytes=%d, sha256=%s)", n, actualSHA)
 
@@ -273,14 +273,14 @@ func (s *CoreService) InstallAppUpdate() error {
 
 	if err := os.Rename(executable, oldExePath); err != nil {
 		debugLogf("update", "rename %q to %q failed: %v", executable, oldExePath, err)
-		return fmt.Errorf("备份当前可执行文件失败: %w", err)
+		return fmt.Errorf("failed to backup current executable: %w", err)
 	}
 
 	// Rename temp file to target executable
 	if err := os.Rename(tempFilePath, executable); err != nil {
 		debugLogf("update", "rename %q to %q failed: %v, rolling back", tempFilePath, executable, err)
 		_ = os.Rename(oldExePath, executable) // rollback
-		return fmt.Errorf("替换程序文件失败: %w", err)
+		return fmt.Errorf("failed to replace executable file: %w", err)
 	}
 	keepTempFile = true
 	debugLogf("update", "executable successfully replaced: %s", executable)

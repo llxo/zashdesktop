@@ -564,7 +564,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 		return CoreConfig{}, err
 	}
 	if len(args) == 0 {
-		return CoreConfig{}, fmt.Errorf("请输入 %s 命令行参数", config.CoreType)
+		return CoreConfig{}, fmt.Errorf("please enter %s command line arguments", config.CoreType)
 	}
 	coreDebugf("start request accepted: type=%s path=%q args=%d config=%t panelStart=%t", config.CoreType, s.corePathFor(config.CoreType, config.Channel), len(args), fileExists(s.configFilePath(config)), isPanelStart)
 
@@ -1081,7 +1081,7 @@ func (s *CoreService) OpenCoreLog(rawCoreType string) error {
 	s.mu.Unlock()
 
 	if !fileExists(logPath) {
-		return fmt.Errorf("日志文件不存在: %s", logPath)
+		return fmt.Errorf("log file does not exist: %s", logPath)
 	}
 
 	verb, _ := windows.UTF16PtrFromString("open")
@@ -1098,7 +1098,7 @@ func (s *CoreService) OpenCoreLog(rawCoreType string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		debugLogf("core", "open core log failed: %v", err)
-		return fmt.Errorf("打开日志文件失败: %w", err)
+		return fmt.Errorf("failed to open log file: %w", err)
 	}
 	debugLogf("core", "opened core log via cmd fallback: %s", logPath)
 	return nil

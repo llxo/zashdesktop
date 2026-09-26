@@ -355,7 +355,7 @@ func normalizeCoreChannel(raw string) (string, error) {
 	case coreChannelTest:
 		return coreChannelTest, nil
 	default:
-		return "", errors.New("核心渠道必须是稳定版或测试版")
+		return "", errors.New("core channel must be stable or test")
 	}
 }
 
@@ -381,14 +381,14 @@ func pathSegments(p string) []string {
 func githubRepository(template string) (string, string, error) {
 	parsedURL, err := url.Parse(template)
 	if err != nil || !strings.EqualFold(parsedURL.Hostname(), "github.com") {
-		return "", "", errors.New("核心地址必须来自 github.com")
+		return "", "", errors.New("core URL must be from github.com")
 	}
 	segments := pathSegments(parsedURL.Path)
 	if len(segments) < 5 || !strings.EqualFold(segments[2], "releases") || !strings.EqualFold(segments[3], "download") || (!strings.Contains(segments[4], "{version}") && !isCoreStaticReleaseTag(segments[4])) {
-		return "", "", errors.New("核心地址不是有效的 GitHub Release 通用地址")
+		return "", "", errors.New("core URL is not a valid GitHub release URL")
 	}
 	if segments[0] == "" || segments[1] == "" {
-		return "", "", errors.New("无法识别 GitHub 仓库")
+		return "", "", errors.New("unable to identify GitHub repository")
 	}
 	return segments[0], segments[1], nil
 }
@@ -815,7 +815,7 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {
-		return CoreConfig{}, "", "", errors.New("无法确定要下载的核心版本")
+		return CoreConfig{}, "", "", errors.New("unable to determine core version to download")
 	}
 
 	downloadURL := strings.ReplaceAll(downloadURLTemplate, "{version}", targetVersion)
