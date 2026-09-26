@@ -739,6 +739,15 @@ const zh = {
   undo: '撤销',
   noProxies: '暂无节点',
   noProxiesDesc: '未获取到任何代理节点或策略组。',
+  invalidConfigURL: '请输入有效的 HTTP(S) 下载链接',
+  configContentEmpty: '配置文件内容不能为空',
+  configContentTooLarge: '配置文件大小不能超过 20MB',
+  configNameRequired: '请输入配置文件名',
+  configNameInvalidChars: '配置文件名不能包含路径或特殊字符',
+  configExtMihomo: 'mihomo 配置文件名必须以 .yaml 或 .yml 结尾',
+  configExtSingbox: 'sing-box 配置文件名必须以 .json 结尾',
+  runArgsUnclosedQuote: '命令行参数包含未闭合的引号',
+  adminPrivilegeRequired: '需要管理员权限才能配置自启动任务',
 }
 
 export default zh

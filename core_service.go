@@ -517,8 +517,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	}
 	s.detectAnyInheritedProcessLocked()
 	if s.inheritedProcess != nil {
-		coreDebugf("start request rejected: inherited %s core already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		coreDebugf("start request skipped: inherited %s core already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
+		return CoreConfig{}, nil
 	}
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -531,8 +531,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 			if runningCoreType == "" {
 				runningCoreType = coreTypeSingBox
 			}
-			coreDebugf("start request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
-			return CoreConfig{}, errors.New("coreAlreadyRunning")
+			coreDebugf("start request skipped: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
+			return CoreConfig{}, nil
 		}
 	}
 	if s.process != nil && s.processDone == nil {
@@ -540,8 +540,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 		if runningCoreType == "" {
 			runningCoreType = coreTypeSingBox
 		}
-		coreDebugf("start request rejected: %s core already running (undone)", runningCoreType)
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		coreDebugf("start request skipped: %s core already running (undone)", runningCoreType)
+		return CoreConfig{}, nil
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -712,15 +712,15 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 		if runningCoreType == "" {
 			runningCoreType = coreTypeSingBox
 		}
-		coreDebugf("restart request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
+		coreDebugf("restart request skipped: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, nil
 	}
 	if s.inheritedProcess != nil && s.inheritedCoreType != coreType {
 		runningCoreType := s.inheritedCoreType
-		coreDebugf("restart request rejected: inherited %s core already running (PID %d)", runningCoreType, s.inheritedProcess.Pid)
+		coreDebugf("restart request skipped: inherited %s core already running (PID %d)", runningCoreType, s.inheritedProcess.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, nil
 	}
 	s.mu.Unlock()
 	if err := s.stopCoreProcess(); err != nil {

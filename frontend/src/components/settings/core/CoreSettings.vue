@@ -271,7 +271,7 @@
               <button
                 class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 type="button"
-                :disabled="isDownloadingConfig || isImportingConfig || !configURLInput.trim() || !saveTargetFileName.trim()"
+                :disabled="isDownloadingConfig || isImportingConfig"
                 @click="downloadConfig"
               >
                 <span
@@ -287,7 +287,7 @@
               <button
                 class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 type="button"
-                :disabled="isDownloadingConfig || isImportingConfig || !saveTargetFileName.trim()"
+                :disabled="isDownloadingConfig || isImportingConfig"
                 @click="openConfigFilePicker"
               >
                 <span
@@ -425,20 +425,20 @@
               />
             </div>
           </label>
-          <label class="setting-item">
+          <div class="setting-item">
             <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
               {{ $t('coreAutoStart') }}
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="config.autoStart"
+                :checked="config.autoStart"
                 class="toggle"
                 type="checkbox"
-                :disabled="isSavingBehavior || !config.isAdmin"
-                @change="saveBehavior()"
+                :disabled="isSavingBehavior"
+                @click.prevent="onToggleAutoStart"
               />
             </div>
-          </label>
+          </div>
           <label class="setting-item">
             <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
               {{ $t('autoStartSingBox') }}
@@ -881,7 +881,11 @@ const scanConfigFiles = async (notify = false) => {
 }
 
 const handleSelectConfigFile = async () => {
-  if (isSelectingConfigFile.value || !activeConfigFile.value || config.running) return
+  if (isSelectingConfigFile.value || !activeConfigFile.value) return
+  if (config.running) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
   isSelectingConfigFile.value = true
   try {
     await runAction(() =>
@@ -906,10 +910,13 @@ const deleteActiveConfigFile = async () => {
   if (
     isDeletingConfigFile.value ||
     !activeConfigFile.value ||
-    config.running ||
     availableConfigFiles.value.length === 0
   )
     return
+  if (config.running) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
   isDeletingConfigFile.value = true
   try {
     const next = await runAction(() =>
@@ -926,7 +933,11 @@ const deleteActiveConfigFile = async () => {
 }
 
 const undoDeleteConfigFile = async () => {
-  if (isUndoingDelete.value || config.running || !canUndoDelete.value) return
+  if (isUndoingDelete.value || !canUndoDelete.value) return
+  if (config.running) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
   isUndoingDelete.value = true
   try {
     const next = await runAction(() =>
@@ -960,8 +971,56 @@ const saveChannel = async (rawChannel: string) => {
   void checkUpdate(false)
 }
 
+const validateConfigFileName = (fileName: string, type: CoreType): boolean => {
+  const name = fileName.trim()
+  if (!name) {
+    showNotification({ content: 'configNameRequired', type: 'alert-warning' })
+    return false
+  }
+  if (/[<>:"/\\|?*]/.test(name) || name.includes('/') || name.includes('\\')) {
+    showNotification({ content: 'configNameInvalidChars', type: 'alert-warning' })
+    return false
+  }
+  const lower = name.toLowerCase()
+  if (type === 'mihomo') {
+    if (!lower.endsWith('.yaml') && !lower.endsWith('.yml')) {
+      showNotification({ content: 'configExtMihomo', type: 'alert-warning' })
+      return false
+    }
+  } else if (type === 'sing-box') {
+    if (!lower.endsWith('.json')) {
+      showNotification({ content: 'configExtSingbox', type: 'alert-warning' })
+      return false
+    }
+  }
+  return true
+}
+
+const checkUnclosedQuotes = (args: string): boolean => {
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < args.length; i++) {
+    const ch = args[i]
+    if (ch === '\\' && i + 1 < args.length) {
+      i++
+      continue
+    }
+    if (ch === '\'' && !inDouble) inSingle = !inSingle
+    if (ch === '"' && !inSingle) inDouble = !inDouble
+  }
+  return inSingle || inDouble
+}
+
 const saveRunArgs = async () => {
-  if (isSavingRunArgs.value || config.running) return
+  if (isSavingRunArgs.value) return
+  if (config.running) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
+  if (checkUnclosedQuotes(runArgsInput.value)) {
+    showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
+    return
+  }
   isSavingRunArgs.value = true
   try {
     await runAction(() =>
@@ -990,7 +1049,15 @@ const handleCoreStartResult = (next: CoreConfig | null) => {
 }
 
 const startCore = async () => {
-  if (isStarting.value || config.running) return
+  if (isStarting.value) return
+  if (config.running) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
+  if (checkUnclosedQuotes(runArgsInput.value)) {
+    showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
+    return
+  }
   isStarting.value = true
   try {
     handleCoreStartResult(
@@ -1014,6 +1081,10 @@ const stopCore = async () => {
 
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
+  if (checkUnclosedQuotes(runArgsInput.value)) {
+    showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
+    return
+  }
   isRestarting.value = true
   try {
     handleCoreStartResult(
@@ -1037,18 +1108,20 @@ const openCoreLog = async () => {
 }
 
 const downloadConfig = async () => {
-  if (
-    isDownloadingConfig.value ||
-    isImportingConfig.value ||
-    !configURLInput.value.trim() ||
-    !saveTargetFileName.value.trim()
-  )
+  if (isDownloadingConfig.value || isImportingConfig.value) return
+  const rawURL = configURLInput.value.trim()
+  if (!/^https?:\/\//i.test(rawURL)) {
+    showNotification({ content: 'invalidConfigURL', type: 'alert-warning' })
     return
+  }
+  const targetFileName = saveTargetFileName.value.trim()
+  if (!validateConfigFileName(targetFileName, coreType.value)) {
+    return
+  }
   isDownloadingConfig.value = true
   try {
-    const targetFileName = saveTargetFileName.value.trim()
     await runAction(() =>
-      CoreService.DownloadConfig(configURLInput.value, targetFileName, coreType.value),
+      CoreService.DownloadConfig(rawURL, targetFileName, coreType.value),
     )
     isConfigURLDirty.value = false
     void scanConfigFiles(false)
@@ -1059,6 +1132,10 @@ const downloadConfig = async () => {
 }
 
 const openConfigFilePicker = () => {
+  const targetFileName = saveTargetFileName.value.trim()
+  if (!validateConfigFileName(targetFileName, coreType.value)) {
+    return
+  }
   configFileInput.value?.click()
 }
 
@@ -1066,10 +1143,27 @@ const importConfig = async (event: Event) => {
   const input = event.currentTarget as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+
+  if (file.size === 0) {
+    showNotification({ content: 'configContentEmpty', type: 'alert-warning' })
+    input.value = ''
+    return
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    showNotification({ content: 'configContentTooLarge', type: 'alert-warning' })
+    input.value = ''
+    return
+  }
+
+  const targetFileName = saveTargetFileName.value.trim()
+  if (!validateConfigFileName(targetFileName, coreType.value)) {
+    input.value = ''
+    return
+  }
+
   isImportingConfig.value = true
   try {
     const text = await file.text()
-    const targetFileName = saveTargetFileName.value.trim() || file.name
     await runAction(() =>
       CoreService.ImportConfig(text, targetFileName, coreType.value),
     )
@@ -1100,8 +1194,23 @@ const loadConfig = async (useActiveCore = false, forceInputs = false) => {
   }
 }
 
+const onToggleAutoStart = () => {
+  if (isSavingBehavior.value) return
+  if (!config.isAdmin) {
+    showNotification({ content: 'adminPrivilegeRequired', type: 'alert-warning' })
+    return
+  }
+  config.autoStart = !config.autoStart
+  void saveBehavior()
+}
+
 const saveBehavior = async (changedCoreType?: CoreType) => {
   if (isSavingBehavior.value) return
+  if (!config.isAdmin && config.autoStart) {
+    config.autoStart = false
+    showNotification({ content: 'adminPrivilegeRequired', type: 'alert-warning' })
+    return
+  }
   if (changedCoreType === 'sing-box' && config.autoStartSingBox) {
     config.autoStartMihomo = false
   } else if (changedCoreType === 'mihomo' && config.autoStartMihomo) {

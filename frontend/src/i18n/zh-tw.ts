@@ -731,6 +731,15 @@ const zhTW: LANG_MESSAGE = {
   undo: '復原',
   noProxies: '暫無節點',
   noProxiesDesc: '未取得任何代理節點或策略組。',
+  invalidConfigURL: '請輸入有效的 HTTP(S) 下載連結',
+  configContentEmpty: '設定檔內容不能為空',
+  configContentTooLarge: '設定檔大小不能超過 20MB',
+  configNameRequired: '請輸入設定檔名稱',
+  configNameInvalidChars: '設定檔名稱不能包含路徑或特殊字元',
+  configExtMihomo: 'mihomo 設定檔名稱必須以 .yaml 或 .yml 結尾',
+  configExtSingbox: 'sing-box 設定檔名稱必須以 .json 結尾',
+  runArgsUnclosedQuote: '命令列引數包含未閉合的引號',
+  adminPrivilegeRequired: '需要系統管理員權限才能設定開機自我啟動工作',
 }
 
 export default zhTW

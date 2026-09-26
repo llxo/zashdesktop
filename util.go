@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,14 +84,6 @@ func (s *CoreService) logFilePath(coreType string) string {
 
 func (s *CoreService) backendDebugLogPath() string {
 	return filepath.Join(s.executableDir, "debug.log")
-}
-
-func validateHTTPURL(rawURL, label string) error {
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return fmt.Errorf("please enter a valid HTTP(S) %s", label)
-	}
-	return nil
 }
 
 func parseCoreCommandLine(input string) ([]string, error) {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,15 +50,7 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		return CoreConfig{}, err
 	}
 	rawURL = strings.TrimSpace(rawURL)
-	if err := validateHTTPURL(rawURL, "config download URL"); err != nil {
-		debugLogf("config", "download config invalid URL %q: %v", rawURL, err)
-		return CoreConfig{}, err
-	}
-	targetFileName, err := normalizeConfigFileName(rawFileName, coreType)
-	if err != nil {
-		debugLogf("config", "download config invalid file name %q: %v", rawFileName, err)
-		return CoreConfig{}, err
-	}
+	targetFileName := normalizeConfigFileName(rawFileName, coreType)
 
 	ua := defaultUserAgentFor(coreType)
 	debugLogf("config", "downloading config from %s to %s for core %s (UA: %s)", rawURL, targetFileName, coreType, ua)
@@ -105,11 +96,6 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		return CoreConfig{}, fmt.Errorf("read %s config: %w", coreType, err)
 	}
 
-	if err := validateConfigFileContent(data, coreType, targetFileName); err != nil {
-		debugLogf("config", "downloaded config validation failed: %v", err)
-		return CoreConfig{}, err
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
@@ -140,55 +126,14 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 	return config, nil
 }
 
-func validateConfigFileContent(data []byte, coreType, fileName string) error {
-	if len(data) == 0 {
-		return fmt.Errorf("%s configuration content is empty", coreType)
-	}
-	if len(data) > maxCoreConfig {
-		return fmt.Errorf("%s configuration size exceeds limit (%d bytes)", coreType, maxCoreConfig)
-	}
-	if bytes.IndexByte(data, 0) != -1 {
-		return errors.New("configuration contains binary characters, not valid text")
-	}
-
-	trimmed := strings.TrimSpace(string(data))
-	lowerTrimmed := strings.ToLower(trimmed)
-	if strings.HasPrefix(lowerTrimmed, "<!doctype html") || strings.HasPrefix(lowerTrimmed, "<html") {
-		return errors.New("configuration content is an HTML webpage, not valid core config")
-	}
-
-	normCore := normalizedCoreType(coreType)
-	ext := strings.ToLower(filepath.Ext(fileName))
-
-	if normCore == coreTypeSingBox || ext == ".json" {
-		if !json.Valid(data) {
-			return errors.New("configuration content is not valid JSON format, please verify subscription for Sing-box")
-		}
-	} else if normCore == coreTypeMihomo || ext == ".yaml" || ext == ".yml" {
-		if !strings.Contains(trimmed, ":") {
-			return errors.New("configuration content is not valid YAML format (no key-value colon detected)")
-		}
-	}
-
-	return nil
-}
-
 func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		debugLogf("config", "import config failed: %v", err)
 		return CoreConfig{}, err
 	}
-	fileName, err := normalizeConfigFileName(filepath.Base(sourceFileName), coreType)
-	if err != nil {
-		debugLogf("config", "import config invalid filename %q: %v", sourceFileName, err)
-		return CoreConfig{}, err
-	}
+	fileName := normalizeConfigFileName(sourceFileName, coreType)
 	data := []byte(rawContent)
-	if err := validateConfigFileContent(data, coreType, fileName); err != nil {
-		debugLogf("config", "import config validation failed: %v", err)
-		return CoreConfig{}, err
-	}
 
 	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
@@ -222,18 +167,6 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 	s.applyRuntimeState(&config)
 	debugLogf("config", "import config success: type=%s file=%q size=%d (activeConfig=%q)", config.CoreType, targetPath, len(data), config.ConfigFileName)
 	return config, nil
-}
-
-func (s *CoreService) ensureCoreNotRunningLocked(coreType, actionName string) error {
-	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
-		debugLogf("config", "%s failed: core is currently running (managed pid=%d)", actionName, s.process.Process.Pid)
-		return errors.New("coreAlreadyRunning")
-	}
-	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
-		debugLogf("config", "%s failed: core is currently running (inherited pid=%d)", actionName, s.inheritedProcess.Pid)
-		return errors.New("coreAlreadyRunning")
-	}
-	return nil
 }
 
 func (s *CoreService) ListConfigFiles(rawCoreType string) ([]string, error) {
@@ -296,9 +229,6 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.ensureCoreNotRunningLocked(coreType, "select config file"); err != nil {
-		return CoreConfig{}, err
-	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
@@ -336,9 +266,6 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.ensureCoreNotRunningLocked(coreType, "delete config file"); err != nil {
-		return CoreConfig{}, err
-	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
@@ -406,9 +333,6 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.ensureCoreNotRunningLocked(coreType, "undo delete config file"); err != nil {
-		return CoreConfig{}, err
-	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
 	if err != nil {
@@ -467,28 +391,12 @@ func defaultConfigFileName(coreType string) string {
 	return defaultCoreConfigFile
 }
 
-func normalizeConfigFileName(rawFileName, coreType string) (string, error) {
-	fileName := strings.TrimSpace(rawFileName)
-	if fileName == "" {
-		return "", errors.New("please enter configuration file name")
+func normalizeConfigFileName(rawFileName, coreType string) string {
+	fileName := filepath.Base(strings.TrimSpace(rawFileName))
+	if fileName == "" || fileName == "." {
+		return defaultConfigFileName(coreType)
 	}
-	if fileName != filepath.Base(fileName) || strings.ContainsAny(fileName, `<>:"/\|?*`) {
-		return "", errors.New("configuration file name cannot contain path or special characters")
-	}
-	for _, character := range fileName {
-		if character < 0x20 {
-			return "", errors.New("configuration file name cannot contain control characters")
-		}
-	}
-	extension := strings.ToLower(filepath.Ext(fileName))
-	if normalizedCoreType(coreType) == coreTypeMihomo {
-		if extension != ".yaml" && extension != ".yml" {
-			return "", errors.New("mihomo configuration file must end with .yaml or .yml")
-		}
-	} else if extension != ".json" {
-		return "", errors.New("sing-box configuration file must end with .json")
-	}
-	return fileName, nil
+	return fileName
 }
 
 func updateRunArgsWithConfigFile(currentArgs, fileName, coreType string) string {

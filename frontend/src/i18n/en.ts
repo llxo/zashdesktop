@@ -745,6 +745,15 @@ const en = {
   undo: 'Undo',
   noProxies: 'No proxies',
   noProxiesDesc: 'No proxy nodes or strategy groups were found.',
+  invalidConfigURL: 'Please enter a valid HTTP(S) download URL',
+  configContentEmpty: 'Configuration content cannot be empty',
+  configContentTooLarge: 'Configuration file size cannot exceed 20MB',
+  configNameRequired: 'Please enter configuration file name',
+  configNameInvalidChars: 'Configuration file name cannot contain path or special characters',
+  configExtMihomo: 'mihomo configuration name must end with .yaml or .yml',
+  configExtSingbox: 'sing-box configuration name must end with .json',
+  runArgsUnclosedQuote: 'Command line arguments contain unclosed quotes',
+  adminPrivilegeRequired: 'Administrator privileges required to configure startup task',
 }
 
 export type LANG_MESSAGE = typeof en

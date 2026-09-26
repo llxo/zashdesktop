@@ -819,10 +819,6 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	}
 
 	downloadURL := strings.ReplaceAll(downloadURLTemplate, "{version}", targetVersion)
-	parsedURL, err := url.Parse(downloadURL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return CoreConfig{}, "", "", errors.New("core download URL is invalid")
-	}
 
 	expectedSHA256 := ""
 	if owner, repo, err := githubRepository(downloadURLTemplate); err == nil {

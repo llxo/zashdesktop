@@ -747,6 +747,15 @@ const ru: LANG_MESSAGE = {
   undo: 'Отменить',
   noProxies: 'Нет узлов',
   noProxiesDesc: 'Не найдено прокси-узлов или групп стратегий.',
+  invalidConfigURL: 'Введите корректную ссылку HTTP(S) для скачивания',
+  configContentEmpty: 'Содержимое конфигурации не может быть пустым',
+  configContentTooLarge: 'Размер файла конфигурации не может превышать 20 МБ',
+  configNameRequired: 'Введите имя файла конфигурации',
+  configNameInvalidChars: 'Имя файла не должно содержать пути или спецсимволы',
+  configExtMihomo: 'Имя файла конфигурации mihomo должно заканчиваться на .yaml или .yml',
+  configExtSingbox: 'Имя файла конфигурации sing-box должно заканчиваться на .json',
+  runArgsUnclosedQuote: 'Аргументы командной строки содержат незакрытые кавычки',
+  adminPrivilegeRequired: 'Требуются права администратора для настройки автозапуска',
 }
 
 export default ru

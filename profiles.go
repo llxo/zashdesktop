@@ -77,10 +77,7 @@ func (s *CoreService) profileItemToConfig(item persistedProfileItem, behavior sh
 	if channel == "" {
 		channel = coreChannelStable
 	}
-	configFileName, err := normalizeConfigFileName(item.ConfigFileName, coreType)
-	if err != nil {
-		configFileName = defaultConfigFileName(coreType)
-	}
+	configFileName := normalizeConfigFileName(item.ConfigFileName, coreType)
 	runArgs := strings.TrimSpace(item.RunArgs)
 	if runArgs == "" {
 		runArgs = defaultRunArgs(coreType)
@@ -113,10 +110,7 @@ func configToProfileItem(config CoreConfig) persistedProfileItem {
 	if channel == "" {
 		channel = coreChannelStable
 	}
-	configFileName, err := normalizeConfigFileName(config.ConfigFileName, coreType)
-	if err != nil {
-		configFileName = defaultConfigFileName(coreType)
-	}
+	configFileName := normalizeConfigFileName(config.ConfigFileName, coreType)
 	runArgs := strings.TrimSpace(config.RunArgs)
 	if runArgs == "" {
 		runArgs = defaultRunArgs(coreType)
@@ -382,9 +376,6 @@ func (s *CoreService) configCorruptedPath() string {
 }
 
 func (s *CoreService) configFilePath(config CoreConfig) string {
-	fileName, err := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
-	if err != nil {
-		fileName = defaultConfigFileName(config.CoreType)
-	}
+	fileName := normalizeConfigFileName(config.ConfigFileName, config.CoreType)
 	return filepath.Join(s.coreDirFor(config.CoreType), fileName)
 }
