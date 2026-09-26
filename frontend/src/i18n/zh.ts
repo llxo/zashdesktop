@@ -700,6 +700,7 @@ const zh = {
   coreRestart: '重启',
   coreOpenLog: '打开日志',
   coreStartFailed: '核心启动失败，请打开日志查看',
+  coreAlreadyRunning: '核心已在运行中',
   coreConfigURLPlaceholder: '粘贴配置下载地址',
   downloadConfig: '下载',
   coreConfig: '配置文件',

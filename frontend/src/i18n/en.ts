@@ -706,6 +706,7 @@ const en = {
   coreRestart: 'Restart',
   coreOpenLog: 'Open Log',
   coreStartFailed: 'Core failed to start, please check the log',
+  coreAlreadyRunning: 'Core is already running',
   coreConfigURLPlaceholder: 'Paste config download URL',
   downloadConfig: 'Download',
   coreConfig: 'Config files',

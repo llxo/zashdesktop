@@ -804,7 +804,12 @@ const runAction = async (
     return null
   } catch (error) {
     if (reqId === activeRequestId && targetCore === coreType.value) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+      const errStr = String(error)
+      if (errStr.includes('core is already running')) {
+        showNotification({ content: 'coreAlreadyRunning', type: 'alert-error' })
+      } else {
+        showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+      }
     }
     throw error
   }
