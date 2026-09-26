@@ -804,12 +804,7 @@ const runAction = async (
     return null
   } catch (error) {
     if (reqId === activeRequestId && targetCore === coreType.value) {
-      const errStr = String(error)
-      if (errStr.includes('core is already running')) {
-        showNotification({ content: 'coreAlreadyRunning', type: 'alert-error' })
-      } else {
-        showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-      }
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
     throw error
   }
@@ -986,7 +981,7 @@ const handleCoreStartResult = (next: CoreConfig | null) => {
   isRunArgsDirty.value = false
   if (next) {
     if (!next.running && next.coreLogError) {
-      showNotification({ content: t('coreStartFailed'), type: 'alert-error', timeout: 5000 })
+      showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     } else if (next.running && next.clashApiUrl) {
       syncManagedBackendFromCore(next)
       void startBackendSession()

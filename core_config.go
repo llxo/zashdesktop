@@ -227,11 +227,11 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 func (s *CoreService) ensureCoreNotRunningLocked(coreType, actionName string) error {
 	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
 		debugLogf("config", "%s failed: core is currently running (managed pid=%d)", actionName, s.process.Process.Pid)
-		return fmt.Errorf("%s core is already running", coreType)
+		return errors.New("coreAlreadyRunning")
 	}
 	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
 		debugLogf("config", "%s failed: core is currently running (inherited pid=%d)", actionName, s.inheritedProcess.Pid)
-		return fmt.Errorf("%s core is already running", coreType)
+		return errors.New("coreAlreadyRunning")
 	}
 	return nil
 }
