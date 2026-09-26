@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,18 @@ import (
 	"strings"
 	"time"
 )
+
+const (
+	defaultMihomoUserAgent  = "clash-verge/v2.4.6"
+	defaultSingboxUserAgent = "sing-box/1.14.1"
+)
+
+func defaultUserAgentFor(coreType string) string {
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		return defaultMihomoUserAgent
+	}
+	return defaultSingboxUserAgent
+}
 
 var (
 	singboxConfigArgPattern = regexp.MustCompile(`(?i)(^|\s)-c\s+("[^"]*"|'[^']*'|[^\s]+)`)
@@ -48,18 +61,39 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		return CoreConfig{}, err
 	}
 
-	debugLogf("config", "downloading config from %s to %s for core %s", rawURL, targetFileName, coreType)
+	ua := defaultUserAgentFor(coreType)
+	debugLogf("config", "downloading config from %s to %s for core %s (UA: %s)", rawURL, targetFileName, coreType, ua)
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		debugLogf("config", "create download request failed: %v", err)
+		return CoreConfig{}, fmt.Errorf("create download request: %w", err)
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "*/*")
+
 	client := newCoreHTTPClient(5 * time.Minute)
-	response, err := client.Get(rawURL)
+	response, err := client.Do(req)
 	if err != nil {
 		debugLogf("config", "download config request error: %v", err)
 		return CoreConfig{}, fmt.Errorf("download %s config: %w", coreType, err)
 	}
 	defer response.Body.Close()
+
+	if userInfo := response.Header.Get("subscription-userinfo"); userInfo != "" {
+		debugLogf("config", "subscription-userinfo received: %s", userInfo)
+	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		debugLogf("config", "download config server returned status %s", response.Status)
 		return CoreConfig{}, fmt.Errorf("download %s config: server returned %s", coreType, response.Status)
 	}
+
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "text/html") {
+		debugLogf("config", "download config failed: server returned HTML content-type %q (likely challenge, login, or error page)", contentType)
+		return CoreConfig{}, fmt.Errorf("订阅下载失败: 服务端返回了网页内容 (%s)，可能是防爬验证、登录或错误页面", contentType)
+	}
+
 	if response.ContentLength > maxCoreConfig {
 		debugLogf("config", "download config failed: content length %d exceeds max %d", response.ContentLength, maxCoreConfig)
 		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
@@ -70,13 +104,10 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		debugLogf("config", "read downloaded config body failed: %v", err)
 		return CoreConfig{}, fmt.Errorf("read %s config: %w", coreType, err)
 	}
-	if len(data) == 0 {
-		debugLogf("config", "downloaded config is empty")
-		return CoreConfig{}, fmt.Errorf("%s config is empty", coreType)
-	}
-	if len(data) > maxCoreConfig {
-		debugLogf("config", "downloaded config data exceeds limit (%d bytes)", len(data))
-		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
+
+	if err := validateConfigFileContent(data, coreType, targetFileName); err != nil {
+		debugLogf("config", "downloaded config validation failed: %v", err)
+		return CoreConfig{}, err
 	}
 
 	s.mu.Lock()
@@ -109,6 +140,39 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 	return config, nil
 }
 
+func validateConfigFileContent(data []byte, coreType, fileName string) error {
+	if len(data) == 0 {
+		return fmt.Errorf("%s 配置文件内容为空", coreType)
+	}
+	if len(data) > maxCoreConfig {
+		return fmt.Errorf("%s 配置文件大小超过上限 (%d 字节)", coreType, maxCoreConfig)
+	}
+	if bytes.IndexByte(data, 0) != -1 {
+		return errors.New("配置文件包含二进制字符，非有效文本配置")
+	}
+
+	trimmed := strings.TrimSpace(string(data))
+	lowerTrimmed := strings.ToLower(trimmed)
+	if strings.HasPrefix(lowerTrimmed, "<!doctype html") || strings.HasPrefix(lowerTrimmed, "<html") {
+		return errors.New("配置内容为 HTML 网页，非有效内核配置")
+	}
+
+	normCore := normalizedCoreType(coreType)
+	ext := strings.ToLower(filepath.Ext(fileName))
+
+	if normCore == coreTypeSingBox || ext == ".json" {
+		if !json.Valid(data) {
+			return errors.New("配置内容不是有效的 JSON 格式，请检查配置或订阅链接是否适用于 Sing-box")
+		}
+	} else if normCore == coreTypeMihomo || ext == ".yaml" || ext == ".yml" {
+		if !strings.Contains(trimmed, ":") {
+			return errors.New("配置内容不是有效的 YAML 格式（未检测到键值对冒号，可能是原始节点串或非配置内容）")
+		}
+	}
+
+	return nil
+}
+
 func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
@@ -121,13 +185,9 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		return CoreConfig{}, err
 	}
 	data := []byte(rawContent)
-	if len(data) == 0 {
-		debugLogf("config", "import config failed: content is empty")
-		return CoreConfig{}, fmt.Errorf("%s config is empty", coreType)
-	}
-	if len(data) > maxCoreConfig {
-		debugLogf("config", "import config failed: content exceeds limit (%d bytes)", len(data))
-		return CoreConfig{}, fmt.Errorf("%s config is too large", coreType)
+	if err := validateConfigFileContent(data, coreType, fileName); err != nil {
+		debugLogf("config", "import config validation failed: %v", err)
+		return CoreConfig{}, err
 	}
 
 	config, _, err := s.loadConfigSnapshot(coreType)
