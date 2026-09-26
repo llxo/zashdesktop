@@ -77,10 +77,6 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartSingBox: boolean, autoStartMihomo: boolean, stopCoreOnExit: boolean, backendDebugLog: boolean, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog, rawCoreType);
-}
-
 export function SaveConfigFileName(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3218160460, rawFileName, rawCoreType);
 }

@@ -46,20 +46,10 @@
         <div class="setting-item-label">
           {{ $t('fonts') }}
         </div>
-        <div class="join">
-          <FontSelector
-            class="join-item w-38!"
-            v-model:value="font"
-          />
-          <button
-            class="btn btn-sm join-item"
-            :title="$t('customFont')"
-            @click="customFontModal = !customFontModal"
-          >
-            <PencilSquareIcon class="h-4 w-4" />
-          </button>
-        </div>
-        <CustomFontModal v-model:value="customFontModal" />
+        <FontSelector
+          class="w-48"
+          v-model:value="font"
+        />
       </SettingItem>
       <SettingItem :setting-key="k.emoji">
         <div class="setting-item-label">Emoji</div>
@@ -80,16 +70,14 @@ import { useIsSettingVisible } from '@/composables/settings'
 import { GENERAL_ITEM_KEYS } from '@/config/settingsItems'
 import { EMOJIS } from '@/constant'
 import { autoTheme, darkTheme, defaultTheme, emoji, font } from '@/store/settings'
-import { PencilSquareIcon, PlusIcon } from '@heroicons/vue/24/outline'
+import { PlusIcon } from '@heroicons/vue/24/outline'
 import { computed, ref } from 'vue'
 import BackgroundSettings from './BackgroundSettings.vue'
-import CustomFontModal from './CustomFontModal.vue'
 import CustomTheme from './CustomTheme.vue'
 import FontSelector from './FontSelector.vue'
 import ThemeSelector from './ThemeSelector.vue'
 
 const customThemeModal = ref(false)
-const customFontModal = ref(false)
 
 const k = GENERAL_ITEM_KEYS
 const isVisibleFonts = useIsSettingVisible(k.fonts)
