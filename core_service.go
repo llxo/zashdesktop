@@ -376,7 +376,7 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 		config.RunArgs = defaultRunArgs(coreType)
 	}
 	config.CoreType = coreType
-	saved, err := s.commitConfigUpdate(config)
+	saved, err := s.commitConfigAndActivateUpdate(config)
 	if err != nil {
 		debugLogf("core", "save core type failed: %v", err)
 		return CoreConfig{}, err

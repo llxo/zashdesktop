@@ -570,8 +570,6 @@ import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { AppUpdateInfo, CoreConfig } from '../../../../bindings/zashdesktop/models'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import { showNotification } from '@/helper/notification'
-import { syncManagedBackendFromCore } from '@/store/setup'
-import { startBackendSession, stopBackendSession } from '@/assembly/session'
 import {
   ArrowDownCircleIcon,
   ArrowDownTrayIcon,
@@ -772,11 +770,11 @@ const installedVersionLabel = computed(() => {
 let activeRequestId = 0
 let checkSequence = 0
 
-const applyConfig = (next: CoreConfig, forceInputs = false) => {
+const applyConfig = (next: CoreConfig, forceInputs = false, allowTypeEmit = false) => {
   const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
   const coreChanged = nextCoreType !== props.coreType
   Object.assign(config, next)
-  if (coreChanged) emit('update:coreType', nextCoreType)
+  if (coreChanged && allowTypeEmit) emit('update:coreType', nextCoreType)
 
   if (forceInputs || coreChanged || !isRunArgsDirty.value) {
     runArgsInput.value = next.runArgs || ''
@@ -787,27 +785,6 @@ const applyConfig = (next: CoreConfig, forceInputs = false) => {
     isConfigURLDirty.value = false
   }
   syncActiveConfigFile()
-}
-
-const runAction = async (
-  action: () => Promise<CoreConfig>,
-  targetCore = coreType.value,
-  forceInputs = false,
-): Promise<CoreConfig | null> => {
-  const reqId = ++activeRequestId
-  try {
-    const next = await action()
-    if (reqId === activeRequestId && targetCore === coreType.value) {
-      applyConfig(next, forceInputs)
-      return next
-    }
-    return null
-  } catch (error) {
-    if (reqId === activeRequestId && targetCore === coreType.value) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
-    throw error
-  }
 }
 
 const sourceOptions = computed(() => builtInDownloadSources[coreType.value])
@@ -888,11 +865,10 @@ const handleSelectConfigFile = async () => {
   }
   isSelectingConfigFile.value = true
   try {
-    await runAction(() =>
-      CoreService.SelectConfigFile(activeConfigFile.value, coreType.value),
-    )
-  } catch {
+    await CoreService.SelectConfigFile(activeConfigFile.value, coreType.value)
+  } catch (error) {
     syncActiveConfigFile()
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSelectingConfigFile.value = false
   }
@@ -919,14 +895,12 @@ const deleteActiveConfigFile = async () => {
   }
   isDeletingConfigFile.value = true
   try {
-    const next = await runAction(() =>
-      CoreService.DeleteConfigFile(activeConfigFile.value, coreType.value),
-    )
-    if (next) {
-      canUndoDelete.value = true
-      showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
-      await scanConfigFiles(false)
-    }
+    await CoreService.DeleteConfigFile(activeConfigFile.value, coreType.value)
+    canUndoDelete.value = true
+    showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
+    await scanConfigFiles(false)
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isDeletingConfigFile.value = false
   }
@@ -940,16 +914,13 @@ const undoDeleteConfigFile = async () => {
   }
   isUndoingDelete.value = true
   try {
-    const next = await runAction(() =>
-      CoreService.UndoDeleteConfigFile(coreType.value),
-    )
-    if (next) {
-      canUndoDelete.value = false
-      showNotification({ content: 'coreConfigFileRestored', type: 'alert-success' })
-      await scanConfigFiles(false)
-    }
-  } catch {
+    await CoreService.UndoDeleteConfigFile(coreType.value)
+    canUndoDelete.value = false
+    showNotification({ content: 'coreConfigFileRestored', type: 'alert-success' })
+    await scanConfigFiles(false)
+  } catch (error) {
     await checkCanUndoDelete()
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isUndoingDelete.value = false
   }
@@ -959,12 +930,12 @@ const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
   try {
-    await runAction(() =>
-      CoreService.UpdateCoreSettings({
-        coreType: coreType.value,
-        channel: rawChannel,
-      }),
-    )
+    await CoreService.UpdateCoreSettings({
+      coreType: coreType.value,
+      channel: rawChannel,
+    })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSavingChannel.value = false
   }
@@ -1023,28 +994,16 @@ const saveRunArgs = async () => {
   }
   isSavingRunArgs.value = true
   try {
-    await runAction(() =>
-      CoreService.UpdateCoreSettings({
-        coreType: coreType.value,
-        runArgs: runArgsInput.value,
-      }),
-    )
+    await CoreService.UpdateCoreSettings({
+      coreType: coreType.value,
+      runArgs: runArgsInput.value,
+    })
     isRunArgsDirty.value = false
     syncActiveConfigFile()
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSavingRunArgs.value = false
-  }
-}
-
-const handleCoreStartResult = (next: CoreConfig | null) => {
-  isRunArgsDirty.value = false
-  if (next) {
-    if (!next.running && next.coreLogError) {
-      showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
-    } else if (next.running && next.clashApiUrl) {
-      syncManagedBackendFromCore(next)
-      void startBackendSession()
-    }
   }
 }
 
@@ -1060,9 +1019,13 @@ const startCore = async () => {
   }
   isStarting.value = true
   try {
-    handleCoreStartResult(
-      await runAction(() => CoreService.StartCore(runArgsInput.value, coreType.value)),
-    )
+    const next = await CoreService.StartCore(runArgsInput.value, coreType.value)
+    isRunArgsDirty.value = false
+    if (next && !next.running && next.coreLogError) {
+      showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
+    }
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isStarting.value = false
   }
@@ -1072,8 +1035,9 @@ const stopCore = async () => {
   if (isStopping.value || !config.running) return
   isStopping.value = true
   try {
-    await runAction(() => CoreService.StopCore())
-    stopBackendSession()
+    await CoreService.StopCore()
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isStopping.value = false
   }
@@ -1087,9 +1051,13 @@ const restartCore = async () => {
   }
   isRestarting.value = true
   try {
-    handleCoreStartResult(
-      await runAction(() => CoreService.RestartCore(runArgsInput.value, coreType.value)),
-    )
+    const next = await CoreService.RestartCore(runArgsInput.value, coreType.value)
+    isRunArgsDirty.value = false
+    if (next && !next.running && next.coreLogError) {
+      showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
+    }
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isRestarting.value = false
   }
@@ -1120,12 +1088,12 @@ const downloadConfig = async () => {
   }
   isDownloadingConfig.value = true
   try {
-    await runAction(() =>
-      CoreService.DownloadConfig(rawURL, targetFileName, coreType.value),
-    )
+    await CoreService.DownloadConfig(rawURL, targetFileName, coreType.value)
     isConfigURLDirty.value = false
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isDownloadingConfig.value = false
   }
@@ -1164,11 +1132,11 @@ const importConfig = async (event: Event) => {
   isImportingConfig.value = true
   try {
     const text = await file.text()
-    await runAction(() =>
-      CoreService.ImportConfig(text, targetFileName, coreType.value),
-    )
+    await CoreService.ImportConfig(text, targetFileName, coreType.value)
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isImportingConfig.value = false
     input.value = ''
@@ -1177,20 +1145,23 @@ const importConfig = async (event: Event) => {
 
 const loadConfig = async (useActiveCore = false, forceInputs = false) => {
   isRefreshing.value = true
+  const reqId = ++activeRequestId
+  const targetCore = coreType.value
   try {
-    const next = await runAction(
-      () =>
-        useActiveCore
-          ? CoreService.GetConfig()
-          : CoreService.GetConfigForType(coreType.value),
-      coreType.value,
-      forceInputs,
-    )
-    return Boolean(next)
+    const next = useActiveCore
+      ? await CoreService.GetConfig()
+      : await CoreService.GetConfigForType(targetCore)
+    if (reqId === activeRequestId && (useActiveCore || targetCore === coreType.value) && next) {
+      applyConfig(next, forceInputs, useActiveCore)
+      return true
+    }
+    return false
   } catch {
     return false
   } finally {
-    isRefreshing.value = false
+    if (reqId === activeRequestId) {
+      isRefreshing.value = false
+    }
   }
 }
 
@@ -1218,18 +1189,17 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
   isSavingBehavior.value = true
   try {
-    await runAction(() =>
-      CoreService.UpdateCoreSettings({
-        coreType: coreType.value,
-        runAsAdmin: config.runAsAdmin,
-        autoStart: config.autoStart,
-        autoStartSingBox: config.autoStartSingBox,
-        autoStartMihomo: config.autoStartMihomo,
-        stopCoreOnExit: config.stopCoreOnExit,
-        backendDebugLog: config.backendDebugLog,
-      }),
-    )
-  } catch {
+    await CoreService.UpdateCoreSettings({
+      coreType: coreType.value,
+      runAsAdmin: config.runAsAdmin,
+      autoStart: config.autoStart,
+      autoStartSingBox: config.autoStartSingBox,
+      autoStartMihomo: config.autoStartMihomo,
+      stopCoreOnExit: config.stopCoreOnExit,
+      backendDebugLog: config.backendDebugLog,
+    })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     await loadConfig(false, true)
   } finally {
     isSavingBehavior.value = false
@@ -1288,12 +1258,10 @@ const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
   try {
-    const next = await runAction(() =>
-      CoreService.DownloadCore(currentDownloadURL.value, coreType.value),
-    )
-    if (next) {
-      showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
-    }
+    await CoreService.DownloadCore(currentDownloadURL.value, coreType.value)
+    showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
+  } catch (error) {
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isDownloading.value = false
   }

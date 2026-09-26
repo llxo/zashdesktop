@@ -174,6 +174,18 @@ func (s *CoreService) commitConfigUpdate(config CoreConfig) (CoreConfig, error) 
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
+	s.notifyStateChangeLocked()
+	return config, nil
+}
+
+func (s *CoreService) commitConfigAndActivateUpdate(config CoreConfig) (CoreConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.saveConfigAndActivateLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	s.notifyStateChangeLocked()
 	return config, nil
 }
 

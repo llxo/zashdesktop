@@ -790,6 +790,8 @@ func (s *CoreService) DownloadCore(rawURL, rawCoreType string) (CoreConfig, erro
 		if err == nil {
 			config = restarted
 		}
+	} else if err == nil {
+		s.notifyStateChange()
 	}
 	return config, err
 }
