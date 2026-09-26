@@ -601,11 +601,24 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	if config.ClashAPIPort != "" {
 		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 300*time.Millisecond, done)
 		debugLogf("core", "clash API port readiness check: host=%s port=%s ready=%t", config.ClashAPIHost, config.ClashAPIPort, ready)
+		if !ready {
+			go s.pollPortReadyAsync(config.ClashAPIHost, config.ClashAPIPort, 5*time.Second, done)
+		}
 	}
 
 	s.applyRuntimeState(&config)
 	s.notifyStateChangeLocked()
 	return config, nil
+}
+
+func (s *CoreService) pollPortReadyAsync(host, port string, timeout time.Duration, done chan struct{}) {
+	ready := waitForPortReady(host, port, timeout, done)
+	if ready {
+		debugLogf("core", "clash API port became ready asynchronously: host=%s port=%s", host, port)
+		s.notifyStateChange()
+	} else {
+		debugLogf("core", "clash API port failed to become ready within %v: host=%s port=%s", timeout, host, port)
+	}
 }
 
 func waitForPortReady(host, port string, timeout time.Duration, done chan struct{}) bool {
