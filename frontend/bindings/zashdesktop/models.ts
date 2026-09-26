@@ -43,3 +43,15 @@ export interface CoreConfig {
     "clashApiPort": string;
     "clashApiSecret": string;
 }
+
+export interface CoreSettingsPatch {
+    "coreType": string;
+    "channel"?: string | null;
+    "runArgs"?: string | null;
+    "runAsAdmin"?: boolean | null;
+    "autoStart"?: boolean | null;
+    "autoStartSingBox"?: boolean | null;
+    "autoStartMihomo"?: boolean | null;
+    "stopCoreOnExit"?: boolean | null;
+    "backendDebugLog"?: boolean | null;
+}

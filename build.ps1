@@ -115,8 +115,8 @@ try {
             throw "Wails binding generation did not produce: $bindingPath"
         }
     }
-    if (-not (Select-String -LiteralPath $coreServiceBindingPath -Pattern "SaveBehavior" -SimpleMatch -Quiet)) {
-        throw "Generated CoreService binding is missing SaveBehavior: $coreServiceBindingPath"
+    if (-not (Select-String -LiteralPath $coreServiceBindingPath -Pattern "UpdateCoreSettings" -SimpleMatch -Quiet)) {
+        throw "Generated CoreService binding is missing UpdateCoreSettings: $coreServiceBindingPath"
     }
 
     Write-Host "Building frontend..."

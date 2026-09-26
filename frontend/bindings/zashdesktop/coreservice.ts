@@ -81,20 +81,12 @@ export function SaveBehavior(runAsAdmin: boolean, autoStart: boolean, autoStartS
     return $Call.ByID(872427917, runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog, rawCoreType);
 }
 
-export function SaveChannel(rawChannel: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(825658706, rawChannel, rawCoreType);
-}
-
 export function SaveConfigFileName(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3218160460, rawFileName, rawCoreType);
 }
 
 export function SaveCoreType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3983412536, rawCoreType);
-}
-
-export function SaveRunArgs(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(1182958737, rawArgs, rawCoreType);
 }
 
 export function SelectConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
@@ -111,4 +103,8 @@ export function StopCore(): $CancellablePromise<$models.CoreConfig> {
 
 export function UndoDeleteConfigFile(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(132981571, rawCoreType);
+}
+
+export function UpdateCoreSettings(patch: $models.CoreSettingsPatch): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(934907905, patch);
 }

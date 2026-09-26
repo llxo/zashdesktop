@@ -8,5 +8,6 @@ export {
 
 export type {
     AppUpdateInfo,
-    CoreConfig
+    CoreConfig,
+    CoreSettingsPatch
 } from "./models.js";

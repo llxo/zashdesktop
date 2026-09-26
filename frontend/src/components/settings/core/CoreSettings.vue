@@ -36,7 +36,7 @@
               :disabled="
                 config.running || isStarting || isStopping || isRestarting || isSavingRunArgs
               "
-              @input="touchDraft('runArgs')"
+              @input="isRunArgsDirty = true"
               @change="saveRunArgs"
               @keydown.enter.prevent="saveRunArgs"
             />
@@ -214,11 +214,11 @@
                 class="join-item btn btn-sm shrink-0 whitespace-nowrap"
                 :class="{ 'btn-primary': !config.installed || config.updateAvailable }"
                 type="button"
-                :disabled="isCoreMaintenanceBusy"
-                @click="maintainCore"
+                :disabled="isDownloading"
+                @click="downloadCore"
               >
                 <span
-                  v-if="isCoreMaintenanceBusy"
+                  v-if="isDownloading"
                   class="loading loading-spinner h-4 w-4"
                 ></span>
                 <ArrowDownCircleIcon
@@ -250,7 +250,7 @@
               :aria-label="$t('coreConfigURL')"
               :placeholder="$t('coreConfigURLPlaceholder')"
               :disabled="isDownloadingConfig || isImportingConfig"
-              @input="touchDraft('configURL')"
+              @input="isConfigURLDirty = true"
             />
           </div>
 
@@ -417,7 +417,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.runAsAdmin"
+                v-model="config.runAsAdmin"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior"
@@ -431,7 +431,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.autoStart"
+                v-model="config.autoStart"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior || !config.isAdmin"
@@ -445,7 +445,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.autoStartSingBox"
+                v-model="config.autoStartSingBox"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior"
@@ -459,7 +459,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.autoStartMihomo"
+                v-model="config.autoStartMihomo"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior"
@@ -473,7 +473,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.stopCoreOnExit"
+                v-model="config.stopCoreOnExit"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior"
@@ -487,7 +487,7 @@
             </span>
             <div class="flex flex-1 justify-end">
               <input
-                v-model="behaviorDraft.backendDebugLog"
+                v-model="config.backendDebugLog"
                 class="toggle"
                 type="checkbox"
                 :disabled="isSavingBehavior"
@@ -591,7 +591,6 @@ import { Events } from '@wailsio/runtime'
 type CoreType = 'sing-box' | 'mihomo'
 type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 type CoreChannel = 'stable' | 'test'
-type DraftKey = 'runArgs' | 'configURL' | 'behavior'
 
 type DownloadSource = {
   label: string
@@ -696,18 +695,11 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   clashApiPort: '9090',
   clashApiSecret: '',
 })
+
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
-// Polling replaces config every second. Editable controls must bind to drafts.
-const behaviorDraft = reactive({
-  runAsAdmin: false,
-  autoStart: false,
-  autoStartSingBox: false,
-  autoStartMihomo: false,
-  backendDebugLog: false,
-  stopCoreOnExit: true,
-})
 const coreType = computed(() => props.coreType)
 const { t } = useI18n()
+
 const channelOptions = computed<SegmentOption[]>(() => [
   { value: 'stable', label: t('coreStableBuild') },
   { value: 'test', label: t('coreTestBuild') },
@@ -729,31 +721,13 @@ const saveTargetFileName = computed({
     saveTargetFileNameMap[coreType.value] = val
   },
 })
+
 const runArgsInput = ref('')
 const configURLInput = ref('')
+const isRunArgsDirty = ref(false)
+const isConfigURLDirty = ref(false)
 const configFileInput = ref<HTMLInputElement | null>(null)
-// A response may only clean the exact draft revision that it submitted.
-const draftState = reactive<Record<DraftKey, { dirty: boolean; revision: number }>>({
-  runArgs: { dirty: false, revision: 0 },
-  configURL: { dirty: false, revision: 0 },
-  behavior: { dirty: false, revision: 0 },
-})
-const touchDraft = (key: DraftKey) => {
-  draftState[key].dirty = true
-  draftState[key].revision += 1
-}
-const beginDraftSave = (key: DraftKey) => {
-  draftState[key].dirty = true
-  return draftState[key].revision
-}
-const commitDraftSave = (key: DraftKey, revision: number) => {
-  if (draftState[key].revision !== revision) return false
-  draftState[key].dirty = false
-  return true
-}
-const resetDraft = (key: DraftKey) => {
-  draftState[key].dirty = false
-}
+
 const isSavingChannel = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
@@ -761,9 +735,7 @@ const isStarting = ref(false)
 const isStopping = ref(false)
 const isRestarting = ref(false)
 const isOpeningLog = ref(false)
-const showCoreLogError = computed(
-  () => !config.running && Boolean(config.coreLogError),
-)
+const showCoreLogError = computed(() => !config.running && Boolean(config.coreLogError))
 const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isImportingConfig = ref(false)
@@ -789,49 +761,55 @@ const appUpdateInfo = reactive<AppUpdateInfo>({
   downloadURL: '',
   assetSize: 0,
 })
-const isConfigMutationPending = computed(
-  () =>
-    isSavingChannel.value ||
-    isDownloading.value ||
-    isStarting.value ||
-    isStopping.value ||
-    isRestarting.value ||
-    isSavingRunArgs.value ||
-    isDownloadingConfig.value ||
-    isSavingConfigFileName.value ||
-    isImportingConfig.value ||
-    isSavingBehavior.value ||
-    isUpdatingApp.value ||
-    isSelectingConfigFile.value ||
-    isDeletingConfigFile.value ||
-    isUndoingDelete.value,
-)
+
 const currentChannel = computed<CoreChannel>(() => (config.channel === 'test' ? 'test' : 'stable'))
 const installedVersionLabel = computed(() => {
   if (!config.installed) return t('coreNotInstalled')
   return config.installedVersion || config.version || t('coreInstalled')
 })
-const isCoreMaintenanceBusy = computed(
-  () => isDownloading.value,
-)
-let refreshRequest = 0
-let appliedRequestId = 0
+
+
+let activeRequestId = 0
 let checkSequence = 0
-type ConfigRequest = { id: number; coreType: CoreType; allowCoreTypeChange: boolean }
-const beginConfigRequest = (allowCoreTypeChange = false): ConfigRequest => {
-  isRefreshing.value = false
-  return { id: ++refreshRequest, coreType: coreType.value, allowCoreTypeChange }
+
+const applyConfig = (next: CoreConfig, forceInputs = false) => {
+  const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
+  const coreChanged = nextCoreType !== props.coreType
+  Object.assign(config, next)
+  if (coreChanged) emit('update:coreType', nextCoreType)
+
+  if (forceInputs || coreChanged || !isRunArgsDirty.value) {
+    runArgsInput.value = next.runArgs || ''
+    isRunArgsDirty.value = false
+  }
+  if (forceInputs || coreChanged || !isConfigURLDirty.value) {
+    configURLInput.value = next.configURL || ''
+    isConfigURLDirty.value = false
+  }
+  syncActiveConfigFile()
 }
-const isCurrentConfigRequest = (request: ConfigRequest) =>
-  request.id === refreshRequest && request.coreType === coreType.value
-const applyCurrentConfig = (request: ConfigRequest, next: CoreConfig, forceDrafts = false) => {
-  if (request.id < appliedRequestId) return false
-  const responseCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
-  if (!request.allowCoreTypeChange && responseCoreType !== request.coreType) return false
-  appliedRequestId = request.id
-  applyConfig(next, forceDrafts)
-  return true
+
+const runAction = async (
+  action: () => Promise<CoreConfig>,
+  targetCore = coreType.value,
+  forceInputs = false,
+): Promise<CoreConfig | null> => {
+  const reqId = ++activeRequestId
+  try {
+    const next = await action()
+    if (reqId === activeRequestId && targetCore === coreType.value) {
+      applyConfig(next, forceInputs)
+      return next
+    }
+    return null
+  } catch (error) {
+    if (reqId === activeRequestId && targetCore === coreType.value) {
+      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    }
+    throw error
+  }
 }
+
 const sourceOptions = computed(() => builtInDownloadSources[coreType.value])
 const sourceURL = (source: DownloadSource, channel = currentChannel.value) =>
   source.channelURLs?.[channel] ?? source.url
@@ -867,47 +845,6 @@ const handleSourceChange = () => {
     localStorage.setItem(sourceStorageKey.value, selectedSourceLabel.value)
   } catch {}
   void checkUpdate(false)
-}
-
-const applyConfig = (next: CoreConfig, forceDrafts = false) => {
-  const nextCoreType: CoreType = next.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
-  const coreChanged = nextCoreType !== props.coreType
-  const syncAllDrafts = forceDrafts || coreChanged
-  Object.assign(config, next)
-  if (coreChanged) emit('update:coreType', nextCoreType)
-  if (syncAllDrafts || !draftState.runArgs.dirty) {
-    if (runArgsInput.value !== next.runArgs) {
-      runArgsInput.value = next.runArgs
-    }
-    resetDraft('runArgs')
-  }
-  if (syncAllDrafts || !draftState.configURL.dirty) {
-    if (configURLInput.value !== next.configURL) {
-      configURLInput.value = next.configURL
-    }
-    resetDraft('configURL')
-  }
-  if (syncAllDrafts || !draftState.behavior.dirty) {
-    if (
-      behaviorDraft.runAsAdmin !== next.runAsAdmin ||
-      behaviorDraft.autoStart !== next.autoStart ||
-      behaviorDraft.autoStartSingBox !== next.autoStartSingBox ||
-      behaviorDraft.autoStartMihomo !== next.autoStartMihomo ||
-      behaviorDraft.stopCoreOnExit !== next.stopCoreOnExit ||
-      behaviorDraft.backendDebugLog !== next.backendDebugLog
-    ) {
-      Object.assign(behaviorDraft, {
-        runAsAdmin: next.runAsAdmin,
-        autoStart: next.autoStart,
-        autoStartSingBox: next.autoStartSingBox,
-        autoStartMihomo: next.autoStartMihomo,
-        stopCoreOnExit: next.stopCoreOnExit,
-        backendDebugLog: next.backendDebugLog,
-      })
-    }
-    resetDraft('behavior')
-  }
-  syncActiveConfigFile()
 }
 
 const syncActiveConfigFile = () => {
@@ -946,15 +883,12 @@ const scanConfigFiles = async (notify = false) => {
 const handleSelectConfigFile = async () => {
   if (isSelectingConfigFile.value || !activeConfigFile.value || config.running) return
   isSelectingConfigFile.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.SelectConfigFile(activeConfigFile.value, request.coreType)
-    applyCurrentConfig(request, next)
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-      syncActiveConfigFile()
-    }
+    await runAction(() =>
+      CoreService.SelectConfigFile(activeConfigFile.value, coreType.value),
+    )
+  } catch {
+    syncActiveConfigFile()
   } finally {
     isSelectingConfigFile.value = false
   }
@@ -977,17 +911,14 @@ const deleteActiveConfigFile = async () => {
   )
     return
   isDeletingConfigFile.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.DeleteConfigFile(activeConfigFile.value, request.coreType)
-    if (applyCurrentConfig(request, next)) {
+    const next = await runAction(() =>
+      CoreService.DeleteConfigFile(activeConfigFile.value, coreType.value),
+    )
+    if (next) {
       canUndoDelete.value = true
       showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
       await scanConfigFiles(false)
-    }
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
     isDeletingConfigFile.value = false
@@ -997,19 +928,17 @@ const deleteActiveConfigFile = async () => {
 const undoDeleteConfigFile = async () => {
   if (isUndoingDelete.value || config.running || !canUndoDelete.value) return
   isUndoingDelete.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.UndoDeleteConfigFile(request.coreType)
-    if (applyCurrentConfig(request, next)) {
+    const next = await runAction(() =>
+      CoreService.UndoDeleteConfigFile(coreType.value),
+    )
+    if (next) {
       canUndoDelete.value = false
       showNotification({ content: 'coreConfigFileRestored', type: 'alert-success' })
       await scanConfigFiles(false)
     }
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-      await checkCanUndoDelete()
-    }
+  } catch {
+    await checkCanUndoDelete()
   } finally {
     isUndoingDelete.value = false
   }
@@ -1018,62 +947,55 @@ const undoDeleteConfigFile = async () => {
 const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.SaveChannel(rawChannel, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    applyCurrentConfig(request, next)
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
+    await runAction(() =>
+      CoreService.UpdateCoreSettings({
+        coreType: coreType.value,
+        channel: rawChannel,
+      }),
+    )
   } finally {
     isSavingChannel.value = false
   }
   void checkUpdate(false)
 }
 
-
 const saveRunArgs = async () => {
   if (isSavingRunArgs.value || config.running) return
   isSavingRunArgs.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('runArgs')
   try {
-    const next = await CoreService.SaveRunArgs(runArgsInput.value, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    commitDraftSave('runArgs', draftRevision)
-    applyCurrentConfig(request, next)
+    await runAction(() =>
+      CoreService.UpdateCoreSettings({
+        coreType: coreType.value,
+        runArgs: runArgsInput.value,
+      }),
+    )
+    isRunArgsDirty.value = false
     syncActiveConfigFile()
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
   } finally {
     isSavingRunArgs.value = false
   }
 }
 
-const startCore = async () => {
-  if (isStarting.value || config.running) return
-  isStarting.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('runArgs')
-  try {
-    const next = await CoreService.StartCore(runArgsInput.value, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    commitDraftSave('runArgs', draftRevision)
-    applyCurrentConfig(request, next)
+const handleCoreStartResult = (next: CoreConfig | null) => {
+  isRunArgsDirty.value = false
+  if (next) {
     if (!next.running && next.coreLogError) {
       showNotification({ content: t('coreStartFailed'), type: 'alert-error', timeout: 5000 })
     } else if (next.running && next.clashApiUrl) {
       syncManagedBackendFromCore(next)
       void startBackendSession()
     }
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
+  }
+}
+
+const startCore = async () => {
+  if (isStarting.value || config.running) return
+  isStarting.value = true
+  try {
+    handleCoreStartResult(
+      await runAction(() => CoreService.StartCore(runArgsInput.value, coreType.value)),
+    )
   } finally {
     isStarting.value = false
   }
@@ -1082,16 +1004,9 @@ const startCore = async () => {
 const stopCore = async () => {
   if (isStopping.value || !config.running) return
   isStopping.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.StopCore()
-    if (!isCurrentConfigRequest(request)) return
-    applyCurrentConfig(request, next)
+    await runAction(() => CoreService.StopCore())
     stopBackendSession()
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
   } finally {
     isStopping.value = false
   }
@@ -1100,23 +1015,10 @@ const stopCore = async () => {
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
   isRestarting.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('runArgs')
   try {
-    const next = await CoreService.RestartCore(runArgsInput.value, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    commitDraftSave('runArgs', draftRevision)
-    applyCurrentConfig(request, next)
-    if (!next.running && next.coreLogError) {
-      showNotification({ content: t('coreStartFailed'), type: 'alert-error', timeout: 5000 })
-    } else if (next.running && next.clashApiUrl) {
-      syncManagedBackendFromCore(next)
-      void startBackendSession()
-    }
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
+    handleCoreStartResult(
+      await runAction(() => CoreService.RestartCore(runArgsInput.value, coreType.value)),
+    )
   } finally {
     isRestarting.value = false
   }
@@ -1142,22 +1044,15 @@ const downloadConfig = async () => {
     !saveTargetFileName.value.trim()
   )
     return
-  if (draftState.configURL.dirty && !(await saveConfigURL())) return
   isDownloadingConfig.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('configURL')
   try {
     const targetFileName = saveTargetFileName.value.trim()
-    const next = await CoreService.DownloadConfig(configURLInput.value, targetFileName, coreType.value)
-    if (!isCurrentConfigRequest(request)) return
-    commitDraftSave('configURL', draftRevision)
-    applyCurrentConfig(request, next)
+    await runAction(() =>
+      CoreService.DownloadConfig(configURLInput.value, targetFileName, coreType.value),
+    )
+    isConfigURLDirty.value = false
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
   } finally {
     isDownloadingConfig.value = false
   }
@@ -1171,37 +1066,34 @@ const importConfig = async (event: Event) => {
   const input = event.currentTarget as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  let request: ConfigRequest | null = null
+  isImportingConfig.value = true
   try {
-    isImportingConfig.value = true
-    request = beginConfigRequest()
+    const text = await file.text()
     const targetFileName = saveTargetFileName.value.trim() || file.name
-    const next = await CoreService.ImportConfig(await file.text(), targetFileName, request.coreType)
-    if (!applyCurrentConfig(request, next)) return
+    await runAction(() =>
+      CoreService.ImportConfig(text, targetFileName, coreType.value),
+    )
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
-  } catch (error) {
-    if (!request || isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
   } finally {
     isImportingConfig.value = false
     input.value = ''
   }
 }
 
-const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
-  const request = beginConfigRequest(useActiveCore)
+const loadConfig = async (useActiveCore = false, forceInputs = false) => {
   isRefreshing.value = true
   try {
-    const next = useActiveCore
-      ? await CoreService.GetConfig()
-      : await CoreService.GetConfigForType(request.coreType)
-    return applyCurrentConfig(request, next, forceDrafts)
-  } catch (error) {
-    if (forceDrafts && isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
+    const next = await runAction(
+      () =>
+        useActiveCore
+          ? CoreService.GetConfig()
+          : CoreService.GetConfigForType(coreType.value),
+      coreType.value,
+      forceInputs,
+    )
+    return Boolean(next)
+  } catch {
     return false
   } finally {
     isRefreshing.value = false
@@ -1210,32 +1102,26 @@ const loadConfig = async (useActiveCore = false, forceDrafts = false) => {
 
 const saveBehavior = async (changedCoreType?: CoreType) => {
   if (isSavingBehavior.value) return
-  if (changedCoreType === 'sing-box' && behaviorDraft.autoStartSingBox) {
-    behaviorDraft.autoStartMihomo = false
-  } else if (changedCoreType === 'mihomo' && behaviorDraft.autoStartMihomo) {
-    behaviorDraft.autoStartSingBox = false
+  if (changedCoreType === 'sing-box' && config.autoStartSingBox) {
+    config.autoStartMihomo = false
+  } else if (changedCoreType === 'mihomo' && config.autoStartMihomo) {
+    config.autoStartSingBox = false
   }
   isSavingBehavior.value = true
-  const request = beginConfigRequest()
-  const draftRevision = beginDraftSave('behavior')
   try {
-    const next = await CoreService.SaveBehavior(
-      behaviorDraft.runAsAdmin,
-      behaviorDraft.autoStart,
-      behaviorDraft.autoStartSingBox,
-      behaviorDraft.autoStartMihomo,
-      behaviorDraft.stopCoreOnExit,
-      behaviorDraft.backendDebugLog,
-      coreType.value,
+    await runAction(() =>
+      CoreService.UpdateCoreSettings({
+        coreType: coreType.value,
+        runAsAdmin: config.runAsAdmin,
+        autoStart: config.autoStart,
+        autoStartSingBox: config.autoStartSingBox,
+        autoStartMihomo: config.autoStartMihomo,
+        stopCoreOnExit: config.stopCoreOnExit,
+        backendDebugLog: config.backendDebugLog,
+      }),
     )
-    if (!isCurrentConfigRequest(request)) return
-    commitDraftSave('behavior', draftRevision)
-    applyCurrentConfig(request, next)
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-      await loadConfig(false, true)
-    }
+  } catch {
+    await loadConfig(false, true)
   } finally {
     isSavingBehavior.value = false
   }
@@ -1292,23 +1178,16 @@ const checkUpdate = async (notifyError = true, force = false) => {
 const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
-  const request = beginConfigRequest()
   try {
-    const next = await CoreService.DownloadCore(currentDownloadURL.value, request.coreType)
-    if (applyCurrentConfig(request, next)) {
+    const next = await runAction(() =>
+      CoreService.DownloadCore(currentDownloadURL.value, coreType.value),
+    )
+    if (next) {
       showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
-    }
-  } catch (error) {
-    if (isCurrentConfigRequest(request)) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
     isDownloading.value = false
   }
-}
-
-const maintainCore = async () => {
-  await downloadCore()
 }
 
 const appVersionLabel = computed(() => {
@@ -1401,7 +1280,7 @@ const handleVisibilityChange = () => {
 watch(
   () => props.coreType,
   () => {
-    refreshRequest += 1
+    activeRequestId += 1
     checkSequence += 1
     activeCheckKey = ''
     isChecking.value = false
@@ -1410,9 +1289,8 @@ watch(
     activeConfigFile.value = ''
     canUndoDelete.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
-    resetDraft('runArgs')
-    resetDraft('configURL')
-    resetDraft('behavior')
+    isRunArgsDirty.value = false
+    isConfigURLDirty.value = false
     loadSavedSource()
     void (async () => {
       if (await loadConfig(false, true)) {
@@ -1425,7 +1303,7 @@ watch(
 )
 
 onUnmounted(() => {
-  refreshRequest += 1
+  activeRequestId += 1
   isRefreshing.value = false
   if (unsubStateChange) {
     unsubStateChange()
@@ -1433,7 +1311,6 @@ onUnmounted(() => {
   }
   if (stateChangeTimer) {
     clearTimeout(stateChangeTimer)
-    stateChangeTimer = undefined
   }
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })

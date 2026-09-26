@@ -67,6 +67,18 @@ type CoreConfig struct {
 	ClashAPISecret    string `json:"clashApiSecret"`
 }
 
+type CoreSettingsPatch struct {
+	CoreType         string  `json:"coreType"`
+	Channel          *string `json:"channel,omitempty"`
+	RunArgs          *string `json:"runArgs,omitempty"`
+	RunAsAdmin       *bool   `json:"runAsAdmin,omitempty"`
+	AutoStart        *bool   `json:"autoStart,omitempty"`
+	AutoStartSingBox *bool   `json:"autoStartSingBox,omitempty"`
+	AutoStartMihomo  *bool   `json:"autoStartMihomo,omitempty"`
+	StopCoreOnExit   *bool   `json:"stopCoreOnExit,omitempty"`
+	BackendDebugLog  *bool   `json:"backendDebugLog,omitempty"`
+}
+
 type coreVersionCacheItem struct {
 	modTime time.Time
 	size    int64
@@ -351,62 +363,6 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveChannel(rawChannel, rawCoreType string) (CoreConfig, error) {
-	channel, err := normalizeCoreChannel(rawChannel)
-	if err != nil {
-		debugLogf("core", "save channel failed: %v", err)
-		return CoreConfig{}, err
-	}
-	coreType, err := normalizeCoreType(rawCoreType)
-	if err != nil {
-		debugLogf("core", "save channel failed: %v", err)
-		return CoreConfig{}, err
-	}
-	config, _, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("core", "save channel failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-	config.Channel = channel
-	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
-	config.Installed = fileExists(config.CorePath)
-	config.Version = ""
-	config.VersionDetail = ""
-	config.InstalledVersion = ""
-	s.applyCurrentVersion(&config, "")
-	config.LatestVersion = ""
-	config.UpdateAvailable = false
-
-	saved, err := s.commitConfigUpdate(config)
-	if err != nil {
-		debugLogf("core", "save channel failed: %v", err)
-		return CoreConfig{}, err
-	}
-	debugLogf("core", "save channel success: type=%s channel=%s installed=%t version=%s", saved.CoreType, saved.Channel, saved.Installed, saved.Version)
-	return saved, nil
-}
-
-func (s *CoreService) SaveRunArgs(rawArgs, rawCoreType string) (CoreConfig, error) {
-	coreType, err := normalizeCoreType(rawCoreType)
-	if err != nil {
-		debugLogf("core", "save run args failed: %v", err)
-		return CoreConfig{}, err
-	}
-	config, _, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("core", "save run args failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-	config.RunArgs = strings.TrimSpace(rawArgs)
-	saved, err := s.commitConfigUpdate(config)
-	if err != nil {
-		debugLogf("core", "save run args failed: %v", err)
-		return CoreConfig{}, err
-	}
-	debugLogf("core", "save run args success: type=%s runArgs=%q", saved.CoreType, saved.RunArgs)
-	return saved, nil
-}
-
 func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
@@ -431,59 +387,120 @@ func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
 	return saved, nil
 }
 
-func (s *CoreService) SaveBehavior(runAsAdmin, autoStart, autoStartSingBox, autoStartMihomo, stopCoreOnExit, backendDebugLog bool, rawCoreType string) (CoreConfig, error) {
-	coreType, err := normalizeCoreType(rawCoreType)
+func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, error) {
+	coreType, err := normalizeCoreType(patch.CoreType)
 	if err != nil {
-		debugLogf("system", "save behavior failed to normalize core type: %v", err)
+		debugLogf("core", "update settings failed to normalize core type: %v", err)
 		return CoreConfig{}, err
 	}
+
 	config, _, err := s.loadConfigSnapshot(coreType)
 	if err != nil {
-		debugLogf("system", "save behavior failed to load snapshot: %v", err)
+		debugLogf("core", "update settings failed to load snapshot: %v", err)
 		return CoreConfig{}, err
 	}
 
-	if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
-		debugLogf("system", "save behavior write RunAsAdmin failed: %v", err)
-		return CoreConfig{}, err
-	}
-	if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
-		debugLogf("system", "save behavior write auto start failed: %v", err)
-		return CoreConfig{}, err
+	if patch.Channel != nil {
+		channel, err := normalizeCoreChannel(*patch.Channel)
+		if err != nil {
+			return CoreConfig{}, err
+		}
+		config.Channel = channel
+		config.CorePath = s.corePathFor(config.CoreType, config.Channel)
+		config.Installed = fileExists(config.CorePath)
+		config.Version = ""
+		config.VersionDetail = ""
+		config.InstalledVersion = ""
+		s.applyCurrentVersion(&config, "")
+		config.LatestVersion = ""
+		config.UpdateAvailable = false
 	}
 
-	behavior := sharedBehaviorConfig{
-		RunAsAdmin:       runAsAdmin,
-		AutoStart:        autoStart,
-		AutoStartSingBox: autoStartSingBox,
-		AutoStartMihomo:  autoStartMihomo,
-		BackendDebugLog:  backendDebugLog,
-		StopCoreOnExit:   &stopCoreOnExit,
+	if patch.RunArgs != nil {
+		config.RunArgs = strings.TrimSpace(*patch.RunArgs)
 	}
-	if behavior.AutoStartSingBox && behavior.AutoStartMihomo {
-		if coreType == coreTypeMihomo {
-			behavior.AutoStartSingBox = false
-		} else {
-			behavior.AutoStartMihomo = false
+
+	hasBehavior := patch.RunAsAdmin != nil || patch.AutoStart != nil ||
+		patch.AutoStartSingBox != nil || patch.AutoStartMihomo != nil ||
+		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil
+
+	if hasBehavior {
+		runAsAdmin := config.RunAsAdmin
+		if patch.RunAsAdmin != nil {
+			runAsAdmin = *patch.RunAsAdmin
+		}
+		autoStart := config.AutoStart
+		if patch.AutoStart != nil {
+			autoStart = *patch.AutoStart
+		}
+		autoStartSingBox := config.AutoStartSingBox
+		if patch.AutoStartSingBox != nil {
+			autoStartSingBox = *patch.AutoStartSingBox
+		}
+		autoStartMihomo := config.AutoStartMihomo
+		if patch.AutoStartMihomo != nil {
+			autoStartMihomo = *patch.AutoStartMihomo
+		}
+		backendDebugLog := config.BackendDebugLog
+		if patch.BackendDebugLog != nil {
+			backendDebugLog = *patch.BackendDebugLog
+		}
+		stopCoreOnExit := config.StopCoreOnExit
+		if patch.StopCoreOnExit != nil {
+			stopCoreOnExit = *patch.StopCoreOnExit
+		}
+
+		if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
+			debugLogf("system", "update settings write RunAsAdmin failed: %v", err)
+			return CoreConfig{}, err
+		}
+		if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
+			debugLogf("system", "update settings write auto start failed: %v", err)
+			return CoreConfig{}, err
+		}
+
+		behavior := sharedBehaviorConfig{
+			RunAsAdmin:       runAsAdmin,
+			AutoStart:        autoStart,
+			AutoStartSingBox: autoStartSingBox,
+			AutoStartMihomo:  autoStartMihomo,
+			BackendDebugLog:  backendDebugLog,
+			StopCoreOnExit:   &stopCoreOnExit,
+		}
+		if behavior.AutoStartSingBox && behavior.AutoStartMihomo {
+			if coreType == coreTypeMihomo {
+				behavior.AutoStartSingBox = false
+			} else {
+				behavior.AutoStartMihomo = false
+			}
+		}
+		applySharedBehavior(&config, behavior)
+
+		s.mu.Lock()
+		if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+			config = currentConfig
+			applySharedBehavior(&config, behavior)
+		}
+		if err := s.saveBehaviorLocked(config, behavior); err != nil {
+			s.mu.Unlock()
+			debugLogf("system", "update settings failed to save behavior: %v", err)
+			return CoreConfig{}, err
+		}
+		s.mu.Unlock()
+
+		if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
+			return CoreConfig{}, err
 		}
 	}
-	applySharedBehavior(&config, behavior)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
-		config = currentConfig
-		applySharedBehavior(&config, behavior)
-	}
-	if err := s.saveBehaviorLocked(config, behavior); err != nil {
-		debugLogf("system", "save behavior failed to write profiles: %v", err)
+
+	saved, err := s.commitConfigUpdate(config)
+	if err != nil {
+		debugLogf("core", "update settings commit failed: %v", err)
 		return CoreConfig{}, err
 	}
-	if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
-		return CoreConfig{}, err
-	}
-	s.applyRuntimeState(&config)
-	debugLogf("system", "save behavior success: runAsAdmin=%t autoStart=%t debugLog=%t", runAsAdmin, autoStart, backendDebugLog)
-	return config, nil
+
+	debugLogf("core", "update settings success: core=%s channel=%s", saved.CoreType, saved.Channel)
+	return saved, nil
 }
 
 func (s *CoreService) StartCore(rawArgs, rawCoreType string) (CoreConfig, error) {
