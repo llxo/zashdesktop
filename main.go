@@ -40,11 +40,7 @@ func main() {
 		windowStatePath: windowStatePath,
 	}
 
-	configDir, _ := os.UserConfigDir()
-	userDataPath := ""
-	if configDir != "" {
-		userDataPath = filepath.Join(configDir, "zashdesktop")
-	}
+	userDataPath := appUserDataDir()
 
 	app := application.New(application.Options{
 		Name:        "zashdesktop",
@@ -125,12 +121,12 @@ func (s windowState) valid() bool {
 }
 
 func loadWindowState() (windowState, string) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
+	userDataDir := appUserDataDir()
+	if userDataDir == "" {
 		return windowState{}, ""
 	}
 
-	path := filepath.Join(configDir, "zashdesktop", "window.json")
+	path := filepath.Join(userDataDir, "window.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return windowState{}, path
@@ -254,17 +250,11 @@ func secondaryPath(path string) string {
 }
 
 func cleanOldUpdateFiles() {
-	executable, err := os.Executable()
+	_, dir, err := executablePathAndDir()
 	if err != nil {
 		debugLogf("app", "locate executable for cleanup failed: %v", err)
 		return
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		debugLogf("app", "eval symlinks for cleanup failed: %v", err)
-		return
-	}
-	dir := filepath.Dir(executable)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		debugLogf("app", "read directory for cleanup %q failed: %v", dir, err)
@@ -285,15 +275,11 @@ func cleanOldUpdateFiles() {
 }
 
 func cleanExpiredDebugLog() {
-	executable, err := os.Executable()
+	_, dir, err := executablePathAndDir()
 	if err != nil {
 		return
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return
-	}
-	debugLogPath := filepath.Join(filepath.Dir(executable), "debug.log")
+	debugLogPath := filepath.Join(dir, "debug.log")
 	file, err := os.Open(debugLogPath)
 	if err != nil {
 		return
@@ -456,10 +442,6 @@ func (a *App) scheduleWindowStateSave(*application.WindowEvent) {
 		})
 	}
 	a.mu.Unlock()
-}
-
-func (a *App) saveWindowStateFromWindow(*application.WindowEvent) {
-	a.saveWindowState()
 }
 
 func (a *App) saveWindowState() {
@@ -681,11 +663,11 @@ func removeDirectoryWithRetry(dir string, maxAttempts int, delay time.Duration) 
 }
 
 func getWebviewCacheDirs() []string {
-	configDir, err := os.UserConfigDir()
-	if err != nil || configDir == "" {
+	userDataDir := appUserDataDir()
+	if userDataDir == "" {
 		return nil
 	}
-	return []string{filepath.Join(configDir, "zashdesktop", "EBWebView")}
+	return []string{filepath.Join(userDataDir, "EBWebView")}
 }
 
 

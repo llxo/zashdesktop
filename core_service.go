@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,7 +107,6 @@ type CoreService struct {
 	runningClashAPIHost   string
 	runningClashAPIPort   string
 	runningClashAPISecret string
-	keepCoreOnShutdown    bool
 	onStateChange         func()
 	stoppingPids       map[int]bool
 	coreLogError       map[string]bool
@@ -129,11 +127,10 @@ type CoreService struct {
 }
 
 func NewCoreService() (*CoreService, error) {
-	executable, err := os.Executable()
+	executable, execDir, err := executablePathAndDir()
 	if err != nil {
 		return nil, fmt.Errorf("locate executable: %w", err)
 	}
-	execDir := filepath.Dir(executable)
 	service := &CoreService{
 		executableDir:      execDir,
 		applicationPath:    executable,
@@ -208,14 +205,14 @@ func configureCoreDebugLog(path string, enabled bool) error {
 }
 
 func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
-	executable, err := os.Executable()
+	executable, execDir, err := executablePathAndDir()
 	if err != nil {
 		return fmt.Errorf("locate executable: %w", err)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.executableDir = filepath.Dir(executable)
+	s.executableDir = execDir
 	s.applicationPath = executable
 	startupContext, cancelStartup := context.WithCancel(ctx)
 	startupDone := make(chan struct{})
@@ -260,7 +257,7 @@ func (s *CoreService) ServiceShutdown() error {
 	} else if profiles, err := s.loadProfilesLocked(); err == nil {
 		stopCoreOnExit = profiles.Behavior.shouldStopCoreOnExit()
 	}
-	keepCore := !stopCoreOnExit || s.keepCoreOnShutdown
+	keepCore := !stopCoreOnExit
 	s.mu.Unlock()
 	if cancelStartup != nil {
 		cancelStartup()
@@ -275,7 +272,7 @@ func (s *CoreService) ServiceShutdown() error {
 	}
 	s.mu.Unlock()
 	if keepCore {
-		coreDebugf("service shutdown: keeping managed core running (stopCoreOnExit=%t, keepCoreOnShutdown=%t)", stopCoreOnExit, s.keepCoreOnShutdown)
+		coreDebugf("service shutdown: keeping managed core running (stopCoreOnExit=%t)", stopCoreOnExit)
 		_ = configureCoreDebugLog("", false)
 		return nil
 	}
@@ -293,10 +290,11 @@ func (s *CoreService) ServiceName() string {
 	return "CoreService"
 }
 
-func (s *CoreService) keepCoreRunningOnShutdown() {
-	s.mu.Lock()
-	s.keepCoreOnShutdown = true
-	s.mu.Unlock()
+func (s *CoreService) clearRunningClashAPILocked() {
+	s.runningClashAPIURL = ""
+	s.runningClashAPIHost = ""
+	s.runningClashAPIPort = ""
+	s.runningClashAPISecret = ""
 }
 
 func (s *CoreService) setOnStateChange(cb func()) {
@@ -879,10 +877,7 @@ func (s *CoreService) clearInheritedProcess(process *os.Process) {
 		s.inheritedProcess = nil
 		s.inheritedCoreType = ""
 		if s.process == nil {
-			s.runningClashAPIURL = ""
-			s.runningClashAPIHost = ""
-			s.runningClashAPIPort = ""
-			s.runningClashAPISecret = ""
+			s.clearRunningClashAPILocked()
 		}
 	}
 }
@@ -911,10 +906,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 		s.process = nil
 		s.processDone = nil
 		s.processCoreType = ""
-		s.runningClashAPIURL = ""
-		s.runningClashAPIHost = ""
-		s.runningClashAPIPort = ""
-		s.runningClashAPISecret = ""
+		s.clearRunningClashAPILocked()
 	}
 
 	if !wasStopping && isPanelStart {
@@ -999,10 +991,7 @@ func (s *CoreService) detectInheritedProcessLocked(coreType string) {
 		s.inheritedProcess = nil
 		s.inheritedCoreType = ""
 		if s.process == nil {
-			s.runningClashAPIURL = ""
-			s.runningClashAPIHost = ""
-			s.runningClashAPIPort = ""
-			s.runningClashAPISecret = ""
+			s.clearRunningClashAPILocked()
 		}
 	}
 	channel := coreChannelStable

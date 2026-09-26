@@ -27,7 +27,6 @@ const (
 	mihomoPrereleaseTag         = "Prerelease-Alpha"
 	mihomoMetaTestURLTemplate   = "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-compatible-{version}.zip"
 	mihomoMetaStableURLTemplate = "https://github.com/MetaCubeX/mihomo/releases/download/v{version}/mihomo-windows-amd64-compatible-v{version}.zip"
-	mihomoSmartTestURLTemplate  = "https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/mihomo-windows-amd64-v2-go120-{version}.zip"
 	remoteReleaseCacheTTL       = 30 * time.Minute
 )
 
@@ -180,20 +179,6 @@ func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version
 	}
 	key := strings.ToLower(owner + "/" + repository + ":" + channel)
 	s.remoteReleaseCache[key] = remoteReleaseCacheItem{version: version, fetchedAt: time.Now()}
-}
-
-func (s *CoreService) clearCachedLatestRelease(owner, repository, channel string) {
-	s.remoteReleaseMu.Lock()
-	defer s.remoteReleaseMu.Unlock()
-	if s.remoteReleaseCache != nil {
-		delete(s.remoteReleaseCache, strings.ToLower(owner+"/"+repository+":"+channel))
-	}
-}
-
-func (s *CoreService) clearRemoteReleaseCache() {
-	s.remoteReleaseMu.Lock()
-	defer s.remoteReleaseMu.Unlock()
-	s.remoteReleaseCache = make(map[string]remoteReleaseCacheItem)
 }
 
 func (s *CoreService) getCachedCoreVersion(coreType, channel string) (coreVersionCacheItem, bool) {
@@ -937,11 +922,6 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	} else if config.InstalledVersion != "" {
 		config.Version = config.InstalledVersion
 	}
-}
-
-func readCoreVersion(path string) (string, error) {
-	v, _, err := readCoreVersionDetail(path, coreTypeSingBox)
-	return v, err
 }
 
 func readCoreVersionDetail(corePath, coreType string) (string, string, error) {

@@ -199,17 +199,11 @@ func (s *CoreService) InstallAppUpdate() error {
 	}
 	debugLogf("update", "target binary: name=%s url=%s expectedSHA=%s", binaryAsset.Name, binaryAsset.BrowserDownloadURL, expectedSHA)
 
-	executable, err := os.Executable()
+	executable, exeDir, err := executablePathAndDir()
 	if err != nil {
 		debugLogf("update", "locate executable failed: %v", err)
 		return fmt.Errorf("无法定位程序路径: %w", err)
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		debugLogf("update", "eval symlinks failed: %v", err)
-		return fmt.Errorf("解析程序路径失败: %w", err)
-	}
-	exeDir := filepath.Dir(executable)
 	exeBase := filepath.Base(executable)
 
 	// Download binary to temp file in the same directory

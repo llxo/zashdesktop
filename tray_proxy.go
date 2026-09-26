@@ -41,13 +41,6 @@ type trayProxyResponse struct {
 	Proxies map[string]trayProxy `json:"proxies"`
 }
 
-type trayMenuState struct {
-	CoreRunning   bool        `json:"coreRunning"`
-	CoreInstalled bool        `json:"coreInstalled"`
-	CoreType      string      `json:"coreType"`
-	Groups        []trayProxy `json:"groups"`
-}
-
 var trayProxyHTTPClient = &http.Client{
 	Timeout: 3 * time.Second,
 	Transport: &http.Transport{
@@ -128,9 +121,8 @@ type trayI18nText struct {
 }
 
 var (
-	modKernel32                  = syscall.NewLazyDLL("kernel32.dll")
-	procGetUserDefaultLocaleName = modKernel32.NewProc("GetUserDefaultLocaleName")
-	procGetUserDefaultUILanguage = modKernel32.NewProc("GetUserDefaultUILanguage")
+	procGetUserDefaultLocaleName = systemKernel32.NewProc("GetUserDefaultLocaleName")
+	procGetUserDefaultUILanguage = systemKernel32.NewProc("GetUserDefaultUILanguage")
 )
 
 func isChineseLocale() bool {
@@ -257,22 +249,26 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 	a.tray.SetMenu(menu)
 }
 
-func (a *App) trayStartCore() {
+func (a *App) runTrayCoreAction(actionName string, action func(args, coreType string) (CoreConfig, error)) {
 	if a.coreService == nil {
 		return
 	}
 	config, err := a.coreService.GetConfig()
 	if err != nil {
-		debugLogf("tray", "tray start core get config: %v", err)
+		debugLogf("tray", "tray %s core get config: %v", actionName, err)
 		return
 	}
 	if !config.Installed {
-		debugLogf("tray", "tray start core: core not installed")
+		debugLogf("tray", "tray %s core: core not installed", actionName)
 		return
 	}
-	if _, err := a.coreService.StartCore(config.RunArgs, config.CoreType); err != nil {
-		debugLogf("tray", "tray start core failed: %v", err)
+	if _, err := action(config.RunArgs, config.CoreType); err != nil {
+		debugLogf("tray", "tray %s core failed: %v", actionName, err)
 	}
+}
+
+func (a *App) trayStartCore() {
+	a.runTrayCoreAction("start", a.coreService.StartCore)
 }
 
 func (a *App) trayStopCore() {
@@ -285,21 +281,7 @@ func (a *App) trayStopCore() {
 }
 
 func (a *App) trayRestartCore() {
-	if a.coreService == nil {
-		return
-	}
-	config, err := a.coreService.GetConfig()
-	if err != nil {
-		debugLogf("tray", "tray restart core get config: %v", err)
-		return
-	}
-	if !config.Installed {
-		debugLogf("tray", "tray restart core: core not installed")
-		return
-	}
-	if _, err := a.coreService.RestartCore(config.RunArgs, config.CoreType); err != nil {
-		debugLogf("tray", "tray restart core failed: %v", err)
-	}
+	a.runTrayCoreAction("restart", a.coreService.RestartCore)
 }
 
 func (a *App) selectTrayProxy(group, proxy string) {

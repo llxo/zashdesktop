@@ -9,7 +9,37 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+var systemKernel32 = windows.NewLazySystemDLL("kernel32.dll")
+
+func executablePathAndDir() (string, string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", "", fmt.Errorf("locate executable: %w", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", "", fmt.Errorf("eval symlinks: %w", err)
+	}
+	return executable, filepath.Dir(executable), nil
+}
+
+func appUserDataDir() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil || configDir == "" {
+		return ""
+	}
+	return filepath.Join(configDir, "zashdesktop")
+}
+
+func isSupportedConfigFile(fileName string) bool {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	return ext == ".json" || ext == ".yaml" || ext == ".yml"
+}
+
 
 func normalizeCoreType(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {

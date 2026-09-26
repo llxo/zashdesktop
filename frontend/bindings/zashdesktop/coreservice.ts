@@ -77,10 +77,6 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
     return $Call.ByID(2020121754, rawArgs, rawCoreType);
 }
 
-export function SaveConfigFileName(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(3218160460, rawFileName, rawCoreType);
-}
-
 export function SaveCoreType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(3983412536, rawCoreType);
 }

@@ -16,13 +16,20 @@ import (
 const attachParentProcess uintptr = ^uintptr(0)
 
 var (
-	coreKernel32                  = windows.NewLazySystemDLL("kernel32.dll")
-	coreFreeConsole               = coreKernel32.NewProc("FreeConsole")
-	coreAttachConsole             = coreKernel32.NewProc("AttachConsole")
-	coreSetConsoleCtrlHandler     = coreKernel32.NewProc("SetConsoleCtrlHandler")
-	coreGenerateConsoleCtrlEvent  = coreKernel32.NewProc("GenerateConsoleCtrlEvent")
-	coreQueryFullProcessImageName = coreKernel32.NewProc("QueryFullProcessImageNameW")
+	coreFreeConsole               = systemKernel32.NewProc("FreeConsole")
+	coreAttachConsole             = systemKernel32.NewProc("AttachConsole")
+	coreSetConsoleCtrlHandler     = systemKernel32.NewProc("SetConsoleCtrlHandler")
+	coreGenerateConsoleCtrlEvent  = systemKernel32.NewProc("GenerateConsoleCtrlEvent")
+	coreQueryFullProcessImageName = systemKernel32.NewProc("QueryFullProcessImageNameW")
 )
+
+func evalCleanPath(p string) string {
+	cleaned := filepath.Clean(p)
+	if eval, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return eval
+	}
+	return cleaned
+}
 
 func configureCoreCommand(command *exec.Cmd) {
 	command.SysProcAttr = &syscall.SysProcAttr{
@@ -61,10 +68,7 @@ func findInheritedCoreProcess(coreType, expectedPath string) (*os.Process, error
 	var cleanExpected string
 	if expectedPath != "" {
 		expectedName = strings.ToLower(filepath.Base(expectedPath))
-		cleanExpected = filepath.Clean(expectedPath)
-		if eval, err := filepath.EvalSymlinks(cleanExpected); err == nil {
-			cleanExpected = eval
-		}
+		cleanExpected = evalCleanPath(expectedPath)
 	}
 
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
@@ -88,10 +92,7 @@ func findInheritedCoreProcess(coreType, expectedPath string) (*os.Process, error
 			if cleanExpected != "" {
 				imagePath, err := getProcessImagePath(entry.ProcessID)
 				if err == nil && imagePath != "" {
-					cleanImage := filepath.Clean(imagePath)
-					if eval, err := filepath.EvalSymlinks(cleanImage); err == nil {
-						cleanImage = eval
-					}
+					cleanImage := evalCleanPath(imagePath)
 					if strings.EqualFold(cleanImage, cleanExpected) {
 						if process, err := os.FindProcess(int(entry.ProcessID)); err == nil {
 							debugLogf("process", "matched external core process: type=%s pid=%d path=%q", coreType, entry.ProcessID, cleanImage)

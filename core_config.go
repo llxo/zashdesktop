@@ -224,30 +224,16 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 	return config, nil
 }
 
-func (s *CoreService) SaveConfigFileName(rawFileName, rawCoreType string) (CoreConfig, error) {
-	coreType, err := normalizeCoreType(rawCoreType)
-	if err != nil {
-		debugLogf("config", "save config file name failed: %v", err)
-		return CoreConfig{}, err
+func (s *CoreService) ensureCoreNotRunningLocked(coreType, actionName string) error {
+	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
+		debugLogf("config", "%s failed: core is currently running (managed pid=%d)", actionName, s.process.Process.Pid)
+		return fmt.Errorf("%s core is already running", coreType)
 	}
-	fileName, err := normalizeConfigFileName(rawFileName, coreType)
-	if err != nil {
-		debugLogf("config", "invalid config file name %q: %v", rawFileName, err)
-		return CoreConfig{}, err
+	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
+		debugLogf("config", "%s failed: core is currently running (inherited pid=%d)", actionName, s.inheritedProcess.Pid)
+		return fmt.Errorf("%s core is already running", coreType)
 	}
-	config, _, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("config", "save config file name failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-	config.ConfigFileName = fileName
-	saved, err := s.commitConfigUpdate(config)
-	if err != nil {
-		debugLogf("config", "save config file name failed: %v", err)
-		return CoreConfig{}, err
-	}
-	debugLogf("config", "save config file name success: type=%s name=%q", saved.CoreType, fileName)
-	return saved, nil
+	return nil
 }
 
 func (s *CoreService) ListConfigFiles(rawCoreType string) ([]string, error) {
@@ -273,14 +259,10 @@ func (s *CoreService) ListConfigFiles(rawCoreType string) ([]string, error) {
 	hasDefault := false
 
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || !isSupportedConfigFile(entry.Name()) {
 			continue
 		}
 		name := entry.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
-			continue
-		}
 		if name == defaultName {
 			hasDefault = true
 			continue
@@ -314,13 +296,8 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
-		debugLogf("config", "select config file failed: core is currently running (managed pid=%d)", s.process.Process.Pid)
-		return CoreConfig{}, errors.New("核心运行中，无法修改生效配置")
-	}
-	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
-		debugLogf("config", "select config file failed: core is currently running (inherited pid=%d)", s.inheritedProcess.Pid)
-		return CoreConfig{}, errors.New("核心运行中，无法修改生效配置")
+	if err := s.ensureCoreNotRunningLocked(coreType, "select config file"); err != nil {
+		return CoreConfig{}, err
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -359,13 +336,8 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
-		coreDebugf("delete config file failed: core is running (managed pid=%d)", s.process.Process.Pid)
-		return CoreConfig{}, errors.New("核心运行中，无法删除配置")
-	}
-	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
-		coreDebugf("delete config file failed: core is running (inherited pid=%d)", s.inheritedProcess.Pid)
-		return CoreConfig{}, errors.New("核心运行中，无法删除配置")
+	if err := s.ensureCoreNotRunningLocked(coreType, "delete config file"); err != nil {
+		return CoreConfig{}, err
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -398,19 +370,16 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 	var nextFile string
 	defaultName := defaultConfigFileName(coreType)
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || !isSupportedConfigFile(entry.Name()) {
 			continue
 		}
 		name := entry.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext == ".json" || ext == ".yaml" || ext == ".yml" {
-			if name == defaultName {
-				nextFile = name
-				break
-			}
-			if nextFile == "" {
-				nextFile = name
-			}
+		if name == defaultName {
+			nextFile = name
+			break
+		}
+		if nextFile == "" {
+			nextFile = name
 		}
 	}
 	if nextFile == "" {
@@ -437,11 +406,8 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.process != nil && normalizedCoreType(s.processCoreType) == coreType {
-		return CoreConfig{}, errors.New("核心运行中，无法撤销删除")
-	}
-	if s.inheritedProcess != nil && normalizedCoreType(s.inheritedCoreType) == coreType {
-		return CoreConfig{}, errors.New("核心运行中，无法撤销删除")
+	if err := s.ensureCoreNotRunningLocked(coreType, "undo delete config file"); err != nil {
+		return CoreConfig{}, err
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)

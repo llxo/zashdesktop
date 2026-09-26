@@ -97,7 +97,6 @@ func (s *CoreService) profileItemToConfig(item persistedProfileItem, behavior sh
 		ConfigFileName: configFileName,
 	}
 	applySharedBehavior(&config, behavior)
-	s.applySystemBehavior(&config)
 	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	config.Installed = fileExists(config.CorePath)
 	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok {
@@ -145,8 +144,6 @@ func (s *CoreService) syncSystemBehaviorOnce(behavior *sharedBehaviorConfig) {
 		behavior.AutoStart = autoStart
 	}
 }
-
-func (s *CoreService) applySystemBehavior(config *CoreConfig) {}
 
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	profiles, err := s.loadProfilesLocked()
@@ -202,6 +199,21 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	return s.profileItemToConfig(item, profiles.Behavior), nil
 }
 
+func (s *CoreService) restoreProfilesFromBackupLocked(reason string) (persistedCoreProfiles, bool) {
+	backupData, backupErr := os.ReadFile(s.configBackupPath())
+	if backupErr == nil && len(backupData) > 0 {
+		var backupProfiles persistedCoreProfiles
+		if unmarshalErr := json.Unmarshal(backupData, &backupProfiles); unmarshalErr == nil {
+			debugLogf("core", "profiles.json %s, successfully restored from backup", reason)
+			s.normalizeLoadedProfiles(&backupProfiles)
+			s.cachedProfiles = &backupProfiles
+			_ = s.writeProfilesLocked(backupProfiles)
+			return backupProfiles, true
+		}
+	}
+	return persistedCoreProfiles{}, false
+}
+
 func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	configPath := s.configPath()
 	stat, statErr := os.Stat(configPath)
@@ -212,16 +224,8 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		// 主配置文件不存在时，尝试从备份恢复
-		backupData, backupErr := os.ReadFile(s.configBackupPath())
-		if backupErr == nil && len(backupData) > 0 {
-			var backupProfiles persistedCoreProfiles
-			if unmarshalErr := json.Unmarshal(backupData, &backupProfiles); unmarshalErr == nil {
-				debugLogf("core", "profiles.json missing, successfully restored from backup")
-				s.normalizeLoadedProfiles(&backupProfiles)
-				s.cachedProfiles = &backupProfiles
-				_ = s.writeProfilesLocked(backupProfiles)
-				return backupProfiles, nil
-			}
+		if backupProfiles, ok := s.restoreProfilesFromBackupLocked("missing"); ok {
+			return backupProfiles, nil
 		}
 
 		// 备份亦不存在，创建标准默认配置
@@ -242,16 +246,8 @@ func (s *CoreService) loadProfilesLocked() (persistedCoreProfiles, error) {
 	if err := json.Unmarshal(data, &profiles); err != nil {
 		debugLogf("core", "parse profiles.json failed: %v, attempting recovery from backup...", err)
 		// 损坏时优先从 .bak 恢复
-		backupData, backupErr := os.ReadFile(s.configBackupPath())
-		if backupErr == nil && len(backupData) > 0 {
-			var backupProfiles persistedCoreProfiles
-			if unmarshalErr := json.Unmarshal(backupData, &backupProfiles); unmarshalErr == nil {
-				debugLogf("core", "corrupted profiles.json restored from backup")
-				s.normalizeLoadedProfiles(&backupProfiles)
-				s.cachedProfiles = &backupProfiles
-				_ = s.writeProfilesLocked(backupProfiles)
-				return backupProfiles, nil
-			}
+		if backupProfiles, ok := s.restoreProfilesFromBackupLocked("corrupted"); ok {
+			return backupProfiles, nil
 		}
 
 		// 无可用备份，将损坏文件归档并用默认配置自愈
