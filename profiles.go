@@ -30,10 +30,7 @@ func (b sharedBehaviorConfig) shouldStopCoreOnExit() bool {
 
 type persistedProfileItem struct {
 	CoreType       string `json:"coreType"`
-	Version        string `json:"version,omitempty"`
-	VersionDetail  string `json:"versionDetail,omitempty"`
 	Channel        string `json:"channel,omitempty"`
-	LatestVersion  string `json:"latestVersion,omitempty"`
 	RunArgs        string `json:"runArgs,omitempty"`
 	ConfigURL      string `json:"configURL,omitempty"`
 	ConfigFileName string `json:"configFileName,omitempty"`
@@ -85,10 +82,7 @@ func (s *CoreService) profileItemToConfig(item persistedProfileItem, behavior sh
 
 	config := CoreConfig{
 		CoreType:       coreType,
-		Version:        item.Version,
-		VersionDetail:  item.VersionDetail,
 		Channel:        channel,
-		LatestVersion:  item.LatestVersion,
 		RunArgs:        runArgs,
 		ConfigURL:      item.ConfigURL,
 		ConfigFileName: configFileName,
@@ -117,10 +111,7 @@ func configToProfileItem(config CoreConfig) persistedProfileItem {
 	}
 	return persistedProfileItem{
 		CoreType:       coreType,
-		Version:        config.Version,
-		VersionDetail:  config.VersionDetail,
 		Channel:        channel,
-		LatestVersion:  config.LatestVersion,
 		RunArgs:        runArgs,
 		ConfigURL:      config.ConfigURL,
 		ConfigFileName: configFileName,
@@ -182,16 +173,6 @@ func (s *CoreService) commitConfigUpdate(config CoreConfig) (CoreConfig, error) 
 	return config, nil
 }
 
-func (s *CoreService) commitConfigAndActivateUpdate(config CoreConfig) (CoreConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.saveConfigAndActivateLocked(config); err != nil {
-		return CoreConfig{}, err
-	}
-	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
-	return config, nil
-}
 
 func (s *CoreService) applyCheckedConfig(config CoreConfig) (CoreConfig, error) {
 	s.mu.Lock()

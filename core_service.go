@@ -362,29 +362,6 @@ func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) SaveCoreType(rawCoreType string) (CoreConfig, error) {
-	coreType, err := normalizeCoreType(rawCoreType)
-	if err != nil {
-		debugLogf("core", "save core type failed: %v", err)
-		return CoreConfig{}, err
-	}
-	config, _, err := s.loadConfigSnapshot(coreType)
-	if err != nil {
-		debugLogf("core", "save core type failed to load snapshot: %v", err)
-		return CoreConfig{}, err
-	}
-	if strings.TrimSpace(config.RunArgs) == "" || isDefaultCoreRunArgs(config.RunArgs) {
-		config.RunArgs = defaultRunArgs(coreType)
-	}
-	config.CoreType = coreType
-	saved, err := s.commitConfigAndActivateUpdate(config)
-	if err != nil {
-		debugLogf("core", "save core type failed: %v", err)
-		return CoreConfig{}, err
-	}
-	debugLogf("core", "save core type success: activeCore=%s", saved.CoreType)
-	return saved, nil
-}
 
 func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(patch.CoreType)
