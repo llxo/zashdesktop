@@ -26,6 +26,7 @@ export interface CoreConfig {
     "configURL": string;
     "configFileName": string;
     "running": boolean;
+    "runningCore": string;
     "pid": number;
     "logPath": string;
     "coreLogError": boolean;

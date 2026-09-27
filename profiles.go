@@ -144,7 +144,11 @@ func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	if err != nil {
 		return CoreConfig{}, err
 	}
-	return s.loadProfileFromStoreLocked(profiles, normalizedCoreType(profiles.ActiveCore))
+	targetCore := normalizedCoreType(profiles.ActiveCore)
+	if runningCore := s.runningCoreTypeLocked(); runningCore != "" {
+		targetCore = runningCore
+	}
+	return s.loadProfileFromStoreLocked(profiles, targetCore)
 }
 
 func (s *CoreService) loadConfigForTypeLocked(coreType string) (CoreConfig, error) {

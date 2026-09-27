@@ -24,12 +24,10 @@
 </template>
 
 <script setup lang="ts">
-import * as CoreService from '../../bindings/zashdesktop/coreservice'
 import CtrlsBar from '@/components/common/CtrlsBar.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import CoreSettings from '@/components/settings/core/CoreSettings.vue'
 import { usePaddingForViews } from '@/composables/paddingViews'
-import { showNotification } from '@/helper/notification'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -54,22 +52,14 @@ const handleCoreTypeUpdate = (nextType: CoreType) => {
   }
 }
 
-const changeTab = async (nextTab: string) => {
+const changeTab = (nextTab: string) => {
   if (nextTab === activeTab.value) return
-  const prevCoreType = coreType.value
   activeTab.value = nextTab as CoreTab
   if (nextTab === 'settings') {
     return
   }
   const nextCoreType: CoreType = nextTab === 'mihomo' ? 'mihomo' : 'sing-box'
   coreType.value = nextCoreType
-  if (nextCoreType !== prevCoreType) {
-    try {
-      await CoreService.SaveCoreType(nextCoreType)
-    } catch (error) {
-      showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
-    }
-  }
 }
 
 const { padding } = usePaddingForViews({

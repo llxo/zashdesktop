@@ -676,6 +676,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
   configURL: '',
   configFileName: coreType === 'mihomo' ? 'config.yaml' : 'config.json',
   running: false,
+  runningCore: '',
   pid: 0,
   logPath: '',
   coreLogError: false,
@@ -696,6 +697,7 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
 
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 const coreType = computed(() => props.coreType)
+const isAnyCoreRunning = computed(() => Boolean(config.runningCore || config.running))
 const { t } = useI18n()
 
 const channelOptions = computed<SegmentOption[]>(() => [
@@ -868,7 +870,12 @@ const handleSelectConfigFile = async () => {
     await CoreService.SelectConfigFile(activeConfigFile.value, coreType.value)
   } catch (error) {
     syncActiveConfigFile()
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSelectingConfigFile.value = false
   }
@@ -900,7 +907,12 @@ const deleteActiveConfigFile = async () => {
     showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
     await scanConfigFiles(false)
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isDeletingConfigFile.value = false
   }
@@ -920,7 +932,12 @@ const undoDeleteConfigFile = async () => {
     await scanConfigFiles(false)
   } catch (error) {
     await checkCanUndoDelete()
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isUndoingDelete.value = false
   }
@@ -1001,7 +1018,12 @@ const saveRunArgs = async () => {
     isRunArgsDirty.value = false
     syncActiveConfigFile()
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isSavingRunArgs.value = false
   }
@@ -1009,7 +1031,7 @@ const saveRunArgs = async () => {
 
 const startCore = async () => {
   if (isStarting.value) return
-  if (config.running) {
+  if (isAnyCoreRunning.value) {
     showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
     return
   }
@@ -1025,7 +1047,12 @@ const startCore = async () => {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isStarting.value = false
   }
@@ -1045,6 +1072,10 @@ const stopCore = async () => {
 
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
+  if (config.runningCore && config.runningCore !== coreType.value) {
+    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    return
+  }
   if (checkUnclosedQuotes(runArgsInput.value)) {
     showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
     return
@@ -1057,7 +1088,12 @@ const restartCore = async () => {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errStr = String(error)
+    if (errStr.includes('coreAlreadyRunning')) {
+      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
+    } else {
+      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
+    }
   } finally {
     isRestarting.value = false
   }

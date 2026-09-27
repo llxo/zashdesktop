@@ -48,6 +48,7 @@ type CoreConfig struct {
 	ConfigURL         string `json:"configURL"`
 	ConfigFileName    string `json:"configFileName"`
 	Running           bool   `json:"running"`
+	RunningCore       string `json:"runningCore"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
 	CoreLogError      bool   `json:"coreLogError"`
@@ -101,8 +102,8 @@ type CoreService struct {
 	inheritedProcess   *os.Process
 	inheritedCoreType  string
 	stateLogged        bool
-	lastRunning        bool
-	lastPID            int
+	lastRunningCore    string
+	lastRunningPID     int
 	runningClashAPIURL    string
 	runningClashAPIHost   string
 	runningClashAPIPort   string
@@ -517,8 +518,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	}
 	s.detectAnyInheritedProcessLocked()
 	if s.inheritedProcess != nil {
-		coreDebugf("start request skipped: inherited %s core already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
-		return CoreConfig{}, nil
+		coreDebugf("start request rejected: inherited %s core already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
+		return CoreConfig{}, errors.New("coreAlreadyRunning")
 	}
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -531,8 +532,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 			if runningCoreType == "" {
 				runningCoreType = coreTypeSingBox
 			}
-			coreDebugf("start request skipped: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
-			return CoreConfig{}, nil
+			coreDebugf("start request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
+			return CoreConfig{}, errors.New("coreAlreadyRunning")
 		}
 	}
 	if s.process != nil && s.processDone == nil {
@@ -540,8 +541,8 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 		if runningCoreType == "" {
 			runningCoreType = coreTypeSingBox
 		}
-		coreDebugf("start request skipped: %s core already running (undone)", runningCoreType)
-		return CoreConfig{}, nil
+		coreDebugf("start request rejected: %s core already running (undone)", runningCoreType)
+		return CoreConfig{}, errors.New("coreAlreadyRunning")
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -712,15 +713,15 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 		if runningCoreType == "" {
 			runningCoreType = coreTypeSingBox
 		}
-		coreDebugf("restart request skipped: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
+		coreDebugf("restart request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, nil
+		return CoreConfig{}, errors.New("coreAlreadyRunning")
 	}
 	if s.inheritedProcess != nil && s.inheritedCoreType != coreType {
 		runningCoreType := s.inheritedCoreType
-		coreDebugf("restart request skipped: inherited %s core already running (PID %d)", runningCoreType, s.inheritedProcess.Pid)
+		coreDebugf("restart request rejected: inherited %s core already running (PID %d)", runningCoreType, s.inheritedProcess.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, nil
+		return CoreConfig{}, errors.New("coreAlreadyRunning")
 	}
 	s.mu.Unlock()
 	if err := s.stopCoreProcess(); err != nil {
@@ -924,11 +925,38 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 	s.notifyStateChange()
 }
 
+func (s *CoreService) runningCoreTypeLocked() string {
+	if s.process != nil {
+		alive, err := coreProcessAlive(s.process.Process)
+		if err != nil {
+			coreDebugf("runtime status check failed: pid=%d err=%v", s.process.Process.Pid, err)
+		} else if alive {
+			if s.processCoreType != "" {
+				return s.processCoreType
+			}
+			return coreTypeSingBox
+		}
+	}
+	if s.inheritedProcess != nil {
+		alive, err := coreProcessAlive(s.inheritedProcess)
+		if err != nil {
+			coreDebugf("inherited runtime status check failed: pid=%d err=%v", s.inheritedProcess.Pid, err)
+		} else if alive {
+			if s.inheritedCoreType != "" {
+				return s.inheritedCoreType
+			}
+			return coreTypeSingBox
+		} else {
+			s.inheritedProcess = nil
+			s.inheritedCoreType = ""
+		}
+	}
+	return ""
+}
+
 func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.CoreType = normalizedCoreType(config.CoreType)
 	s.detectInheritedProcessLocked(config.CoreType)
-	config.Running = false
-	config.PID = 0
 	config.LogPath = s.logFilePath(config.CoreType)
 	config.ConfigPath = s.configFilePath(*config)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
@@ -936,40 +964,35 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
-	if s.process != nil && s.processCoreType == config.CoreType {
-		alive, err := coreProcessAlive(s.process.Process)
-		if err != nil {
-			coreDebugf("runtime status check failed: pid=%d err=%v", s.process.Process.Pid, err)
-		}
-		config.Running = err == nil && alive
-	}
-	if !config.Running && s.inheritedProcess != nil && s.inheritedCoreType == config.CoreType {
-		alive, err := coreProcessAlive(s.inheritedProcess)
-		if err != nil {
-			coreDebugf("inherited runtime status check failed: pid=%d err=%v", s.inheritedProcess.Pid, err)
-		} else if alive {
-			config.Running = true
-			config.PID = s.inheritedProcess.Pid
-		} else {
-			s.inheritedProcess = nil
-			s.inheritedCoreType = ""
+
+	runningCore := s.runningCoreTypeLocked()
+	runningPID := 0
+	if runningCore != "" {
+		if s.process != nil && s.processCoreType == runningCore {
+			runningPID = s.process.Process.Pid
+		} else if s.inheritedProcess != nil && s.inheritedCoreType == runningCore {
+			runningPID = s.inheritedProcess.Pid
 		}
 	}
-	if config.Running && s.process != nil && s.processCoreType == config.CoreType {
-		config.PID = s.process.Process.Pid
+
+	config.RunningCore = runningCore
+	config.Running = runningCore != "" && runningCore == config.CoreType
+	if config.Running {
+		config.PID = runningPID
+	} else {
+		config.PID = 0
 	}
+
 	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
 	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running
-	stateChanged := s.stateLogged && (s.lastRunning != config.Running || s.lastPID != config.PID)
-	if !s.stateLogged || s.lastRunning != config.Running || s.lastPID != config.PID {
-		coreDebugf("runtime state changed: running=%t pid=%d type=%s", config.Running, config.PID, config.CoreType)
+
+	if !s.stateLogged || s.lastRunningCore != runningCore || s.lastRunningPID != runningPID {
+		coreDebugf("runtime state changed: running=%t pid=%d type=%s", runningCore != "", runningPID, runningCore)
 		s.stateLogged = true
-		s.lastRunning = config.Running
-		s.lastPID = config.PID
+		s.lastRunningCore = runningCore
+		s.lastRunningPID = runningPID
 	}
-	if stateChanged {
-		s.notifyStateChangeLocked()
-	}
+
 	if config.Running {
 		config.ClashAPIURL = s.runningClashAPIURL
 		config.ClashAPIHost = s.runningClashAPIHost

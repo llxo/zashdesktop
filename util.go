@@ -193,6 +193,12 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 		}
 		time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
 	}
+
+	// 在 Windows 上，若目标文件因系统句柄占用或锁定导致 Rename 报 Access is denied，
+	// 回退采用直接截断写入目标文件，确保配置数据落盘成功。
+	if writeErr := os.WriteFile(path, data, mode); writeErr == nil {
+		return nil
+	}
 	return renameErr
 }
 
