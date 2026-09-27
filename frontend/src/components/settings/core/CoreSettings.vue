@@ -826,7 +826,7 @@ const handleSourceChange = () => {
   try {
     localStorage.setItem(sourceStorageKey.value, selectedSourceLabel.value)
   } catch {}
-  void checkUpdate(false)
+  void checkUpdate(false, true)
 }
 
 const syncActiveConfigFile = () => {
@@ -935,7 +935,7 @@ const saveChannel = async (rawChannel: string) => {
   } finally {
     isSavingChannel.value = false
   }
-  void checkUpdate(false)
+  void checkUpdate(false, true)
 }
 
 const validateConfigFileName = (fileName: string, type: CoreType): boolean => {
@@ -1195,12 +1195,43 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
 }
 
+const CORE_UPDATE_CHECK_TTL = 60_000
+
+interface VersionCheckCache {
+  latestVersion: string
+  updateAvailable: boolean
+  timestamp: number
+}
+
+const lastCheckTimestamps: Record<string, VersionCheckCache> = {}
 let activeCheckKey = ''
+let checkUpdateTimer: ReturnType<typeof setTimeout> | undefined
+
+const debounceCheckUpdate = (delay = 300) => {
+  if (checkUpdateTimer) {
+    clearTimeout(checkUpdateTimer)
+  }
+  checkUpdateTimer = setTimeout(() => {
+    checkUpdateTimer = undefined
+    void checkUpdate(false)
+  }, delay)
+}
 
 const checkUpdate = async (notifyError = true, force = false) => {
   const targetCoreType = coreType.value
   const targetChannel = currentChannel.value
   const checkKey = `${targetCoreType}:${targetChannel}`
+
+  const now = Date.now()
+  const cached = lastCheckTimestamps[checkKey]
+  if (!force && cached && now - cached.timestamp < CORE_UPDATE_CHECK_TTL) {
+    if (coreType.value === targetCoreType && currentChannel.value === targetChannel) {
+      config.latestVersion = cached.latestVersion
+      config.updateAvailable = cached.updateAvailable
+    }
+    return null
+  }
+
   if (isChecking.value && activeCheckKey === checkKey && !force) return null
   activeCheckKey = checkKey
   const sequence = ++checkSequence
@@ -1222,6 +1253,11 @@ const checkUpdate = async (notifyError = true, force = false) => {
       }
       if (next.version) {
         config.version = next.version
+      }
+      lastCheckTimestamps[checkKey] = {
+        latestVersion: next.latestVersion,
+        updateAvailable: next.updateAvailable,
+        timestamp: Date.now(),
       }
     }
     return next
@@ -1358,6 +1394,12 @@ watch(
     activeConfigFile.value = ''
     canUndoDelete.value = false
     Object.assign(config, emptyCoreConfig(props.coreType))
+    const cacheKey = `${nextType}:${currentChannel.value}`
+    const cached = lastCheckTimestamps[cacheKey]
+    if (cached) {
+      config.latestVersion = cached.latestVersion
+      config.updateAvailable = cached.updateAvailable
+    }
     isRunArgsDirty.value = false
     isConfigURLDirty.value = false
     loadSavedSource()
@@ -1365,7 +1407,7 @@ watch(
       if (await loadConfig(false, true)) {
         void scanConfigFiles(false)
         void checkCanUndoDelete()
-        void checkUpdate(false)
+        debounceCheckUpdate()
       }
     })()
   },
@@ -1373,6 +1415,10 @@ watch(
 
 onUnmounted(() => {
   activeRequestId += 1
+  if (checkUpdateTimer) {
+    clearTimeout(checkUpdateTimer)
+    checkUpdateTimer = undefined
+  }
   if (unsubStateChange) {
     unsubStateChange()
     unsubStateChange = undefined
