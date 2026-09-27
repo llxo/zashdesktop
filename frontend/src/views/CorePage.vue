@@ -15,9 +15,11 @@
 
     <div class="mx-auto w-full max-w-3xl p-3 md:p-6">
       <CoreSettings
-        :active-tab="activeTab"
+        v-if="activeTab !== 'settings'"
         :core-type="coreType"
-        @update:core-type="handleCoreTypeUpdate"
+      />
+      <CoreGeneralSettings
+        v-else
       />
     </div>
   </div>
@@ -27,6 +29,7 @@
 import * as CoreService from '@/../bindings/zashdesktop/coreservice'
 import CtrlsBar from '@/components/common/CtrlsBar.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
+import CoreGeneralSettings from '@/components/settings/core/CoreGeneralSettings.vue'
 import CoreSettings from '@/components/settings/core/CoreSettings.vue'
 import { usePaddingForViews } from '@/composables/paddingViews'
 import { computed, onMounted, ref } from 'vue'
@@ -45,13 +48,6 @@ const tabOptions = computed<SegmentOption[]>(() => [
   { value: 'mihomo', label: 'mihomo' },
   { value: 'settings', label: t('settings') },
 ])
-
-const handleCoreTypeUpdate = (nextType: CoreType) => {
-  coreType.value = nextType
-  if (activeTab.value !== 'settings') {
-    activeTab.value = nextType
-  }
-}
 
 const changeTab = (nextTab: string) => {
   if (nextTab === activeTab.value) return
