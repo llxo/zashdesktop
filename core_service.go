@@ -496,7 +496,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	s.detectAnyInheritedProcessLocked()
 	if s.inheritedProcess != nil {
 		coreDebugf("start request rejected: inherited %s core already running (PID %d)", s.inheritedCoreType, s.inheritedProcess.Pid)
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, errors.New("inherited core process is already running")
 	}
 	if s.process != nil {
 		alive, aliveErr := coreProcessAlive(s.process.Process)
@@ -510,7 +510,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 				runningCoreType = coreTypeSingBox
 			}
 			coreDebugf("start request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
-			return CoreConfig{}, errors.New("coreAlreadyRunning")
+			return CoreConfig{}, errors.New("core process is already running")
 		}
 	}
 	if s.process != nil && s.processDone == nil {
@@ -519,7 +519,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 			runningCoreType = coreTypeSingBox
 		}
 		coreDebugf("start request rejected: %s core already running (undone)", runningCoreType)
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, errors.New("core process is already running")
 	}
 
 	config, err := s.loadConfigForTypeLocked(coreType)
@@ -692,13 +692,13 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 		}
 		coreDebugf("restart request rejected: %s core already running (PID %d)", runningCoreType, s.process.Process.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, errors.New("another core process is already running")
 	}
 	if s.inheritedProcess != nil && s.inheritedCoreType != coreType {
 		runningCoreType := s.inheritedCoreType
 		coreDebugf("restart request rejected: inherited %s core already running (PID %d)", runningCoreType, s.inheritedProcess.Pid)
 		s.mu.Unlock()
-		return CoreConfig{}, errors.New("coreAlreadyRunning")
+		return CoreConfig{}, errors.New("inherited core process is already running")
 	}
 	s.mu.Unlock()
 	if err := s.stopCoreProcess(); err != nil {

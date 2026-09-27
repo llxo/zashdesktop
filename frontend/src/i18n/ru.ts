@@ -708,7 +708,6 @@ const ru: LANG_MESSAGE = {
   coreRestart: 'Перезапустить',
   coreOpenLog: 'Открыть журнал',
   coreStartFailed: 'Сбой запуска ядра, пожалуйста, проверьте журнал',
-  coreAlreadyRunning: 'Ядро уже запущено',
   coreConfigURLPlaceholder: 'Вставьте ссылку на конфигурацию',
   downloadConfig: 'Скачать',
   coreConfig: 'Конфигурация',

@@ -52,7 +52,6 @@
                 v-if="!config.running"
                 class="btn btn-primary btn-sm min-w-16"
                 :disabled="isStarting || isStopping || isRestarting || !config.installed || isOtherCoreRunning"
-                :title="isOtherCoreRunning ? $t('coreAlreadyRunning') : undefined"
                 @click="startCore"
               >
                 <span
@@ -83,7 +82,9 @@
               </button>
               <button
                 class="btn btn-sm min-w-16"
-                :disabled="isStarting || isStopping || isRestarting || !config.installed"
+                :disabled="
+                  isStarting || isStopping || isRestarting || !config.installed || isOtherCoreRunning
+                "
                 @click="restartCore"
               >
                 <span
@@ -698,7 +699,6 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
 
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 const coreType = computed(() => props.coreType)
-const isAnyCoreRunning = computed(() => Boolean(config.runningCore || config.running))
 const isOtherCoreRunning = computed(
   () => Boolean(config.runningCore && config.runningCore !== coreType.value),
 )
@@ -864,21 +864,12 @@ const scanConfigFiles = async (notify = false) => {
 
 const handleSelectConfigFile = async () => {
   if (isSelectingConfigFile.value || !activeConfigFile.value) return
-  if (config.running) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   isSelectingConfigFile.value = true
   try {
     await CoreService.SelectConfigFile(activeConfigFile.value, coreType.value)
   } catch (error) {
     syncActiveConfigFile()
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSelectingConfigFile.value = false
   }
@@ -899,10 +890,6 @@ const deleteActiveConfigFile = async () => {
     availableConfigFiles.value.length === 0
   )
     return
-  if (config.running) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   isDeletingConfigFile.value = true
   try {
     await CoreService.DeleteConfigFile(activeConfigFile.value, coreType.value)
@@ -910,12 +897,7 @@ const deleteActiveConfigFile = async () => {
     showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
     await scanConfigFiles(false)
   } catch (error) {
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isDeletingConfigFile.value = false
   }
@@ -923,10 +905,6 @@ const deleteActiveConfigFile = async () => {
 
 const undoDeleteConfigFile = async () => {
   if (isUndoingDelete.value || !canUndoDelete.value) return
-  if (config.running) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   isUndoingDelete.value = true
   try {
     await CoreService.UndoDeleteConfigFile(coreType.value)
@@ -935,12 +913,7 @@ const undoDeleteConfigFile = async () => {
     await scanConfigFiles(false)
   } catch (error) {
     await checkCanUndoDelete()
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isUndoingDelete.value = false
   }
@@ -1007,10 +980,6 @@ const checkUnclosedQuotes = (args: string): boolean => {
 
 const saveRunArgs = async () => {
   if (isSavingRunArgs.value) return
-  if (config.running) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   if (checkUnclosedQuotes(runArgsInput.value)) {
     showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
     return
@@ -1026,12 +995,7 @@ const saveRunArgs = async () => {
       applyConfig(updated)
     }
   } catch (error) {
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSavingRunArgs.value = false
   }
@@ -1039,10 +1003,6 @@ const saveRunArgs = async () => {
 
 const startCore = async () => {
   if (isStarting.value) return
-  if (isAnyCoreRunning.value) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   if (checkUnclosedQuotes(runArgsInput.value)) {
     showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
     return
@@ -1055,12 +1015,7 @@ const startCore = async () => {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isStarting.value = false
   }
@@ -1080,10 +1035,6 @@ const stopCore = async () => {
 
 const restartCore = async () => {
   if (isRestarting.value || !config.installed) return
-  if (config.runningCore && config.runningCore !== coreType.value) {
-    showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    return
-  }
   if (checkUnclosedQuotes(runArgsInput.value)) {
     showNotification({ content: 'runArgsUnclosedQuote', type: 'alert-warning' })
     return
@@ -1096,12 +1047,7 @@ const restartCore = async () => {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {
-    const errStr = String(error)
-    if (errStr.includes('coreAlreadyRunning')) {
-      showNotification({ content: 'coreAlreadyRunning', type: 'alert-warning' })
-    } else {
-      showNotification({ content: errStr, type: 'alert-error', timeout: 0 })
-    }
+    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isRestarting.value = false
   }
