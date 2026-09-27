@@ -24,11 +24,12 @@
 </template>
 
 <script setup lang="ts">
+import * as CoreService from '@/../bindings/zashdesktop/coreservice'
 import CtrlsBar from '@/components/common/CtrlsBar.vue'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
 import CoreSettings from '@/components/settings/core/CoreSettings.vue'
 import { usePaddingForViews } from '@/composables/paddingViews'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 type CoreType = 'sing-box' | 'mihomo'
@@ -58,12 +59,24 @@ const changeTab = (nextTab: string) => {
   if (nextTab === 'settings') {
     return
   }
-  const nextCoreType: CoreType = nextTab === 'mihomo' ? 'mihomo' : 'sing-box'
-  coreType.value = nextCoreType
+  coreType.value = nextTab as CoreType
 }
 
 const { padding } = usePaddingForViews({
   offsetTop: 0,
   offsetBottom: 8,
+})
+
+onMounted(async () => {
+  try {
+    const active = await CoreService.GetConfig()
+    if (active?.coreType) {
+      const nextCoreType: CoreType = active.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
+      coreType.value = nextCoreType
+      if (activeTab.value !== 'settings') {
+        activeTab.value = nextCoreType
+      }
+    }
+  } catch {}
 })
 </script>

@@ -51,7 +51,8 @@
               <button
                 v-if="!config.running"
                 class="btn btn-primary btn-sm min-w-16"
-                :disabled="isStarting || isStopping || isRestarting || !config.installed"
+                :disabled="isStarting || isStopping || isRestarting || !config.installed || isOtherCoreRunning"
+                :title="isOtherCoreRunning ? $t('coreAlreadyRunning') : undefined"
                 @click="startCore"
               >
                 <span
@@ -698,6 +699,9 @@ const emptyCoreConfig = (coreType: CoreType): CoreConfig => ({
 const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
 const coreType = computed(() => props.coreType)
 const isAnyCoreRunning = computed(() => Boolean(config.runningCore || config.running))
+const isOtherCoreRunning = computed(
+  () => Boolean(config.runningCore && config.runningCore !== coreType.value),
+)
 const { t } = useI18n()
 
 const channelOptions = computed<SegmentOption[]>(() => [
@@ -740,7 +744,6 @@ const isSavingRunArgs = ref(false)
 const isDownloadingConfig = ref(false)
 const isImportingConfig = ref(false)
 const isSavingBehavior = ref(false)
-const isRefreshing = ref(false)
 const isCheckingAppUpdate = ref(false)
 const isUpdatingApp = ref(false)
 const isScanningConfigFiles = ref(false)
@@ -829,7 +832,7 @@ const handleSourceChange = () => {
 const syncActiveConfigFile = () => {
   const target = config.configFileName || defaultConfigFileName.value
   if (availableConfigFiles.value.length === 0) {
-    activeConfigFile.value = target
+    activeConfigFile.value = ''
     return
   }
   if (availableConfigFiles.value.includes(target)) {
@@ -947,10 +950,13 @@ const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
   try {
-    await CoreService.UpdateCoreSettings({
+    const updated = await CoreService.UpdateCoreSettings({
       coreType: coreType.value,
       channel: rawChannel,
     })
+    if (updated) {
+      applyConfig(updated)
+    }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
@@ -1011,12 +1017,14 @@ const saveRunArgs = async () => {
   }
   isSavingRunArgs.value = true
   try {
-    await CoreService.UpdateCoreSettings({
+    const updated = await CoreService.UpdateCoreSettings({
       coreType: coreType.value,
       runArgs: runArgsInput.value,
     })
     isRunArgsDirty.value = false
-    syncActiveConfigFile()
+    if (updated) {
+      applyConfig(updated)
+    }
   } catch (error) {
     const errStr = String(error)
     if (errStr.includes('coreAlreadyRunning')) {
@@ -1180,7 +1188,6 @@ const importConfig = async (event: Event) => {
 }
 
 const loadConfig = async (useActiveCore = false, forceInputs = false) => {
-  isRefreshing.value = true
   const reqId = ++activeRequestId
   const targetCore = coreType.value
   try {
@@ -1194,10 +1201,6 @@ const loadConfig = async (useActiveCore = false, forceInputs = false) => {
     return false
   } catch {
     return false
-  } finally {
-    if (reqId === activeRequestId) {
-      isRefreshing.value = false
-    }
   }
 }
 
@@ -1225,8 +1228,9 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
   }
   isSavingBehavior.value = true
   try {
-    await CoreService.UpdateCoreSettings({
-      coreType: coreType.value,
+    const targetCore = changedCoreType || coreType.value
+    const updated = await CoreService.UpdateCoreSettings({
+      coreType: targetCore,
       runAsAdmin: config.runAsAdmin,
       autoStart: config.autoStart,
       autoStartSingBox: config.autoStartSingBox,
@@ -1234,6 +1238,9 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
       stopCoreOnExit: config.stopCoreOnExit,
       backendDebugLog: config.backendDebugLog,
     })
+    if (updated) {
+      applyConfig(updated)
+    }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     await loadConfig(false, true)
@@ -1392,12 +1399,15 @@ const handleVisibilityChange = () => {
 
 watch(
   () => props.coreType,
-  () => {
+  (nextType, prevType) => {
+    if (nextType === prevType) return
+    if (config.coreType === nextType && config.installed !== undefined && config.corePath) {
+      return
+    }
     activeRequestId += 1
     checkSequence += 1
     activeCheckKey = ''
     isChecking.value = false
-    isRefreshing.value = false
     availableConfigFiles.value = []
     activeConfigFile.value = ''
     canUndoDelete.value = false
@@ -1417,7 +1427,6 @@ watch(
 
 onUnmounted(() => {
   activeRequestId += 1
-  isRefreshing.value = false
   if (unsubStateChange) {
     unsubStateChange()
     unsubStateChange = undefined
