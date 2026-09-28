@@ -206,6 +206,19 @@ const handleSourceChange = () => {
   debounceCheckUpdate(false, true, 400)
 }
 
+const syncVersionFromCache = (coreType: CoreType, channel: CoreChannel) => {
+  const checkKey = `${coreType}:${channel}`
+  const cached = versionCheckCache.get(checkKey)
+  if (cached) {
+    props.config.latestVersion = cached.latestVersion
+    props.config.updateAvailable = cached.updateAvailable
+    return true
+  }
+  props.config.latestVersion = ''
+  props.config.updateAvailable = false
+  return false
+}
+
 const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
@@ -216,13 +229,15 @@ const saveChannel = async (rawChannel: string) => {
     })
     if (updated) {
       emit('update:config', updated)
+      const nextChannel: CoreChannel = updated.channel === 'test' ? 'test' : 'stable'
+      syncVersionFromCache(props.coreType, nextChannel)
+      debounceCheckUpdate(false, true, 200)
     }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
     isSavingChannel.value = false
   }
-  debounceCheckUpdate(false, true, 400)
 }
 
 const CORE_UPDATE_CHECK_TTL = 60_000
@@ -326,31 +341,39 @@ const downloadCore = async () => {
 
 onMounted(() => {
   loadSavedSource()
-  const checkKey = `${props.coreType}:${currentChannel.value}`
-  const cached = versionCheckCache.get(checkKey)
-  if (cached) {
-    props.config.latestVersion = cached.latestVersion
-    props.config.updateAvailable = cached.updateAvailable
+  if (props.config.channel) {
+    const channel: CoreChannel = props.config.channel === 'test' ? 'test' : 'stable'
+    const hasCached = syncVersionFromCache(props.coreType, channel)
+    if (!hasCached) {
+      debounceCheckUpdate(false, false, 300)
+    }
   }
-  debounceCheckUpdate(false, false, 300)
 })
 
 watch(
-  () => props.coreType,
-  (nextType, prevType) => {
-    if (nextType === prevType) return
-    checkSequence += 1
-    activeCheckKey = ''
-    isChecking.value = false
-    const cacheKey = `${nextType}:${currentChannel.value}`
-    const cached = versionCheckCache.get(cacheKey)
-    if (cached) {
-      props.config.latestVersion = cached.latestVersion
-      props.config.updateAvailable = cached.updateAvailable
+  () => [props.coreType, props.config.channel] as const,
+  ([nextType, nextChannel], [prevType, prevChannel]) => {
+    if (!nextChannel) return
+
+    const normalizedChannel: CoreChannel = nextChannel === 'test' ? 'test' : 'stable'
+    const typeChanged = nextType !== prevType
+    const channelChanged = nextChannel !== prevChannel
+
+    if (typeChanged) {
+      checkSequence += 1
+      activeCheckKey = ''
+      isChecking.value = false
+      loadSavedSource()
     }
-    loadSavedSource()
-    debounceCheckUpdate(false, false, 400)
+
+    if (typeChanged || channelChanged) {
+      const hasCached = syncVersionFromCache(nextType, normalizedChannel)
+      if (!hasCached) {
+        debounceCheckUpdate(false, false, 300)
+      }
+    }
   },
+  { immediate: true },
 )
 
 onUnmounted(() => {

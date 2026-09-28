@@ -78,7 +78,12 @@ let unsubStateChange: (() => void) | undefined
 let stateChangeTimer: ReturnType<typeof setTimeout> | undefined
 
 const applyConfig = (next: CoreConfig) => {
-  if (!next.latestVersion && config.latestVersion && next.coreType === config.coreType) {
+  if (
+    !next.latestVersion &&
+    config.latestVersion &&
+    next.coreType === config.coreType &&
+    next.channel === config.channel
+  ) {
     next.latestVersion = config.latestVersion
     next.updateAvailable = config.updateAvailable
   }
