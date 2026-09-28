@@ -15,11 +15,11 @@
 
     <div class="mx-auto w-full max-w-3xl p-3 md:p-6">
       <CoreSettings
-        v-if="activeTab !== 'settings'"
+        v-show="activeTab !== 'settings'"
         :core-type="coreType"
       />
       <CoreGeneralSettings
-        v-else
+        v-show="activeTab === 'settings'"
       />
     </div>
   </div>
@@ -38,10 +38,14 @@ import { useI18n } from 'vue-i18n'
 type CoreType = 'sing-box' | 'mihomo'
 type CoreTab = 'sing-box' | 'mihomo' | 'settings'
 
+let lastActiveTab: CoreTab = 'sing-box'
+let lastCoreType: CoreType = 'sing-box'
+let initialCoreLoaded = false
+
 const { t } = useI18n()
 
-const activeTab = ref<CoreTab>('sing-box')
-const coreType = ref<CoreType>('sing-box')
+const activeTab = ref<CoreTab>(lastActiveTab)
+const coreType = ref<CoreType>(lastCoreType)
 
 const tabOptions = computed<SegmentOption[]>(() => [
   { value: 'sing-box', label: 'sing-box' },
@@ -52,10 +56,12 @@ const tabOptions = computed<SegmentOption[]>(() => [
 const changeTab = (nextTab: string) => {
   if (nextTab === activeTab.value) return
   activeTab.value = nextTab as CoreTab
+  lastActiveTab = activeTab.value
   if (nextTab === 'settings') {
     return
   }
   coreType.value = nextTab as CoreType
+  lastCoreType = coreType.value
 }
 
 const { padding } = usePaddingForViews({
@@ -64,14 +70,18 @@ const { padding } = usePaddingForViews({
 })
 
 onMounted(async () => {
+  if (initialCoreLoaded) return
   try {
     const active = await CoreService.GetConfig()
     if (active?.coreType) {
       const nextCoreType: CoreType = active.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
       coreType.value = nextCoreType
+      lastCoreType = nextCoreType
       if (activeTab.value !== 'settings') {
         activeTab.value = nextCoreType
+        lastActiveTab = nextCoreType
       }
+      initialCoreLoaded = true
     }
   } catch {}
 })

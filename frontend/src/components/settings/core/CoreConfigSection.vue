@@ -328,10 +328,6 @@ const downloadConfig = async () => {
 }
 
 const openConfigFilePicker = () => {
-  const targetFileName = saveTargetFileName.value.trim()
-  if (!validateConfigFileName(targetFileName, props.coreType)) {
-    return
-  }
   configFileInput.value?.click()
 }
 
@@ -351,8 +347,8 @@ const importConfig = async (event: Event) => {
     return
   }
 
-  const targetFileName = saveTargetFileName.value.trim()
-  if (!validateConfigFileName(targetFileName, props.coreType)) {
+  const originalFileName = file.name.trim()
+  if (!validateConfigFileName(originalFileName, props.coreType)) {
     input.value = ''
     return
   }
@@ -360,8 +356,8 @@ const importConfig = async (event: Event) => {
   isImportingConfig.value = true
   try {
     const text = await file.text()
-    await CoreService.ImportConfig(text, targetFileName, props.coreType)
-    void scanConfigFiles(false)
+    await CoreService.ImportConfig(text, originalFileName, props.coreType)
+    await scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })

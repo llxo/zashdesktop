@@ -38,7 +38,7 @@
             :aria-label="$t('checkUpdate')"
             :title="$t('checkUpdate')"
             :disabled="isChecking || isDownloading"
-            @click="checkUpdate(true, true)"
+            @click="handleManualCheckUpdate"
           >
             <span
               v-if="isChecking"
@@ -134,6 +134,14 @@ import {
   type DownloadSource,
 } from './coreSources'
 
+interface VersionCheckEntry {
+  latestVersion: string
+  updateAvailable: boolean
+  timestamp: number
+}
+
+const versionCheckCache = new Map<string, VersionCheckEntry>()
+
 const props = defineProps<{
   coreType: CoreType
   config: CoreConfig
@@ -195,7 +203,7 @@ const handleSourceChange = () => {
   try {
     localStorage.setItem(sourceStorageKey.value, selectedSourceLabel.value)
   } catch {}
-  void checkUpdate(false, true)
+  debounceCheckUpdate(false, true, 400)
 }
 
 const saveChannel = async (rawChannel: string) => {
@@ -214,29 +222,30 @@ const saveChannel = async (rawChannel: string) => {
   } finally {
     isSavingChannel.value = false
   }
-  void checkUpdate(false, true)
+  debounceCheckUpdate(false, true, 400)
 }
 
 const CORE_UPDATE_CHECK_TTL = 60_000
 
-interface VersionCheckCache {
-  latestVersion: string
-  updateAvailable: boolean
-  timestamp: number
-}
-
-const lastCheckTimestamps: Record<string, VersionCheckCache> = {}
 let activeCheckKey = ''
 let checkSequence = 0
 let checkUpdateTimer: ReturnType<typeof setTimeout> | undefined
+let lastManualCheckTime = 0
 
-const debounceCheckUpdate = (delay = 300) => {
+const handleManualCheckUpdate = () => {
+  const now = Date.now()
+  if (now - lastManualCheckTime < 800 || isChecking.value) return
+  lastManualCheckTime = now
+  void checkUpdate(true, true)
+}
+
+const debounceCheckUpdate = (notifyError = false, force = false, delay = 400) => {
   if (checkUpdateTimer) {
     clearTimeout(checkUpdateTimer)
   }
   checkUpdateTimer = setTimeout(() => {
     checkUpdateTimer = undefined
-    void checkUpdate(false)
+    void checkUpdate(notifyError, force)
   }, delay)
 }
 
@@ -246,7 +255,7 @@ const checkUpdate = async (notifyError = true, force = false) => {
   const checkKey = `${targetCoreType}:${targetChannel}`
 
   const now = Date.now()
-  const cached = lastCheckTimestamps[checkKey]
+  const cached = versionCheckCache.get(checkKey)
   if (!force && cached && now - cached.timestamp < CORE_UPDATE_CHECK_TTL) {
     if (props.coreType === targetCoreType && currentChannel.value === targetChannel) {
       props.config.latestVersion = cached.latestVersion
@@ -277,11 +286,11 @@ const checkUpdate = async (notifyError = true, force = false) => {
       if (next.version) {
         props.config.version = next.version
       }
-      lastCheckTimestamps[checkKey] = {
+      versionCheckCache.set(checkKey, {
         latestVersion: next.latestVersion,
         updateAvailable: next.updateAvailable,
         timestamp: Date.now(),
-      }
+      })
     }
     return next
   } catch (error) {
@@ -317,7 +326,13 @@ const downloadCore = async () => {
 
 onMounted(() => {
   loadSavedSource()
-  void checkUpdate(false)
+  const checkKey = `${props.coreType}:${currentChannel.value}`
+  const cached = versionCheckCache.get(checkKey)
+  if (cached) {
+    props.config.latestVersion = cached.latestVersion
+    props.config.updateAvailable = cached.updateAvailable
+  }
+  debounceCheckUpdate(false, false, 300)
 })
 
 watch(
@@ -328,13 +343,13 @@ watch(
     activeCheckKey = ''
     isChecking.value = false
     const cacheKey = `${nextType}:${currentChannel.value}`
-    const cached = lastCheckTimestamps[cacheKey]
+    const cached = versionCheckCache.get(cacheKey)
     if (cached) {
       props.config.latestVersion = cached.latestVersion
       props.config.updateAvailable = cached.updateAvailable
     }
     loadSavedSource()
-    debounceCheckUpdate()
+    debounceCheckUpdate(false, false, 400)
   },
 )
 

@@ -16,24 +16,28 @@
               class="toggle"
               type="checkbox"
               :disabled="isSavingBehavior"
-              @change="saveBehavior()"
+              @change="updateSetting('runAsAdmin')"
             />
           </div>
         </label>
-        <div class="setting-item">
+        <label
+          class="setting-item"
+          :class="{ 'opacity-50 cursor-not-allowed': !behaviorConfig.isAdmin }"
+          :title="!behaviorConfig.isAdmin ? $t('adminPrivilegeRequired') : undefined"
+        >
           <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
             {{ $t('coreAutoStart') }}
           </span>
           <div class="flex flex-1 justify-end">
             <input
-              :checked="behaviorConfig.autoStart"
+              v-model="behaviorConfig.autoStart"
               class="toggle"
               type="checkbox"
-              :disabled="isSavingBehavior"
-              @click.prevent="onToggleAutoStart"
+              :disabled="isSavingBehavior || !behaviorConfig.isAdmin"
+              @change="updateSetting('autoStart')"
             />
           </div>
-        </div>
+        </label>
         <label class="setting-item">
           <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
             {{ $t('autoStartSingBox') }}
@@ -44,7 +48,7 @@
               class="toggle"
               type="checkbox"
               :disabled="isSavingBehavior"
-              @change="saveBehavior('sing-box')"
+              @change="updateSetting('autoStartSingBox')"
             />
           </div>
         </label>
@@ -58,7 +62,7 @@
               class="toggle"
               type="checkbox"
               :disabled="isSavingBehavior"
-              @change="saveBehavior('mihomo')"
+              @change="updateSetting('autoStartMihomo')"
             />
           </div>
         </label>
@@ -72,7 +76,7 @@
               class="toggle"
               type="checkbox"
               :disabled="isSavingBehavior"
-              @change="saveBehavior()"
+              @change="updateSetting('stopCoreOnExit')"
             />
           </div>
         </label>
@@ -86,7 +90,7 @@
               class="toggle"
               type="checkbox"
               :disabled="isSavingBehavior"
-              @change="saveBehavior()"
+              @change="updateSetting('backendDebugLog')"
             />
           </div>
         </label>
@@ -172,16 +176,24 @@ import {
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Events } from '@wailsio/runtime'
 
-type CoreType = 'sing-box' | 'mihomo'
+type BehaviorField =
+  | 'runAsAdmin'
+  | 'autoStart'
+  | 'autoStartSingBox'
+  | 'autoStartMihomo'
+  | 'stopCoreOnExit'
+  | 'backendDebugLog'
+
+let cachedBehavior: any = null
 
 const behaviorConfig = reactive({
-  runAsAdmin: false,
-  isAdmin: false,
-  autoStart: false,
-  autoStartSingBox: false,
-  autoStartMihomo: false,
-  stopCoreOnExit: true,
-  backendDebugLog: false,
+  runAsAdmin: cachedBehavior?.runAsAdmin ?? false,
+  isAdmin: cachedBehavior?.isAdmin ?? false,
+  autoStart: cachedBehavior?.autoStart ?? false,
+  autoStartSingBox: cachedBehavior?.autoStartSingBox ?? false,
+  autoStartMihomo: cachedBehavior?.autoStartMihomo ?? false,
+  stopCoreOnExit: cachedBehavior?.stopCoreOnExit ?? true,
+  backendDebugLog: cachedBehavior?.backendDebugLog ?? false,
 })
 
 const isSavingBehavior = ref(false)
@@ -215,44 +227,39 @@ const loadBehaviorConfig = async () => {
       behaviorConfig.autoStartMihomo = config.autoStartMihomo
       behaviorConfig.stopCoreOnExit = config.stopCoreOnExit
       behaviorConfig.backendDebugLog = config.backendDebugLog
+      cachedBehavior = { ...behaviorConfig }
     }
   } catch {}
 }
 
-const onToggleAutoStart = () => {
+const updateSetting = async (key: BehaviorField) => {
   if (isSavingBehavior.value) return
-  if (!behaviorConfig.isAdmin) {
-    showNotification({ content: 'adminPrivilegeRequired', type: 'alert-warning' })
-    return
-  }
-  behaviorConfig.autoStart = !behaviorConfig.autoStart
-  void saveBehavior()
-}
 
-const saveBehavior = async (changedCoreType?: CoreType) => {
-  if (isSavingBehavior.value) return
-  if (!behaviorConfig.isAdmin && behaviorConfig.autoStart) {
+  if (key === 'autoStart' && !behaviorConfig.isAdmin) {
     behaviorConfig.autoStart = false
     showNotification({ content: 'adminPrivilegeRequired', type: 'alert-warning' })
     return
   }
-  if (changedCoreType === 'sing-box' && behaviorConfig.autoStartSingBox) {
+
+  if (key === 'autoStartSingBox' && behaviorConfig.autoStartSingBox) {
     behaviorConfig.autoStartMihomo = false
-  } else if (changedCoreType === 'mihomo' && behaviorConfig.autoStartMihomo) {
+  } else if (key === 'autoStartMihomo' && behaviorConfig.autoStartMihomo) {
     behaviorConfig.autoStartSingBox = false
   }
+
   isSavingBehavior.value = true
   try {
-    const targetCore = changedCoreType || 'sing-box'
-    const updated = await CoreService.UpdateCoreSettings({
-      coreType: targetCore,
-      runAsAdmin: behaviorConfig.runAsAdmin,
-      autoStart: behaviorConfig.autoStart,
-      autoStartSingBox: behaviorConfig.autoStartSingBox,
-      autoStartMihomo: behaviorConfig.autoStartMihomo,
-      stopCoreOnExit: behaviorConfig.stopCoreOnExit,
-      backendDebugLog: behaviorConfig.backendDebugLog,
-    })
+    const patch: any = {
+      coreType: 'sing-box',
+      [key]: behaviorConfig[key],
+    }
+    if (key === 'autoStartSingBox' && behaviorConfig.autoStartSingBox) {
+      patch.autoStartMihomo = false
+    } else if (key === 'autoStartMihomo' && behaviorConfig.autoStartMihomo) {
+      patch.autoStartSingBox = false
+    }
+
+    const updated = await CoreService.UpdateCoreSettings(patch)
     if (updated) {
       behaviorConfig.runAsAdmin = updated.runAsAdmin
       behaviorConfig.isAdmin = updated.isAdmin
@@ -261,6 +268,7 @@ const saveBehavior = async (changedCoreType?: CoreType) => {
       behaviorConfig.autoStartMihomo = updated.autoStartMihomo
       behaviorConfig.stopCoreOnExit = updated.stopCoreOnExit
       behaviorConfig.backendDebugLog = updated.backendDebugLog
+      cachedBehavior = { ...behaviorConfig }
     }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })

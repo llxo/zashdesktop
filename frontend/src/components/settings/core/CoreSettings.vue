@@ -67,14 +67,23 @@ const emptyCoreConfig = (type: CoreType): CoreConfig => ({
   clashApiSecret: '',
 })
 
-const config = reactive<CoreConfig>(emptyCoreConfig(props.coreType))
+const coreConfigCache: Record<string, CoreConfig> = {}
+
+const config = reactive<CoreConfig>({
+  ...(coreConfigCache[props.coreType] || emptyCoreConfig(props.coreType)),
+})
 
 let activeRequestId = 0
 let unsubStateChange: (() => void) | undefined
 let stateChangeTimer: ReturnType<typeof setTimeout> | undefined
 
 const applyConfig = (next: CoreConfig) => {
+  if (!next.latestVersion && config.latestVersion && next.coreType === config.coreType) {
+    next.latestVersion = config.latestVersion
+    next.updateAvailable = config.updateAvailable
+  }
   Object.assign(config, next)
+  coreConfigCache[config.coreType] = { ...config }
 }
 
 const loadConfig = async () => {
@@ -113,7 +122,12 @@ watch(
   (nextType, prevType) => {
     if (nextType === prevType) return
     activeRequestId += 1
-    Object.assign(config, emptyCoreConfig(nextType))
+    const cached = coreConfigCache[nextType]
+    if (cached) {
+      Object.assign(config, cached)
+    } else {
+      Object.assign(config, emptyCoreConfig(nextType))
+    }
     void loadConfig()
   },
 )

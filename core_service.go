@@ -426,13 +426,17 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 			stopCoreOnExit = *patch.StopCoreOnExit
 		}
 
-		if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
-			debugLogf("system", "update settings write RunAsAdmin failed: %v", err)
-			return CoreConfig{}, err
+		if patch.RunAsAdmin != nil && runAsAdmin != config.RunAsAdmin {
+			if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
+				debugLogf("system", "update settings write RunAsAdmin failed: %v", err)
+				return CoreConfig{}, err
+			}
 		}
-		if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
-			debugLogf("system", "update settings write auto start failed: %v", err)
-			return CoreConfig{}, err
+		if patch.AutoStart != nil && autoStart != config.AutoStart {
+			if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
+				debugLogf("system", "update settings write auto start failed: %v", err)
+				return CoreConfig{}, err
+			}
 		}
 
 		behavior := sharedBehaviorConfig{
@@ -464,8 +468,10 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 		}
 		s.mu.Unlock()
 
-		if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
-			return CoreConfig{}, err
+		if patch.BackendDebugLog != nil {
+			if err := configureCoreDebugLog(s.backendDebugLogPath(), backendDebugLog); err != nil {
+				return CoreConfig{}, err
+			}
 		}
 	}
 
@@ -938,6 +944,9 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.ConfigPath = s.configFilePath(*config)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	config.IsAdmin = isPrivilegedCached()
+	if autoStart, err := readAutoStartSetting(); err == nil {
+		config.AutoStart = autoStart
+	}
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}

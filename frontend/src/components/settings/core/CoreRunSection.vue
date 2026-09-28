@@ -64,7 +64,7 @@
           </button>
           <button
             v-else
-            class="btn btn-error btn-sm min-w-16"
+            class="btn btn-sm text-error min-w-16"
             :disabled="isStarting || isStopping || isRestarting"
             @click="stopCore"
           >
