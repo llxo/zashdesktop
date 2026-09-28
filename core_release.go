@@ -47,10 +47,9 @@ var (
 	testVerPattern    = regexp.MustCompile(`(?i)^(?:alpha|alpha-smart|beta|dev|rc|nightly|preview)(?:[-._][0-9a-z]+)*$`)
 	testChanPattern   = regexp.MustCompile(`(?i)(^|[-._])(alpha|beta|rc|dev|nightly|preview)([-._]|\d|$)`)
 	githubProxies     = []string{
-		"https://gh-proxy.org",
+		"https://v6.gh-proxy.org",
+		"https://v4.gh-proxy.org",
 		"https://ghfast.top",
-		"https://down.clashparty.org",
-		"https://download.mihomo.party",
 	}
 )
 
