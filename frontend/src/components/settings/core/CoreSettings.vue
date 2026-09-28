@@ -127,12 +127,18 @@ watch(
   (nextType, prevType) => {
     if (nextType === prevType) return
     activeRequestId += 1
+    const currentRunningCore = config.runningCore
+    const currentRunningPID = config.pid
     const cached = coreConfigCache[nextType]
     if (cached) {
       Object.assign(config, cached)
     } else {
       Object.assign(config, emptyCoreConfig(nextType))
     }
+    // 保持实时权威的核心运行状态，避免过期快照导致按钮状态来回跳变
+    config.runningCore = currentRunningCore
+    config.running = Boolean(currentRunningCore && currentRunningCore === nextType)
+    config.pid = config.running ? currentRunningPID : 0
     void loadConfig()
   },
 )

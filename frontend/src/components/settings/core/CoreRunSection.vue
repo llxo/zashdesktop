@@ -209,6 +209,9 @@ const startCore = async () => {
   try {
     const next = await CoreService.StartCore(runArgsInput.value, props.coreType)
     isRunArgsDirty.value = false
+    if (next) {
+      emit('update:config', next)
+    }
     if (next && !next.running && next.coreLogError) {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
@@ -223,7 +226,10 @@ const stopCore = async () => {
   if (isStopping.value || !props.config.running) return
   isStopping.value = true
   try {
-    await CoreService.StopCore()
+    const next = await CoreService.StopCore()
+    if (next) {
+      emit('update:config', next)
+    }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
@@ -241,6 +247,9 @@ const restartCore = async () => {
   try {
     const next = await CoreService.RestartCore(runArgsInput.value, props.coreType)
     isRunArgsDirty.value = false
+    if (next) {
+      emit('update:config', next)
+    }
     if (next && !next.running && next.coreLogError) {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
