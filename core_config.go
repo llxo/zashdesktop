@@ -122,7 +122,6 @@ func (s *CoreService) DownloadConfig(rawURL, rawFileName, rawCoreType string) (C
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	debugLogf("config", "download config success: type=%s target=%q size=%d (activeConfig=%q)", config.CoreType, targetPath, len(data), config.ConfigFileName)
 	return config, nil
 }
@@ -166,7 +165,6 @@ func (s *CoreService) ImportConfig(rawContent, sourceFileName, rawCoreType strin
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	debugLogf("config", "import config success: type=%s file=%q size=%d (activeConfig=%q)", config.CoreType, targetPath, len(data), config.ConfigFileName)
 	return config, nil
 }
@@ -247,7 +245,6 @@ func (s *CoreService) SelectConfigFile(rawFileName, rawCoreType string) (CoreCon
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	return config, nil
 }
 
@@ -325,7 +322,6 @@ func (s *CoreService) DeleteConfigFile(rawFileName, rawCoreType string) (CoreCon
 	}
 
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	return config, nil
 }
 
@@ -371,7 +367,6 @@ func (s *CoreService) UndoDeleteConfigFile(rawCoreType string) (CoreConfig, erro
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	return config, nil
 }
 

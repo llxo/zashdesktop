@@ -182,6 +182,10 @@ const props = defineProps<{
   config: CoreConfig
 }>()
 
+const emit = defineEmits<{
+  (e: 'update:config', config: CoreConfig): void
+}>()
+
 const defaultConfigFileName = computed(() =>
   props.coreType === 'mihomo' ? 'config.yaml' : 'config.json',
 )
@@ -250,7 +254,10 @@ const handleSelectConfigFile = async () => {
   if (isSelectingConfigFile.value || !activeConfigFile.value) return
   isSelectingConfigFile.value = true
   try {
-    await CoreService.SelectConfigFile(activeConfigFile.value, props.coreType)
+    const updated = await CoreService.SelectConfigFile(activeConfigFile.value, props.coreType)
+    if (updated) {
+      emit('update:config', updated)
+    }
   } catch (error) {
     syncActiveConfigFile()
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
@@ -276,7 +283,10 @@ const deleteActiveConfigFile = async () => {
     return
   isDeletingConfigFile.value = true
   try {
-    await CoreService.DeleteConfigFile(activeConfigFile.value, props.coreType)
+    const updated = await CoreService.DeleteConfigFile(activeConfigFile.value, props.coreType)
+    if (updated) {
+      emit('update:config', updated)
+    }
     canUndoDelete.value = true
     showNotification({ content: 'coreConfigFileDeleted', type: 'alert-success' })
     await scanConfigFiles(false)
@@ -291,7 +301,10 @@ const undoDeleteConfigFile = async () => {
   if (isUndoingDelete.value || !canUndoDelete.value) return
   isUndoingDelete.value = true
   try {
-    await CoreService.UndoDeleteConfigFile(props.coreType)
+    const updated = await CoreService.UndoDeleteConfigFile(props.coreType)
+    if (updated) {
+      emit('update:config', updated)
+    }
     canUndoDelete.value = false
     showNotification({ content: 'coreConfigFileRestored', type: 'alert-success' })
     await scanConfigFiles(false)
@@ -316,7 +329,10 @@ const downloadConfig = async () => {
   }
   isDownloadingConfig.value = true
   try {
-    await CoreService.DownloadConfig(rawURL, targetFileName, props.coreType)
+    const updated = await CoreService.DownloadConfig(rawURL, targetFileName, props.coreType)
+    if (updated) {
+      emit('update:config', updated)
+    }
     isConfigURLDirty.value = false
     void scanConfigFiles(false)
     showNotification({ content: 'coreConfigDownloadSuccess', type: 'alert-success' })
@@ -356,7 +372,10 @@ const importConfig = async (event: Event) => {
   isImportingConfig.value = true
   try {
     const text = await file.text()
-    await CoreService.ImportConfig(text, originalFileName, props.coreType)
+    const updated = await CoreService.ImportConfig(text, originalFileName, props.coreType)
+    if (updated) {
+      emit('update:config', updated)
+    }
     await scanConfigFiles(false)
     showNotification({ content: 'coreConfigImportSuccess', type: 'alert-success' })
   } catch (error) {
