@@ -332,6 +332,7 @@ type App struct {
 	clearCacheMu          sync.Mutex
 	forceClose            bool
 	quitting              bool
+	lastBlurTime          time.Time
 	mu                    sync.Mutex
 }
 
@@ -389,7 +390,19 @@ func (a *App) showWindow() {
 }
 
 func (a *App) hideWindow() {
+	a.mu.Lock()
+	a.lastBlurTime = time.Time{}
+	a.mu.Unlock()
 	a.releaseWindow(nil)
+}
+
+func (a *App) isWindowInForeground(win *application.WebviewWindow) bool {
+	if win == nil || !win.IsVisible() || win.IsMinimised() {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return win.IsFocused() || (!a.lastBlurTime.IsZero() && time.Since(a.lastBlurTime) < 500*time.Millisecond)
 }
 
 func (a *App) toggleWindow() {
@@ -401,13 +414,13 @@ func (a *App) toggleWindow() {
 	win := a.window
 	a.mu.Unlock()
 
-	if win != nil && win.IsVisible() && !win.IsMinimised() {
-		debugLogf("app", "tray clicked: window is visible, closing window")
+	if a.isWindowInForeground(win) {
+		debugLogf("app", "tray clicked: window is focused/foreground, closing window")
 		a.hideWindow()
 		return
 	}
 
-	debugLogf("app", "tray clicked: window not visible or minimised, showing window")
+	debugLogf("app", "tray clicked: window not focused/foreground, showing and focusing window")
 	a.showWindow()
 }
 
@@ -427,6 +440,11 @@ func (a *App) createWindowLocked() *application.WebviewWindow {
 	window := a.app.Window.NewWithOptions(a.launch.windowOptions(a.windowState))
 	window.OnWindowEvent(events.Common.WindowDidMove, a.scheduleWindowStateSave)
 	window.OnWindowEvent(events.Common.WindowDidResize, a.scheduleWindowStateSave)
+	window.OnWindowEvent(events.Common.WindowLostFocus, func(*application.WindowEvent) {
+		a.mu.Lock()
+		a.lastBlurTime = time.Now()
+		a.mu.Unlock()
+	})
 	window.RegisterHook(events.Common.WindowClosing, a.releaseWindow)
 	a.window = window
 	return window
