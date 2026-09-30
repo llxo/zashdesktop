@@ -98,11 +98,18 @@
             @change="handleSelectConfigFile"
           >
             <option
-              v-if="availableConfigFiles.length === 0"
+              v-if="hasLoaded && availableConfigFiles.length === 0"
               disabled
               value=""
             >
               {{ $t('noConfigFilesFound') }}
+            </option>
+            <option
+              v-else-if="!hasLoaded && availableConfigFiles.length === 0"
+              disabled
+              :value="activeConfigFile"
+            >
+              {{ activeConfigFile || $t('fetchingConfiguration') }}
             </option>
             <option
               v-for="file in availableConfigFiles"
@@ -163,6 +170,21 @@
   </section>
 </template>
 
+<script lang="ts">
+import { reactive } from 'vue'
+import type { CoreType } from './coreSources'
+
+const configFileCache = reactive<Record<CoreType, string[]>>({
+  'sing-box': [],
+  'mihomo': [],
+})
+
+const configFilesLoaded = reactive<Record<CoreType, boolean>>({
+  'sing-box': false,
+  'mihomo': false,
+})
+</script>
+
 <script setup lang="ts">
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
@@ -207,6 +229,8 @@ const configURLInput = ref(props.config.configURL || '')
 const isConfigURLDirty = ref(false)
 const configFileInput = ref<HTMLInputElement | null>(null)
 
+const hasLoaded = computed(() => Boolean(configFilesLoaded[props.coreType]))
+
 const isDownloadingConfig = ref(false)
 const isImportingConfig = ref(false)
 const isScanningConfigFiles = ref(false)
@@ -214,13 +238,19 @@ const isSelectingConfigFile = ref(false)
 const isDeletingConfigFile = ref(false)
 const isUndoingDelete = ref(false)
 const canUndoDelete = ref(false)
-const availableConfigFiles = ref<string[]>([])
-const activeConfigFile = ref('')
+const availableConfigFiles = ref<string[]>([...(configFileCache[props.coreType] || [])])
+const activeConfigFile = ref(props.config.configFileName || defaultConfigFileName.value)
+
+let scanRequestId = 0
 
 const syncActiveConfigFile = () => {
   const target = props.config.configFileName || defaultConfigFileName.value
   if (availableConfigFiles.value.length === 0) {
-    activeConfigFile.value = ''
+    if (hasLoaded.value) {
+      activeConfigFile.value = ''
+    } else {
+      activeConfigFile.value = target
+    }
     return
   }
   if (availableConfigFiles.value.includes(target)) {
@@ -235,18 +265,26 @@ const syncActiveConfigFile = () => {
 }
 
 const scanConfigFiles = async (notify = false) => {
-  if (isScanningConfigFiles.value) return
+  const currentType = props.coreType
+  const reqId = ++scanRequestId
   isScanningConfigFiles.value = true
   try {
-    const files = await CoreService.ListConfigFiles(props.coreType)
-    availableConfigFiles.value = files || []
-    syncActiveConfigFile()
+    const files = await CoreService.ListConfigFiles(currentType)
+    const list = files || []
+    configFileCache[currentType] = list
+    configFilesLoaded[currentType] = true
+    if (reqId === scanRequestId && props.coreType === currentType) {
+      availableConfigFiles.value = list
+      syncActiveConfigFile()
+    }
   } catch (error) {
-    if (notify) {
+    if (notify && reqId === scanRequestId) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
   } finally {
-    isScanningConfigFiles.value = false
+    if (reqId === scanRequestId) {
+      isScanningConfigFiles.value = false
+    }
   }
 }
 
@@ -404,18 +442,26 @@ watch(
 
 watch(
   () => props.coreType,
-  () => {
+  (newType) => {
     configURLInput.value = props.config.configURL || ''
     isConfigURLDirty.value = false
-    availableConfigFiles.value = []
-    activeConfigFile.value = ''
     canUndoDelete.value = false
+
+    const cached = configFileCache[newType]
+    if (cached && cached.length > 0) {
+      availableConfigFiles.value = [...cached]
+    } else {
+      availableConfigFiles.value = []
+    }
+    syncActiveConfigFile()
+
     void scanConfigFiles(false)
     void checkCanUndoDelete()
   },
 )
 
 onMounted(() => {
+  syncActiveConfigFile()
   void scanConfigFiles(false)
   void checkCanUndoDelete()
 })

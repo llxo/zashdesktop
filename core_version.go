@@ -199,7 +199,7 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 			owner, repository := parseGitHubRepo(downloadURL)
 			if cached, ok := s.getCachedLatestRelease(owner, repository, config.Channel); ok {
 				config.LatestVersion = cached.version
-				config.UpdateAvailable = isCoreUpdateAvailable(cached.version, config.Version, config.Channel)
+				config.UpdateAvailable = isCoreUpdateAvailable(cached.version, config.Version, config.Channel, config.CoreType)
 			}
 		}
 	}()
@@ -266,7 +266,7 @@ func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
 		debugLogf("release", "execute %s %v failed: %v", corePath, versionArgs, err)
 		return "", "", fmt.Errorf("read %s core version: %w", coreType, err)
 	}
-	version := normalizeCoreVersion(string(output))
+	version := parseCoreVersionOutput(string(output), coreType)
 	if version == "" {
 		debugLogf("release", "unable to parse version from output: %q", string(output))
 		return "", "", fmt.Errorf("unable to read %s core version", coreType)
@@ -284,13 +284,29 @@ func normalizeCoreVersion(value string) string {
 		return ""
 	}
 	value = strings.TrimSuffix(value, ".zip")
-	if v := semverPattern.FindString(value); v != "" {
-		return v
-	}
 	if v := alphaPattern.FindString(value); v != "" {
 		return v
 	}
+	if v := semverPattern.FindString(value); v != "" {
+		return v
+	}
 	return strings.TrimPrefix(strings.TrimPrefix(value, "v"), "V")
+}
+
+func parseCoreVersionOutput(output, coreType string) string {
+	line := strings.TrimSpace(strings.Split(output, "\n")[0])
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		if v := alphaPattern.FindString(line); v != "" {
+			return v
+		}
+		if v := semverPattern.FindString(line); v != "" {
+			return v
+		}
+	}
+	if strings.HasPrefix(line, "sing-box version ") {
+		return strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(line[17:]), "v"), "V")
+	}
+	return normalizeCoreVersion(line)
 }
 
 // compareVersions 比较两个版本号，遵循标准版本主次数字递进规则。v1 > v2 返回 1，v1 < v2 返回 -1，相等返回 0
@@ -300,6 +316,7 @@ func compareVersions(v1, v2 string) int {
 	if v1 == v2 {
 		return 0
 	}
+
 	p1 := strings.Split(strings.Split(v1, "-")[0], ".")
 	p2 := strings.Split(strings.Split(v2, "-")[0], ".")
 	for i := 0; i < len(p1) || i < len(p2); i++ {
@@ -328,7 +345,7 @@ func compareVersions(v1, v2 string) int {
 	return strings.Compare(v1, v2)
 }
 
-func isCoreUpdateAvailable(latest, current, channel string) bool {
+func isCoreUpdateAvailable(latest, current, channel, coreType string) bool {
 	latest = normalizeCoreVersion(latest)
 	current = normalizeCoreVersion(current)
 	if latest == "" {
@@ -337,6 +354,35 @@ func isCoreUpdateAvailable(latest, current, channel string) bool {
 	if current == "" {
 		return true
 	}
+	if strings.EqualFold(latest, current) {
+		return false
+	}
+
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	isMihomo := normalizedCoreType(coreType) == coreTypeMihomo
+
+	// mihomo 特定处理：测试版使用 alpha-<hash> 形式
+	if isMihomo {
+		if channel == coreChannelTest {
+			return true
+		}
+		if strings.HasPrefix(strings.ToLower(current), "alpha") {
+			return true
+		}
+		return compareVersions(latest, current) > 0
+	}
+
+	// sing-box 特定处理：全部遵循标准 SemVer
+	if channel == coreChannelTest {
+		if strings.Contains(latest, "-") && !strings.Contains(current, "-") {
+			return true
+		}
+	} else if channel == coreChannelStable || channel == "" {
+		if strings.Contains(current, "-") && !strings.Contains(latest, "-") {
+			return true
+		}
+	}
+
 	return compareVersions(latest, current) > 0
 }
 
@@ -581,7 +627,7 @@ func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool
 	}
 
 	config.LatestVersion = latest
-	config.UpdateAvailable = isCoreUpdateAvailable(latest, config.Version, config.Channel)
+	config.UpdateAvailable = isCoreUpdateAvailable(latest, config.Version, config.Channel, config.CoreType)
 	debugLogf("release", "check update result: type=%s current=%s latest=%s updateAvailable=%t cached=%t", coreType, config.Version, config.LatestVersion, config.UpdateAvailable, cachedHit)
 	return s.applyCheckedConfig(config)
 }

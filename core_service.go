@@ -803,7 +803,7 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 	config.InstalledVersion = installedVersion
 	config.Installed = true
 	config.LatestVersion = targetVersion
-	config.UpdateAvailable = isCoreUpdateAvailable(targetVersion, installedVersion, config.Channel)
+	config.UpdateAvailable = isCoreUpdateAvailable(targetVersion, installedVersion, config.Channel, config.CoreType)
 	if err := s.saveConfigLocked(config); err != nil {
 		return CoreConfig{}, err
 	}
@@ -1069,7 +1069,7 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 		config.PID = 0
 	}
 
-	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel)
+	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel, config.CoreType)
 	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running
 
 	if !s.stateLogged || s.lastRunningCore != runningCore || s.lastRunningPID != runningPID {

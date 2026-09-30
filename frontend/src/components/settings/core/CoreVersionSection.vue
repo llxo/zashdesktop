@@ -302,9 +302,25 @@ const downloadCore = async () => {
   }
 }
 
-onMounted(() => {
-  loadSavedSource()
-})
+watch(
+  () => props.coreType,
+  () => {
+    checkSequence += 1
+    activeCheckKey = ''
+    isChecking.value = false
+    loadSavedSource()
+  },
+  { immediate: true },
+)
+
+watch(
+  sourceOptions,
+  (options) => {
+    if (!options.some((s) => s.label === selectedSourceLabel.value)) {
+      loadSavedSource()
+    }
+  },
+)
 
 watch(
   () => [props.coreType, props.config.channel] as const,
@@ -313,13 +329,6 @@ watch(
 
     const typeChanged = nextType !== prevType
     const channelChanged = nextChannel !== prevChannel
-
-    if (typeChanged) {
-      checkSequence += 1
-      activeCheckKey = ''
-      isChecking.value = false
-      loadSavedSource()
-    }
 
     if (typeChanged || channelChanged) {
       if (!props.config.latestVersion || channelChanged) {
