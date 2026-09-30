@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -206,66 +204,17 @@ func (s *CoreService) InstallAppUpdate() error {
 	}
 	exeBase := filepath.Base(executable)
 
-	// Download binary to temp file in the same directory
-	tempFile, err := os.CreateTemp(exeDir, fmt.Sprintf(".%s-update-*.tmp", exeBase))
-	if err != nil {
-		debugLogf("update", "create temp file in %q failed: %v", exeDir, err)
-		return fmt.Errorf("failed to create temp update file (please check write permissions): %w", err)
-	}
-	tempFilePath := tempFile.Name()
-	keepTempFile := false
-	defer func() {
-		if !keepTempFile {
-			_ = tempFile.Close()
-			_ = os.Remove(tempFilePath)
-		}
-	}()
-
-	debugLogf("update", "downloading update binary to %s", tempFilePath)
-	downloadClient := newCoreHTTPClient(10 * time.Minute)
-	downloadReq, err := http.NewRequest(http.MethodGet, binaryAsset.BrowserDownloadURL, nil)
-	if err != nil {
-		debugLogf("update", "create download request failed: %v", err)
-		return fmt.Errorf("failed to create download request: %w", err)
-	}
-	downloadReq.Header.Set("User-Agent", "zashdesktop")
-
-	downloadResp, err := downloadClient.Do(downloadReq)
+	tempFilePath, err := downloadFile(binaryAsset.BrowserDownloadURL, exeDir, DownloadOptions{
+		ExpectedSHA256: expectedSHA,
+		MaxBytes:       maxAppBinaryDownload,
+		Timeout:        15 * time.Minute,
+		FilePattern:    fmt.Sprintf(".%s-update-*.tmp", exeBase),
+	})
 	if err != nil {
 		debugLogf("update", "download update binary failed: %v", err)
 		return fmt.Errorf("failed to download update package: %w", err)
 	}
-	defer downloadResp.Body.Close()
-
-	if downloadResp.StatusCode < http.StatusOK || downloadResp.StatusCode >= http.StatusMultipleChoices {
-		debugLogf("update", "download update binary server returned status %s", downloadResp.Status)
-		return fmt.Errorf("failed to download update package: server returned %s", downloadResp.Status)
-	}
-
-	hasher := sha256.New()
-	writer := io.MultiWriter(tempFile, hasher)
-
-	n, err := io.Copy(writer, io.LimitReader(downloadResp.Body, maxAppBinaryDownload))
-	if err != nil {
-		debugLogf("update", "save downloaded binary failed: %v", err)
-		return fmt.Errorf("failed to write update file: %w", err)
-	}
-	if n == 0 {
-		debugLogf("update", "downloaded binary is empty")
-		return errors.New("downloaded update file is empty")
-	}
-
-	if err := tempFile.Close(); err != nil {
-		debugLogf("update", "close temp update file failed: %v", err)
-		return fmt.Errorf("failed to save update file: %w", err)
-	}
-
-	actualSHA := hex.EncodeToString(hasher.Sum(nil))
-	if expectedSHA != "" && !strings.EqualFold(actualSHA, expectedSHA) {
-		debugLogf("update", "SHA256 checksum mismatch: expected=%s actual=%s", expectedSHA, actualSHA)
-		return fmt.Errorf("SHA256 checksum mismatch: expected %s, actual %s", expectedSHA, actualSHA)
-	}
-	debugLogf("update", "binary downloaded and verified successfully (bytes=%d, sha256=%s)", n, actualSHA)
+	defer os.Remove(tempFilePath)
 
 	// Rename current exe to old
 	oldExePath := filepath.Join(exeDir, fmt.Sprintf("%s.old", exeBase))
@@ -282,7 +231,6 @@ func (s *CoreService) InstallAppUpdate() error {
 		_ = os.Rename(oldExePath, executable) // rollback
 		return fmt.Errorf("failed to replace executable file: %w", err)
 	}
-	keepTempFile = true
 	debugLogf("update", "executable successfully replaced: %s", executable)
 
 	// Launch background helper to restart app after current process exits
