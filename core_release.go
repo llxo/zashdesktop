@@ -340,7 +340,7 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 	if isMihomoPre {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), mihomoPrereleaseTag)
 	} else if channel == coreChannelTest {
-		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=10", url.PathEscape(owner), url.PathEscape(repository))
+		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=3", url.PathEscape(owner), url.PathEscape(repository))
 	}
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
