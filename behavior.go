@@ -350,7 +350,7 @@ type winHTTPCurrentUserIEProxyConfig struct {
 	lpszProxyBypass   *uint16
 }
 
-const proxySettingsCacheTTL = 2 * time.Second
+const proxySettingsCacheTTL = 10 * time.Second
 
 type cachedProxySettings struct {
 	enabled   bool
@@ -418,7 +418,7 @@ func readCachedProxySettings() (enabled bool, server, override string) {
 func systemProxy(request *http.Request) (*url.URL, error) {
 	enabled, server, override := readCachedProxySettings()
 	if !enabled || server == "" {
-		return http.ProxyFromEnvironment(request)
+		return nil, nil
 	}
 	if proxyBypassed(request.URL, override) {
 		return nil, nil
@@ -426,14 +426,14 @@ func systemProxy(request *http.Request) (*url.URL, error) {
 
 	address := proxyAddressForScheme(server, request.URL.Scheme)
 	if address == "" {
-		return http.ProxyFromEnvironment(request)
+		return nil, nil
 	}
 	if !strings.Contains(address, "://") {
 		address = "http://" + address
 	}
 	proxyURL, err := url.Parse(address)
 	if err != nil || proxyURL.Host == "" {
-		return http.ProxyFromEnvironment(request)
+		return nil, nil
 	}
 	return proxyURL, nil
 }

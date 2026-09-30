@@ -314,7 +314,11 @@ func (s *CoreService) notifyStateChange() {
 	s.mu.Lock()
 	cb := s.onStateChange
 	app := s.app
+	isStopped := s.runningCoreTypeLocked() == ""
 	s.mu.Unlock()
+	if isStopped {
+		invalidateProxySettingsCache()
+	}
 	if cb != nil {
 		go cb()
 	}
@@ -322,6 +326,9 @@ func (s *CoreService) notifyStateChange() {
 }
 
 func (s *CoreService) notifyStateChangeLocked() {
+	if s.runningCoreTypeLocked() == "" {
+		invalidateProxySettingsCache()
+	}
 	cb := s.onStateChange
 	app := s.app
 	if cb != nil {
