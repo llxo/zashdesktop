@@ -95,7 +95,7 @@ const loadConfig = async () => {
   const reqId = ++activeRequestId
   const targetCore = coreType.value
   try {
-    const next = await CoreService.GetConfigForType(targetCore)
+    const next = await CoreService.GetCoreStateForType(targetCore)
     if (reqId === activeRequestId && targetCore === coreType.value && next) {
       applyConfig(next)
       return true

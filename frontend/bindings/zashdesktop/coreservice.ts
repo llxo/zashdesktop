@@ -45,12 +45,12 @@ export function GetAppVersion(): $CancellablePromise<string> {
     return $Call.ByID(3044026275);
 }
 
-export function GetConfig(): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(2439653156);
+export function GetCoreState(): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(3259379246);
 }
 
-export function GetConfigForType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
-    return $Call.ByID(798218691, rawCoreType);
+export function GetCoreStateForType(rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
+    return $Call.ByID(4278355373, rawCoreType);
 }
 
 export function GetSystemFonts(): $CancellablePromise<string[] | null> {

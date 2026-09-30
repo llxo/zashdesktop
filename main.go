@@ -570,7 +570,7 @@ func (a *App) setupTray() {
 
 	var initialConfig CoreConfig
 	if a.coreService != nil {
-		if config, err := a.coreService.GetConfig(); err == nil {
+		if config, err := a.coreService.GetCoreState(); err == nil {
 			initialConfig = config
 		}
 		a.coreService.setOnStateChange(func() {

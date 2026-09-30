@@ -337,7 +337,7 @@ func (s *CoreService) notifyStateChangeLocked() {
 	s.emitStateChangeEvent(app)
 }
 
-func (s *CoreService) GetConfig() (CoreConfig, error) {
+func (s *CoreService) GetCoreState() (CoreConfig, error) {
 	s.mu.Lock()
 	config, err := s.loadConfigLocked()
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *CoreService) GetConfig() (CoreConfig, error) {
 	return config, nil
 }
 
-func (s *CoreService) GetConfigForType(rawCoreType string) (CoreConfig, error) {
+func (s *CoreService) GetCoreStateForType(rawCoreType string) (CoreConfig, error) {
 	coreType, err := normalizeCoreType(rawCoreType)
 	if err != nil {
 		return CoreConfig{}, err

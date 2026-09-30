@@ -218,7 +218,7 @@ const appVersionLabel = computed(() => {
 
 const loadBehaviorConfig = async () => {
   try {
-    const config = await CoreService.GetConfig()
+    const config = await CoreService.GetCoreState()
     if (config) {
       behaviorConfig.runAsAdmin = config.runAsAdmin
       behaviorConfig.isAdmin = config.isAdmin

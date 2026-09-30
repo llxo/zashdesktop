@@ -72,7 +72,7 @@ const { padding } = usePaddingForViews({
 onMounted(async () => {
   if (initialCoreLoaded) return
   try {
-    const active = await CoreService.GetConfig()
+    const active = await CoreService.GetCoreState()
     if (active?.coreType) {
       const nextCoreType: CoreType = active.coreType === 'mihomo' ? 'mihomo' : 'sing-box'
       coreType.value = nextCoreType

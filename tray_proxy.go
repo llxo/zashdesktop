@@ -76,7 +76,7 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 	var coreConfig CoreConfig
 	if a.coreService != nil {
 		var err error
-		coreConfig, err = a.coreService.GetConfig()
+		coreConfig, err = a.coreService.GetCoreState()
 		if err != nil {
 			debugLogf("tray", "refresh tray proxy groups get core config: %v", err)
 		}
@@ -253,7 +253,7 @@ func (a *App) runTrayCoreAction(actionName string, action func(args, coreType st
 	if a.coreService == nil {
 		return
 	}
-	config, err := a.coreService.GetConfig()
+	config, err := a.coreService.GetCoreState()
 	if err != nil {
 		debugLogf("tray", "tray %s core get config: %v", actionName, err)
 		return

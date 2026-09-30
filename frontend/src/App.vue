@@ -156,7 +156,7 @@ let lastCorePID = 0
 
 const checkRunningCore = async () => {
   try {
-    const config = await CoreService.GetConfig()
+    const config = await CoreService.GetCoreState()
     const isRunning = Boolean(config?.running && config.clashApiUrl)
     const pid = config?.pid || 0
     if (isRunning) {
