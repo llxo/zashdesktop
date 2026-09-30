@@ -713,6 +713,99 @@ func (s *CoreService) RestartCore(rawArgs, rawCoreType string) (CoreConfig, erro
 	return s.startCore(rawArgs, coreType, true)
 }
 
+func (s *CoreService) applyCoreUpgrade(coreType, archivePath, targetVersion string) (CoreConfig, error) {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+
+	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return CoreConfig{}, errors.New("core service is shutting down")
+	}
+	config, err := s.loadConfigForTypeLocked(coreType)
+	if err != nil {
+		s.mu.Unlock()
+		return CoreConfig{}, err
+	}
+	s.detectInheritedProcessLocked(config.CoreType)
+	runningType := ""
+	if s.process != nil {
+		runningType = normalizedCoreType(s.processCoreType)
+	} else if s.inheritedProcess != nil {
+		runningType = normalizedCoreType(s.inheritedCoreType)
+	}
+	wasRunning := runningType == config.CoreType
+	runArgs := config.RunArgs
+	s.mu.Unlock()
+
+	if wasRunning {
+		coreDebugf("stopping core before replacement: type=%s", config.CoreType)
+		if err := s.stopCoreProcess(); err != nil {
+			return CoreConfig{}, err
+		}
+	}
+
+	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return CoreConfig{}, errors.New("core service is shutting down")
+	}
+	if currentConfig, err := s.loadConfigForTypeLocked(coreType); err == nil {
+		config = currentConfig
+	}
+	config, err = s.installCoreArchiveLocked(config, archivePath, targetVersion)
+	s.mu.Unlock()
+	if err != nil {
+		coreDebugf("install downloaded core failed: type=%s version=%s err=%v", coreType, targetVersion, err)
+		return config, err
+	}
+
+	if wasRunning {
+		restarted, restartErr := s.startCore(runArgs, coreType, false)
+		if restartErr != nil {
+			return CoreConfig{}, fmt.Errorf("restart %s core after update: %w", coreType, restartErr)
+		}
+		config = restarted
+	} else {
+		s.notifyStateChange()
+	}
+	return config, nil
+}
+
+func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, targetVersion string) (CoreConfig, error) {
+	corePath := s.corePathFor(config.CoreType, config.Channel)
+	if err := extractAndReplaceCoreExe(archivePath, corePath, config.CoreType); err != nil {
+		return CoreConfig{}, err
+	}
+
+	config.CorePath = corePath
+	installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath, config.CoreType)
+	if versionErr != nil {
+		return CoreConfig{}, versionErr
+	}
+	if stat, statErr := os.Stat(corePath); statErr == nil {
+		s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
+			modTime: stat.ModTime(),
+			size:    stat.Size(),
+			version: installedVersion,
+			detail:  versionDetail,
+		})
+	}
+	config.Version = installedVersion
+	config.VersionDetail = versionDetail
+	config.InstalledVersion = installedVersion
+	config.Installed = true
+	config.LatestVersion = targetVersion
+	config.UpdateAvailable = isCoreUpdateAvailable(targetVersion, installedVersion, config.Channel)
+	if err := s.saveConfigLocked(config); err != nil {
+		return CoreConfig{}, err
+	}
+	s.applyRuntimeState(&config)
+	return config, nil
+}
+
+
+
 func (s *CoreService) stopManagedCoreProcess() error {
 	s.mu.Lock()
 	process := s.process

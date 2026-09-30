@@ -183,3 +183,15 @@ func isFileLockedError(err error) bool {
 	return errno == errorSharingViolation || errno == errorLockViolation
 }
 
+func coreExecutableNameFor(coreType, channel string) string {
+	baseName := coreExecutableBaseName
+	if normalizedCoreType(coreType) == coreTypeMihomo {
+		baseName = mihomoExecutableName
+	}
+	if strings.EqualFold(strings.TrimSpace(channel), coreChannelTest) {
+		return baseName + "-latest.exe"
+	}
+	return baseName + ".exe"
+}
+
+
