@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -42,25 +41,7 @@ var (
 	testVerPattern    = regexp.MustCompile(`(?i)^(?:alpha|alpha-smart|beta|dev|rc|nightly|preview)(?:[-._][0-9a-z]+)*$`)
 	testChanPattern   = regexp.MustCompile(`(?i)(^|[-._])(alpha|beta|rc|dev|nightly|preview)([-._]|\d|$)`)
 	buildAssetPattern = regexp.MustCompile(`(?i)(^|-)((?:alpha|beta|rc|dev|nightly|preview)(?:[-._][0-9a-z]+)+)\.(?:zip|tar\.gz)$`)
-	githubTagProxies  = []string{
-		"https://v6.gh-proxy.org",
-		"https://v4.gh-proxy.org",
-		"https://ghfast.top",
-	}
 )
-
-func buildGitHubTagCandidateURLs(rawURL string) []string {
-	rawURL = strings.TrimSpace(rawURL)
-	if !strings.HasPrefix(rawURL, "https://github.com/") && !strings.HasPrefix(rawURL, "http://github.com/") {
-		return []string{rawURL}
-	}
-	urls := make([]string, 0, 1+len(githubTagProxies))
-	for _, proxy := range githubTagProxies {
-		urls = append(urls, strings.TrimRight(proxy, "/")+"/"+rawURL)
-	}
-	urls = append(urls, rawURL)
-	return urls
-}
 
 // -----------------------------------------------------------------------------
 // Core Network Transport
@@ -170,24 +151,25 @@ func (s *CoreService) setCachedCoreVersion(coreType, channel string, item coreVe
 
 type remoteReleaseCacheItem struct {
 	version   string
+	digest    string
 	fetchedAt time.Time
 }
 
-func (s *CoreService) getCachedLatestRelease(owner, repository, channel string) (string, bool) {
+func (s *CoreService) getCachedLatestRelease(owner, repository, channel string) (remoteReleaseCacheItem, bool) {
 	s.remoteReleaseMu.Lock()
 	defer s.remoteReleaseMu.Unlock()
 	if s.remoteReleaseCache == nil {
-		return "", false
+		return remoteReleaseCacheItem{}, false
 	}
 	key := strings.ToLower(owner + "/" + repository + ":" + channel)
 	item, ok := s.remoteReleaseCache[key]
 	if !ok || item.version == "" || time.Since(item.fetchedAt) >= remoteReleaseCacheTTL {
-		return "", false
+		return remoteReleaseCacheItem{}, false
 	}
-	return item.version, true
+	return item, true
 }
 
-func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version string) {
+func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version, digest string) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return
@@ -198,7 +180,11 @@ func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version
 		s.remoteReleaseCache = make(map[string]remoteReleaseCacheItem)
 	}
 	key := strings.ToLower(owner + "/" + repository + ":" + channel)
-	s.remoteReleaseCache[key] = remoteReleaseCacheItem{version: version, fetchedAt: time.Now()}
+	s.remoteReleaseCache[key] = remoteReleaseCacheItem{
+		version:   version,
+		digest:    digest,
+		fetchedAt: time.Now(),
+	}
 }
 
 func isCoreStaticReleaseTag(tag string) bool {
@@ -495,111 +481,11 @@ type githubAsset struct {
 	Size               int64  `json:"size"`
 }
 
-func fetchVersionTxt(rawURL string) (string, error) {
+// fetchLatestCoreRelease 直接请求 GitHub Releases API，一次性解析出目标版本号和 SHA-256 摘要
+func fetchLatestCoreRelease(owner, repository, channel string) (version string, sha256Digest string, err error) {
 	client := newCoreHTTPClient(10 * time.Second)
-	var lastErr error
-	for _, candidate := range buildGitHubTagCandidateURLs(rawURL) {
-		req, err := http.NewRequest(http.MethodGet, candidate, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("User-Agent", "zashdesktop")
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			_ = resp.Body.Close()
-			lastErr = fmt.Errorf("server returned %s", resp.Status)
-			continue
-		}
-		data, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		version := strings.TrimSpace(strings.TrimPrefix(string(data), "\ufeff"))
-		if version != "" {
-			return version, nil
-		}
-		lastErr = errors.New("empty version.txt")
-	}
-	if lastErr != nil {
-		return "", lastErr
-	}
-	return "", errors.New("failed to fetch version.txt from all sources")
-}
-
-func fetchLatestReleaseTagByRedirect(owner, repository string) (string, error) {
-	rawURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", owner, repository)
-	client := newCoreHTTPClient(10 * time.Second)
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	var lastErr error
-	for _, candidate := range buildGitHubTagCandidateURLs(rawURL) {
-		req, err := http.NewRequest(http.MethodGet, candidate, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("User-Agent", "zashdesktop")
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		_ = resp.Body.Close()
-		location := resp.Header.Get("Location")
-		if (resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusTemporaryRedirect) && location != "" {
-			if idx := strings.Index(location, "/releases/tag/"); idx != -1 {
-				tag := strings.TrimSpace(location[idx+len("/releases/tag/"):])
-				if qIdx := strings.Index(tag, "?"); qIdx != -1 {
-					tag = tag[:qIdx]
-				}
-				tag = strings.Trim(tag, "/")
-				if unescaped, err := url.PathUnescape(tag); err == nil && unescaped != "" {
-					tag = unescaped
-				}
-				if tag != "" {
-					return normalizeCoreVersion(tag), nil
-				}
-			}
-		}
-		lastErr = fmt.Errorf("server returned %s without release tag redirect", resp.Status)
-	}
-	if lastErr != nil {
-		return "", lastErr
-	}
-	return "", errors.New("failed to fetch latest release tag redirect")
-}
-
-func findLatestRelease(owner, repository, channel string) (string, error) {
-	if strings.EqualFold(repository, "mihomo") {
-		if strings.EqualFold(owner, "vernesong") {
-			if v, err := fetchVersionTxt("https://github.com/vernesong/mihomo/releases/download/Prerelease-Alpha/version.txt"); err == nil && v != "" {
-				return normalizeCoreVersion(v), nil
-			}
-		} else if strings.EqualFold(owner, "MetaCubeX") {
-			url := "https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt"
-			if channel == coreChannelTest {
-				url = "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt"
-			}
-			if v, err := fetchVersionTxt(url); err == nil && v != "" {
-				return normalizeCoreVersion(v), nil
-			}
-		}
-	} else if channel != coreChannelTest {
-		if tag, err := fetchLatestReleaseTagByRedirect(owner, repository); err == nil && tag != "" {
-			return tag, nil
-		}
-	}
-
-	client := newCoreHTTPClient(30 * time.Second)
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
+
 	isMihomoPre := (strings.EqualFold(owner, "MetaCubeX") || strings.EqualFold(owner, "vernesong")) && strings.EqualFold(repository, "mihomo") && channel == coreChannelTest
 	if isMihomoPre {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), mihomoPrereleaseTag)
@@ -609,135 +495,75 @@ func findLatestRelease(owner, repository, channel string) (string, error) {
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", fmt.Errorf("check core update: %w", err)
+		return "", "", fmt.Errorf("create core release request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "zashdesktop")
+
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("check core update: %w", err)
+		return "", "", fmt.Errorf("check core update: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("check core update: GitHub returned %s", resp.Status)
+		return "", "", fmt.Errorf("check core update: GitHub returned %s", resp.Status)
 	}
 
+	var targetRelease githubRelease
 	if channel == coreChannelTest && !isMihomoPre {
 		var releases []githubRelease
-		if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&releases); err != nil {
-			return "", fmt.Errorf("parse GitHub releases: %w", err)
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&releases); err != nil {
+			return "", "", fmt.Errorf("parse GitHub releases: %w", err)
 		}
-		for _, release := range releases {
-			v := releaseVersion(release)
-			if v != "" && (release.Prerelease || coreChannel(v) == coreChannelTest) {
-				return v, nil
+		for _, r := range releases {
+			if r.Prerelease || coreChannel(r.TagName) == coreChannelTest {
+				targetRelease = r
+				break
 			}
 		}
-		return "", errors.New("no test core release found")
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&release); err != nil {
-		return "", fmt.Errorf("parse GitHub release: %w", err)
-	}
-	v := releaseVersion(release)
-	if v == "" {
-		v = normalizeCoreVersion(release.TagName)
-	}
-	if v == "" {
-		return "", errors.New("GitHub release has no valid core version")
-	}
-	return v, nil
-}
-
-func isGenericCoreBuildVersion(version string) bool {
-	switch strings.ToLower(strings.TrimSpace(version)) {
-	case "alpha", "beta", "rc", "dev", "nightly", "preview", "prerelease-alpha", "prerelease":
-		return true
-	default:
-		return false
-	}
-}
-
-func releaseVersion(release githubRelease) string {
-	tagVer := normalizeCoreVersion(release.TagName)
-	if tagVer != "" && !isGenericCoreBuildVersion(tagVer) && !isCoreStaticReleaseTag(release.TagName) {
-		return tagVer
-	}
-	for _, asset := range release.Assets {
-		if match := buildAssetPattern.FindStringSubmatch(asset.Name); len(match) >= 3 {
-			return match[2]
+		if targetRelease.TagName == "" && len(releases) > 0 {
+			targetRelease = releases[0]
+		}
+	} else {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&targetRelease); err != nil {
+			return "", "", fmt.Errorf("parse GitHub release: %w", err)
 		}
 	}
-	if isGenericCoreBuildVersion(tagVer) {
-		return ""
+
+	v := normalizeCoreVersion(targetRelease.TagName)
+	if v == "" || isCoreStaticReleaseTag(targetRelease.TagName) {
+		for _, asset := range targetRelease.Assets {
+			if match := buildAssetPattern.FindStringSubmatch(asset.Name); len(match) >= 3 {
+				v = match[2]
+				break
+			}
+		}
 	}
-	return tagVer
+	if v == "" {
+		return "", "", errors.New("GitHub release has no valid core version")
+	}
+
+	digest := ""
+	for _, asset := range targetRelease.Assets {
+		lower := strings.ToLower(asset.Name)
+		if strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
+			if strings.HasPrefix(strings.ToLower(asset.Digest), "sha256:") {
+				digest = strings.TrimSpace(asset.Digest[7:])
+				break
+			}
+		}
+	}
+
+	return v, digest, nil
 }
 
-func findLatestReleaseForURL(downloadURLTemplate, channel string) (string, error) {
+func findLatestReleaseForURL(downloadURLTemplate, channel string) (string, string, error) {
 	owner, repository, err := githubRepository(downloadURLTemplate)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return findLatestRelease(owner, repository, channel)
-}
-
-func findReleaseAssetDigest(owner, repository, version, downloadURL string) (string, error) {
-	client := newCoreHTTPClient(30 * time.Second)
-	tags := make([]string, 0, 3)
-	if parsedURL, err := url.Parse(downloadURL); err == nil {
-		if segments := pathSegments(parsedURL.Path); len(segments) >= 5 {
-			tags = append(tags, segments[4])
-		}
-	}
-	if version != "" {
-		tags = append(tags, "v"+version, version)
-	}
-	seen := make(map[string]struct{}, len(tags))
-	for _, tag := range tags {
-		if tag == "" {
-			continue
-		}
-		if _, ok := seen[tag]; ok {
-			continue
-		}
-		seen[tag] = struct{}{}
-		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), url.PathEscape(tag))
-		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
-		if err != nil {
-			return "", err
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("User-Agent", "zashdesktop")
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", err
-		}
-		var release githubRelease
-		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&release)
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
-			continue
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return "", fmt.Errorf("lookup core release: GitHub returned %s", resp.Status)
-		}
-		if decodeErr != nil {
-			return "", fmt.Errorf("parse GitHub release: %w", decodeErr)
-		}
-		assetName := path.Base(strings.SplitN(downloadURL, "?", 2)[0])
-		for _, asset := range release.Assets {
-			if asset.Name == assetName || strings.HasSuffix(asset.BrowserDownloadURL, "/"+assetName) {
-				if strings.HasPrefix(strings.ToLower(asset.Digest), "sha256:") {
-					return strings.TrimSpace(asset.Digest[7:]), nil
-				}
-				return "", nil
-			}
-		}
-		return "", fmt.Errorf("core download asset not found: %s", assetName)
-	}
-	return "", errors.New("core release not found")
+	return fetchLatestCoreRelease(owner, repository, channel)
 }
 
 // -----------------------------------------------------------------------------
@@ -776,19 +602,21 @@ func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool
 		return CoreConfig{}, err
 	}
 
-	var latest string
+	var latest, digest string
 	if !force {
 		if cached, ok := s.getCachedLatestRelease(owner, repository, config.Channel); ok {
-			latest = cached
+			latest = cached.version
+			digest = cached.digest
 		}
 	}
 	if latest == "" {
-		latest, err = findLatestRelease(owner, repository, config.Channel)
-		if err != nil {
-			debugLogf("release", "find latest release failed for %s/%s (%s): %v", owner, repository, config.Channel, err)
-			return CoreConfig{}, err
+		var fErr error
+		latest, digest, fErr = fetchLatestCoreRelease(owner, repository, config.Channel)
+		if fErr != nil {
+			debugLogf("release", "fetch latest release failed for %s/%s (%s): %v", owner, repository, config.Channel, fErr)
+			return CoreConfig{}, fErr
 		}
-		s.setCachedLatestRelease(owner, repository, config.Channel, latest)
+		s.setCachedLatestRelease(owner, repository, config.Channel, latest, digest)
 	}
 
 	config.LatestVersion = latest

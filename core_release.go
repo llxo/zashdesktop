@@ -48,11 +48,25 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	if isMihomoTestPlaceholderVersion(config, targetVersion) {
 		targetVersion = ""
 	}
+
+	expectedSHA256 := ""
+	if owner, repo, err := githubRepository(downloadURLTemplate); err == nil {
+		if cached, ok := s.getCachedLatestRelease(owner, repo, config.Channel); ok {
+			if targetVersion == "" {
+				targetVersion = cached.version
+			}
+			expectedSHA256 = cached.digest
+		}
+	}
+
 	if targetVersion == "" {
 		var err error
-		targetVersion, err = findLatestReleaseForURL(downloadURLTemplate, config.Channel)
+		targetVersion, expectedSHA256, err = findLatestReleaseForURL(downloadURLTemplate, config.Channel)
 		if err != nil {
 			return CoreConfig{}, "", "", err
+		}
+		if owner, repo, rErr := githubRepository(downloadURLTemplate); rErr == nil {
+			s.setCachedLatestRelease(owner, repo, config.Channel, targetVersion, expectedSHA256)
 		}
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
@@ -61,13 +75,6 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	}
 
 	downloadURL := strings.ReplaceAll(downloadURLTemplate, "{version}", targetVersion)
-
-	expectedSHA256 := ""
-	if owner, repo, err := githubRepository(downloadURLTemplate); err == nil {
-		if digest, dErr := findReleaseAssetDigest(owner, repo, targetVersion, downloadURL); dErr == nil {
-			expectedSHA256 = digest
-		}
-	}
 
 	archivePath, err := downloadFile(downloadURL, s.executableDir, DownloadOptions{
 		ExpectedSHA256: expectedSHA256,
