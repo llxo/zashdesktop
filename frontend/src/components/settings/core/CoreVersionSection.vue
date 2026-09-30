@@ -134,14 +134,6 @@ import {
   type DownloadSource,
 } from './coreSources'
 
-interface VersionCheckEntry {
-  latestVersion: string
-  updateAvailable: boolean
-  timestamp: number
-}
-
-const versionCheckCache = new Map<string, VersionCheckEntry>()
-
 const props = defineProps<{
   coreType: CoreType
   config: CoreConfig
@@ -206,19 +198,6 @@ const handleSourceChange = () => {
   debounceCheckUpdate(false, true, 400)
 }
 
-const syncVersionFromCache = (coreType: CoreType, channel: CoreChannel) => {
-  const checkKey = `${coreType}:${channel}`
-  const cached = versionCheckCache.get(checkKey)
-  if (cached) {
-    props.config.latestVersion = cached.latestVersion
-    props.config.updateAvailable = cached.updateAvailable
-    return true
-  }
-  props.config.latestVersion = ''
-  props.config.updateAvailable = false
-  return false
-}
-
 const saveChannel = async (rawChannel: string) => {
   if (isSavingChannel.value || rawChannel === currentChannel.value) return
   isSavingChannel.value = true
@@ -229,8 +208,8 @@ const saveChannel = async (rawChannel: string) => {
     })
     if (updated) {
       emit('update:config', updated)
-      const nextChannel: CoreChannel = updated.channel === 'test' ? 'test' : 'stable'
-      syncVersionFromCache(props.coreType, nextChannel)
+      props.config.latestVersion = ''
+      props.config.updateAvailable = false
       debounceCheckUpdate(false, true, 200)
     }
   } catch (error) {
@@ -239,8 +218,6 @@ const saveChannel = async (rawChannel: string) => {
     isSavingChannel.value = false
   }
 }
-
-const CORE_UPDATE_CHECK_TTL = 60_000
 
 let activeCheckKey = ''
 let checkSequence = 0
@@ -269,16 +246,6 @@ const checkUpdate = async (notifyError = true, force = false) => {
   const targetChannel = currentChannel.value
   const checkKey = `${targetCoreType}:${targetChannel}`
 
-  const now = Date.now()
-  const cached = versionCheckCache.get(checkKey)
-  if (!force && cached && now - cached.timestamp < CORE_UPDATE_CHECK_TTL) {
-    if (props.coreType === targetCoreType && currentChannel.value === targetChannel) {
-      props.config.latestVersion = cached.latestVersion
-      props.config.updateAvailable = cached.updateAvailable
-    }
-    return null
-  }
-
   if (isChecking.value && activeCheckKey === checkKey && !force) return null
   activeCheckKey = checkKey
   const sequence = ++checkSequence
@@ -301,11 +268,7 @@ const checkUpdate = async (notifyError = true, force = false) => {
       if (next.version) {
         props.config.version = next.version
       }
-      versionCheckCache.set(checkKey, {
-        latestVersion: next.latestVersion,
-        updateAvailable: next.updateAvailable,
-        timestamp: Date.now(),
-      })
+      emit('update:config', { ...props.config })
     }
     return next
   } catch (error) {
@@ -341,13 +304,6 @@ const downloadCore = async () => {
 
 onMounted(() => {
   loadSavedSource()
-  if (props.config.channel) {
-    const channel: CoreChannel = props.config.channel === 'test' ? 'test' : 'stable'
-    const hasCached = syncVersionFromCache(props.coreType, channel)
-    if (!hasCached) {
-      debounceCheckUpdate(false, false, 300)
-    }
-  }
 })
 
 watch(
@@ -355,7 +311,6 @@ watch(
   ([nextType, nextChannel], [prevType, prevChannel]) => {
     if (!nextChannel) return
 
-    const normalizedChannel: CoreChannel = nextChannel === 'test' ? 'test' : 'stable'
     const typeChanged = nextType !== prevType
     const channelChanged = nextChannel !== prevChannel
 
@@ -367,8 +322,7 @@ watch(
     }
 
     if (typeChanged || channelChanged) {
-      const hasCached = syncVersionFromCache(nextType, normalizedChannel)
-      if (!hasCached) {
+      if (!props.config.latestVersion || channelChanged) {
         debounceCheckUpdate(false, false, 300)
       }
     }

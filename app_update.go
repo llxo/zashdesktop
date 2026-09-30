@@ -47,7 +47,7 @@ func isAppUpdateAvailable(currentVer, latestVer string) bool {
 	if normCurrent == "" || normCurrent == "0.0.0" {
 		return true
 	}
-	return compareCoreVersions(mustParseCoreVersion(normLatest), mustParseCoreVersion(normCurrent)) > 0
+	return compareVersions(normLatest, normCurrent) > 0
 }
 
 func (s *CoreService) GetAppVersion() string {

@@ -50,13 +50,12 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	}
 
 	expectedSHA256 := ""
-	if owner, repo, err := githubRepository(downloadURLTemplate); err == nil {
-		if cached, ok := s.getCachedLatestRelease(owner, repo, config.Channel); ok {
-			if targetVersion == "" {
-				targetVersion = cached.version
-			}
-			expectedSHA256 = cached.digest
+	owner, repo := parseGitHubRepo(downloadURLTemplate)
+	if cached, ok := s.getCachedLatestRelease(owner, repo, config.Channel); ok {
+		if targetVersion == "" {
+			targetVersion = cached.version
 		}
+		expectedSHA256 = cached.digest
 	}
 
 	if targetVersion == "" {
@@ -65,9 +64,7 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 		if err != nil {
 			return CoreConfig{}, "", "", err
 		}
-		if owner, repo, rErr := githubRepository(downloadURLTemplate); rErr == nil {
-			s.setCachedLatestRelease(owner, repo, config.Channel, targetVersion, expectedSHA256)
-		}
+		s.setCachedLatestRelease(owner, repo, config.Channel, targetVersion, expectedSHA256)
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {

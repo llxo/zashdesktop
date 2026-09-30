@@ -16,6 +16,7 @@ var (
 	githubDownloadProxies = []string{
 		"https://v6.gh-proxy.org",
 		"https://v4.gh-proxy.org",
+		"https://gh-proxy.com",
 		"https://ghfast.top",
 	}
 )
