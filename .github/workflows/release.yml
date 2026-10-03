@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号（如 v1.6.4，留空则仅在 main 构建并建立公共缓存）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -55,27 +61,41 @@ jobs:
       - name: Build Windows application
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $version = $env:RELEASE_TAG -replace '^v', ''
+          $target = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:REF_NAME }
+          $version = $target -replace '^v', ''
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tag must use the v1.2.3 format, got: $env:RELEASE_TAG"
+            if ($env:REF_NAME -eq 'main') {
+              $version = '0.0.0'
+            } else {
+              throw "Release tag must use the v1.2.3 format, got: $target"
+            }
           }
           .\build.ps1 -Version $version
 
       - name: Prepare release assets
+        if: startsWith(github.ref, 'refs/tags/') || (inputs.version != '' && inputs.version != null)
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
+          $target = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:REF_NAME }
+          $tag = if ($target.StartsWith('v')) { $target } else { "v$target" }
+          $assetName = "zashdesktop-windows-amd64-$tag.exe"
           Copy-Item -LiteralPath build\bin\zashdesktop.exe -Destination $assetName
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || (inputs.version != '' && inputs.version != null)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $assetName = "zashdesktop-windows-amd64-$env:RELEASE_TAG.exe"
-          gh release create $env:RELEASE_TAG $assetName --title "zashdesktop $env:RELEASE_TAG" --generate-notes
+          $target = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:REF_NAME }
+          $tag = if ($target.StartsWith('v')) { $target } else { "v$target" }
+          $assetName = "zashdesktop-windows-amd64-$tag.exe"
+          gh release create $tag $assetName --title "zashdesktop $tag" --generate-notes
