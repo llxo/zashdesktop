@@ -4,7 +4,7 @@ import {
   type ConnectionHistoryData,
 } from '@/helper/indexeddb'
 import type { Connection } from '@/types'
-import { shallowRef } from 'vue'
+import { shallowRef, type Ref } from 'vue'
 
 const allHistoryTypes: ConnectionHistoryType[] = [
   ConnectionHistoryType.SourceIP,
@@ -33,47 +33,77 @@ const emptyView = (): Record<ConnectionHistoryType, ConnectionHistoryData[]> => 
 // 展示态: 直接由 Go 后端 GetTrafficRank 填充
 export const aggregatedDataMap = shallowRef(emptyView())
 
+let activeTypeRef: Ref<ConnectionHistoryType> | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let isFetching = false
 
-export const fetchHistoryFromBackend = async () => {
+export const fetchDimensionHistory = async (type: ConnectionHistoryType) => {
+  if (typeof document !== 'undefined' && document.hidden) {
+    return
+  }
+  if (isFetching) {
+    return
+  }
+  const dim = dimensionMap[type]
+  if (!dim) return
+
+  isFetching = true
   try {
-    const next = { ...aggregatedDataMap.value }
-    await Promise.all(
-      allHistoryTypes.map(async (type) => {
-        const dim = dimensionMap[type]
-        const res = await CoreService.GetTrafficRank({
-          dimension: dim,
-          pageNum: 1,
-          pageSize: 500,
-        })
-        if (res && res.list) {
-          next[type] = res.list.map((item) => ({
-            key: item.name,
-            download: item.down,
-            upload: item.up,
-            count: item.hits ?? item.count ?? 1,
-          }))
-        }
-      }),
-    )
-    aggregatedDataMap.value = next
+    const res = await CoreService.GetTrafficRank({
+      dimension: dim,
+      pageNum: 1,
+      pageSize: 200,
+    })
+    if (res && res.list) {
+      aggregatedDataMap.value = {
+        ...aggregatedDataMap.value,
+        [type]: res.list.map((item) => ({
+          key: item.name,
+          download: item.down,
+          upload: item.up,
+          count: item.count || 1,
+        })),
+      }
+    }
   } catch {
     // 后端未运行或返回错误时静默
+  } finally {
+    isFetching = false
   }
 }
 
-export const initAggregatedDataMap = () => {
-  fetchHistoryFromBackend()
+export const fetchHistoryFromBackend = async () => {
+  if (activeTypeRef) {
+    await fetchDimensionHistory(activeTypeRef.value)
+  }
+}
+
+export const startConnectionHistoryPolling = (currentType: Ref<ConnectionHistoryType>) => {
+  activeTypeRef = currentType
+  fetchDimensionHistory(currentType.value)
   if (!refreshTimer) {
-    refreshTimer = setInterval(fetchHistoryFromBackend, 3000)
+    refreshTimer = setInterval(() => {
+      if (activeTypeRef) {
+        fetchDimensionHistory(activeTypeRef.value)
+      }
+    }, 3000)
   }
 }
 
-export const stopConnectionHistory = () => {
+export const stopConnectionHistoryPolling = () => {
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
   }
+  activeTypeRef = null
+}
+
+export const initAggregatedDataMap = () => {
+  // 保持兼容性接口：无需全局无休止开启轮询，改由 Overview/ConnectionHistory 组件按需激活
+}
+
+export const stopConnectionHistory = () => {
+  stopConnectionHistoryPolling()
 }
 
 // 禁用原有前端关闭连接时的累加与 IndexedDB 写入（已全面由 Go 后端接管）

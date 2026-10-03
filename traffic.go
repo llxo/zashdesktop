@@ -64,9 +64,23 @@ type ClashConnectionsSnapshot struct {
 
 // ===================== 2. 统计引擎与存储 =====================
 
+const (
+	maxDimensionItems = 1500
+	trimDimensionKeep = 1000
+)
+
+type connMetaCache struct {
+	clientID    string
+	destination string
+	process     string
+	node        string
+	rule        string
+}
+
 type lastConnTraffic struct {
 	Download int64
 	Upload   int64
+	meta     connMetaCache
 }
 
 type trafficPersistData struct {
@@ -165,36 +179,77 @@ func (s *TrafficStore) flushLoop() {
 	}
 }
 
-func (s *TrafficStore) Flush() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.dirty {
+func cloneTrafficMap(src map[string]*TrafficItem) map[string]*TrafficItem {
+	dst := make(map[string]*TrafficItem, len(src))
+	for k, v := range src {
+		if v != nil {
+			itemCopy := *v
+			dst[k] = &itemCopy
+		}
+	}
+	return dst
+}
+
+func (s *TrafficStore) trimMapIfNeededLocked(targetMap map[string]*TrafficItem) {
+	if len(targetMap) <= maxDimensionItems {
 		return
 	}
-	data := trafficPersistData{
-		Clients:   s.clients,
-		Domains:   s.domains,
-		Processes: s.processes,
-		Nodes:     s.nodes,
-		Rules:     s.rules,
+	items := make([]*TrafficItem, 0, len(targetMap))
+	for _, item := range targetMap {
+		if item != nil {
+			items = append(items, item)
+		}
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
+	})
+	for i := trimDimensionKeep; i < len(items); i++ {
+		delete(targetMap, items[i].Name)
+	}
+}
+
+func (s *TrafficStore) Flush() {
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+		return
+	}
+
+	// 1. 容量超限时淘汰低流量项，防止内存与磁盘文件无界增长
+	s.trimMapIfNeededLocked(s.domains)
+	s.trimMapIfNeededLocked(s.clients)
+	s.trimMapIfNeededLocked(s.processes)
+	s.trimMapIfNeededLocked(s.nodes)
+	s.trimMapIfNeededLocked(s.rules)
+
+	// 2. 浅克隆快照后立刻释放锁，避免序列化和磁盘 I/O 阻塞实时统计与前端查询
+	data := trafficPersistData{
+		Clients:   cloneTrafficMap(s.clients),
+		Domains:   cloneTrafficMap(s.domains),
+		Processes: cloneTrafficMap(s.processes),
+		Nodes:     cloneTrafficMap(s.nodes),
+		Rules:     cloneTrafficMap(s.rules),
+	}
+	s.dirty = false
+	filePath := s.filePath
+	s.mu.Unlock()
+
+	// 3. 锁外执行序列化与落盘
 	bytes, err := json.Marshal(data)
 	if err != nil {
 		debugLogf("traffic", "failed to marshal traffic data: %v", err)
 		return
 	}
-	tmp := s.filePath + ".tmp"
+	tmp := filePath + ".tmp"
 	if err := os.WriteFile(tmp, bytes, 0644); err == nil {
-		if err := os.Rename(tmp, s.filePath); err != nil {
-			debugLogf("traffic", "failed to rename traffic tmp file: %v", err)
-			_ = os.WriteFile(s.filePath, bytes, 0644)
+		if err := os.Rename(tmp, filePath); err != nil {
+			_ = os.WriteFile(filePath, bytes, 0644)
+			_ = os.Remove(tmp)
 		}
 	} else {
-		debugLogf("traffic", "failed to write traffic tmp file %q: %v", tmp, err)
-		_ = os.WriteFile(s.filePath, bytes, 0644)
+		_ = os.WriteFile(filePath, bytes, 0644)
 	}
-	debugLogf("traffic", "saved traffic snapshot to disk (clients=%d, domains=%d)", len(s.clients), len(s.domains))
-	s.dirty = false
+	debugLogf("traffic", "saved traffic snapshot to disk (clients=%d, domains=%d)", len(data.Clients), len(data.Domains))
 }
 
 func getProcessName(m *ClashMetadata) string {
@@ -256,37 +311,64 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 		id := conn.ID
 		currentIDs[id] = struct{}{}
 		prev, hadPrev := s.lastConnections[id]
+		isNew := !hadPrev
 		diffDown := conn.Download - prev.Download
 		diffUp := conn.Upload - prev.Upload
 
-		if diffDown > 0 || diffUp > 0 {
-			process := getProcessName(&conn.Metadata)
-			clientID := getClientIdentity(&conn.Metadata, process)
-			destination := conn.Metadata.Host
-			if destination == "" {
-				destination = conn.Metadata.DestinationIP
-			}
-			if destination == "" {
-				destination = "unknown"
-			}
-			node := "DIRECT"
-			if len(conn.Chains) > 0 && conn.Chains[0] != "" {
-				node = conn.Chains[0]
-			}
-			rule := conn.Rule
-			if rule == "" {
-				rule = "Match"
+		// 首次接入新连接，或已有连接产生新流量增量时才进行更新
+		if isNew || diffDown > 0 || diffUp > 0 {
+			var meta connMetaCache
+			if hadPrev {
+				// 长连接直接复用元数据，避免每秒重复调用 filepath.Base、strings.ToLower 与 net.ParseIP
+				meta = prev.meta
+			} else {
+				process := getProcessName(&conn.Metadata)
+				clientID := getClientIdentity(&conn.Metadata, process)
+				destination := conn.Metadata.Host
+				if destination == "" {
+					destination = conn.Metadata.DestinationIP
+				}
+				if destination == "" {
+					destination = "unknown"
+				}
+				node := "DIRECT"
+				if len(conn.Chains) > 0 && conn.Chains[0] != "" {
+					node = conn.Chains[0]
+				}
+				rule := conn.Rule
+				if rule == "" {
+					rule = "Match"
+				}
+				meta = connMetaCache{
+					clientID:    clientID,
+					destination: destination,
+					process:     process,
+					node:        node,
+					rule:        rule,
+				}
 			}
 
-			isNew := !hadPrev
-			addTraffic(s.clients, clientID, diffUp, diffDown, isNew)
-			addTraffic(s.domains, destination, diffUp, diffDown, isNew)
-			addTraffic(s.processes, process, diffUp, diffDown, isNew)
-			addTraffic(s.nodes, node, diffUp, diffDown, isNew)
-			addTraffic(s.rules, rule, diffUp, diffDown, isNew)
+			if diffDown < 0 {
+				diffDown = 0
+			}
+			if diffUp < 0 {
+				diffUp = 0
+			}
+
+			addTraffic(s.clients, meta.clientID, diffUp, diffDown, isNew)
+			addTraffic(s.domains, meta.destination, diffUp, diffDown, isNew)
+			addTraffic(s.processes, meta.process, diffUp, diffDown, isNew)
+			addTraffic(s.nodes, meta.node, diffUp, diffDown, isNew)
+			addTraffic(s.rules, meta.rule, diffUp, diffDown, isNew)
 			changed = true
+			s.lastConnections[id] = lastConnTraffic{
+				Download: conn.Download,
+				Upload:   conn.Upload,
+				meta:     meta,
+			}
+		} else {
+			s.lastConnections[id] = prev
 		}
-		s.lastConnections[id] = lastConnTraffic{Download: conn.Download, Upload: conn.Upload}
 	}
 
 	for id := range s.lastConnections {
@@ -317,7 +399,6 @@ func addTraffic(targetMap map[string]*TrafficItem, name string, up, down int64, 
 
 func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	res := TrafficRankResult{
 		List:     make([]TrafficItem, 0),
@@ -328,7 +409,7 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 		res.PageNum = 1
 	}
 	if res.PageSize <= 0 {
-		res.PageSize = 500
+		res.PageSize = 200
 	}
 
 	var targetMap map[string]*TrafficItem
@@ -344,6 +425,7 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 	case "rules":
 		targetMap = s.rules
 	default:
+		s.mu.RUnlock()
 		return res
 	}
 
@@ -353,6 +435,7 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 			items = append(items, *item)
 		}
 	}
+	s.mu.RUnlock() // 拷贝完后立即释放读锁！排序在锁外进行，避免长时间阻塞写入
 
 	sort.Slice(items, func(i, j int) bool {
 		return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)

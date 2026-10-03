@@ -194,7 +194,10 @@ import {
   aggregateConnections,
   aggregatedDataMap,
   clearConnectionHistory,
+  fetchDimensionHistory,
   mergeAggregatedData,
+  startConnectionHistoryPolling,
+  stopConnectionHistoryPolling,
 } from '@/store/connHistory'
 import { activeConnections } from '@/store/connections'
 import {
@@ -213,7 +216,7 @@ import {
 } from '@tanstack/vue-table'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import dayjs from 'dayjs'
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DialogWrapper from '../common/DialogWrapper.vue'
 import ProxyName from '../proxies/ProxyName.vue'
@@ -450,7 +453,16 @@ const handleClearHistory = async () => {
   }
 }
 
+watch(aggregationType, (newType) => {
+  fetchDimensionHistory(newType)
+})
+
 onMounted(() => {
   checkAndPerformAutoCleanup()
+  startConnectionHistoryPolling(aggregationType)
+})
+
+onUnmounted(() => {
+  stopConnectionHistoryPolling()
 })
 </script>
