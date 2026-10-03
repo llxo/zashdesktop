@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -121,14 +122,33 @@ func (s windowState) valid() bool {
 }
 
 func loadWindowState() (windowState, string) {
-	userDataDir := appUserDataDir()
-	if userDataDir == "" {
+	_, execDir, err := executablePathAndDir()
+	var path string
+	if err == nil && execDir != "" {
+		path = filepath.Join(execDir, "data", "window.json")
+	} else if userDataDir := appUserDataDir(); userDataDir != "" {
+		path = filepath.Join(userDataDir, "window.json")
+	} else {
 		return windowState{}, ""
 	}
 
-	path := filepath.Join(userDataDir, "window.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
+	data, readErr := os.ReadFile(path)
+	if readErr != nil && errors.Is(readErr, os.ErrNotExist) {
+		// 尝试平滑迁移旧的 AppData/window.json
+		if userDataDir := appUserDataDir(); userDataDir != "" {
+			oldPath := filepath.Join(userDataDir, "window.json")
+			if oldData, oldErr := os.ReadFile(oldPath); oldErr == nil {
+				var oldState windowState
+				if json.Unmarshal(oldData, &oldState) == nil && oldState.valid() {
+					debugLogf("app", "migrated window.json from %q to %q", oldPath, path)
+					_ = saveWindowState(path, oldState)
+					_ = os.Remove(oldPath)
+					return oldState, path
+				}
+			}
+		}
+		return windowState{}, path
+	} else if readErr != nil {
 		return windowState{}, path
 	}
 
@@ -145,7 +165,7 @@ func saveWindowState(path string, state windowState) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		debugLogf("app", "create window state directory %q failed: %v", filepath.Dir(path), err)
 		return err
 	}
@@ -157,7 +177,7 @@ func saveWindowState(path string, state windowState) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		debugLogf("app", "write window state file %q failed: %v", path, err)
 		return err
 	}
