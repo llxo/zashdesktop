@@ -92,11 +92,11 @@ type TrafficStore struct {
 }
 
 func NewTrafficStore(dataDir string) *TrafficStore {
-	storeDir := filepath.Join(dataDir, "data", "traffic-statistics")
-	_ = os.MkdirAll(storeDir, 0755)
+	dir := filepath.Join(dataDir, "data")
+	_ = os.MkdirAll(dir, 0755)
 
 	store := &TrafficStore{
-		filePath:        filepath.Join(storeDir, "traffic.json"),
+		filePath:        filepath.Join(dir, "traffic.json"),
 		clients:         make(map[string]*TrafficItem),
 		domains:         make(map[string]*TrafficItem),
 		processes:       make(map[string]*TrafficItem),
@@ -116,10 +116,14 @@ func NewTrafficStore(dataDir string) *TrafficStore {
 func (s *TrafficStore) loadData() {
 	content, err := os.ReadFile(s.filePath)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			debugLogf("traffic", "failed to read traffic file %q: %v", s.filePath, err)
+		}
 		return
 	}
 	var data trafficPersistData
 	if err := json.Unmarshal(content, &data); err != nil {
+		debugLogf("traffic", "failed to parse traffic file %q: %v", s.filePath, err)
 		return
 	}
 	if data.Clients != nil {
@@ -137,6 +141,8 @@ func (s *TrafficStore) loadData() {
 	if data.Rules != nil {
 		s.rules = data.Rules
 	}
+	debugLogf("traffic", "loaded traffic history: clients=%d, domains=%d, processes=%d, nodes=%d, rules=%d",
+		len(s.clients), len(s.domains), len(s.processes), len(s.nodes), len(s.rules))
 }
 
 func (s *TrafficStore) Close() {
@@ -174,14 +180,20 @@ func (s *TrafficStore) Flush() {
 	}
 	bytes, err := json.Marshal(data)
 	if err != nil {
+		debugLogf("traffic", "failed to marshal traffic data: %v", err)
 		return
 	}
 	tmp := s.filePath + ".tmp"
 	if err := os.WriteFile(tmp, bytes, 0644); err == nil {
-		_ = os.Rename(tmp, s.filePath)
+		if err := os.Rename(tmp, s.filePath); err != nil {
+			debugLogf("traffic", "failed to rename traffic tmp file: %v", err)
+			_ = os.WriteFile(s.filePath, bytes, 0644)
+		}
 	} else {
+		debugLogf("traffic", "failed to write traffic tmp file %q: %v", tmp, err)
 		_ = os.WriteFile(s.filePath, bytes, 0644)
 	}
+	debugLogf("traffic", "saved traffic snapshot to disk (clients=%d, domains=%d)", len(s.clients), len(s.domains))
 	s.dirty = false
 }
 
@@ -371,6 +383,7 @@ func (s *TrafficStore) ClearData() error {
 	s.rules = make(map[string]*TrafficItem)
 	s.dirty = true
 	_ = os.Remove(s.filePath)
+	debugLogf("traffic", "traffic stats cleared")
 	return nil
 }
 
@@ -405,9 +418,11 @@ func (c *TrafficCollector) UpdateTarget(apiURL, secret string) {
 	c.currentURL = apiURL
 	c.secret = secret
 	if apiURL == "" {
+		debugLogf("traffic", "collector target cleared, stopping collection")
 		c.store.Flush()
 		return
 	}
+	debugLogf("traffic", "collector target updated: url=%s, hasSecret=%t", apiURL, secret != "")
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelFunc = cancel
 	c.running = true
@@ -422,6 +437,7 @@ func (c *TrafficCollector) Stop() {
 	}
 	c.running = false
 	c.mu.Unlock()
+	debugLogf("traffic", "collector stopped")
 	c.store.Flush()
 }
 
@@ -449,6 +465,7 @@ func (c *TrafficCollector) runConnections(ctx context.Context, apiURL, secret st
 		}
 		conn, _, err := websocket.Dial(ctx, wsURL, opts)
 		if err != nil {
+			debugLogf("traffic", "dial /connections failed (%s): %v, will retry in 2s", wsURL, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -456,9 +473,11 @@ func (c *TrafficCollector) runConnections(ctx context.Context, apiURL, secret st
 				continue
 			}
 		}
+		debugLogf("traffic", "connected to /connections stream: %s", wsURL)
 		for {
 			_, data, err := conn.Read(ctx)
 			if err != nil {
+				debugLogf("traffic", "connections stream closed: %v, will reconnect in 1s", err)
 				break
 			}
 			var snapshot ClashConnectionsSnapshot
@@ -479,6 +498,7 @@ func (c *TrafficCollector) runConnections(ctx context.Context, apiURL, secret st
 
 func (s *CoreService) GetTrafficRank(req TrafficRankRequest) (TrafficRankResult, error) {
 	if s.trafficStore == nil {
+		debugLogf("traffic", "GetTrafficRank failed: traffic store not initialized")
 		return TrafficRankResult{}, errors.New("traffic store not initialized")
 	}
 	return s.trafficStore.GetRank(req), nil
@@ -486,6 +506,7 @@ func (s *CoreService) GetTrafficRank(req TrafficRankRequest) (TrafficRankResult,
 
 func (s *CoreService) ClearTrafficData() error {
 	if s.trafficStore == nil {
+		debugLogf("traffic", "ClearTrafficData failed: traffic store not initialized")
 		return errors.New("traffic store not initialized")
 	}
 	return s.trafficStore.ClearData()

@@ -234,6 +234,7 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 			s.syncSystemBehaviorOnce(&s.cachedProfiles.Behavior)
 		}
 	}
+	s.syncTrafficCollectorTargetLocked()
 	s.mu.Unlock()
 	if configErr == nil {
 		if debugErr := configureCoreDebugLog(s.backendDebugLogPath(), startupConfig.BackendDebugLog); debugErr != nil {
@@ -306,6 +307,7 @@ func (s *CoreService) clearRunningClashAPILocked() {
 	s.runningClashAPIHost = ""
 	s.runningClashAPIPort = ""
 	s.runningClashAPISecret = ""
+	s.syncTrafficCollectorTargetLocked()
 }
 
 func (s *CoreService) setOnStateChange(cb func()) {
@@ -1150,6 +1152,7 @@ func (s *CoreService) detectInheritedProcessLocked(coreType string) {
 				s.runningClashAPISecret = cfg.ClashAPISecret
 			}
 		}
+		s.syncTrafficCollectorTargetLocked()
 	}
 }
 
