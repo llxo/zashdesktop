@@ -56,3 +56,23 @@ export interface CoreSettingsPatch {
     "stopCoreOnExit"?: boolean | null;
     "backendDebugLog"?: boolean | null;
 }
+
+export interface TrafficItem {
+    "name": string;
+    "up": number;
+    "down": number;
+    "count": number;
+}
+
+export interface TrafficRankRequest {
+    "dimension": string;
+    "pageNum"?: number;
+    "pageSize"?: number;
+}
+
+export interface TrafficRankResult {
+    "list": TrafficItem[] | null;
+    "total": number;
+    "pageNum": number;
+    "pageSize": number;
+}

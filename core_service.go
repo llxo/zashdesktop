@@ -125,6 +125,8 @@ type CoreService struct {
 	versionCache       map[string]coreVersionCacheItem
 	remoteReleaseMu    sync.Mutex
 	remoteReleaseCache map[string]remoteReleaseCacheItem
+	trafficStore       *TrafficStore
+	trafficCollector   *TrafficCollector
 }
 
 func NewCoreService() (*CoreService, error) {
@@ -141,6 +143,8 @@ func NewCoreService() (*CoreService, error) {
 		versionCache:       make(map[string]coreVersionCacheItem),
 		remoteReleaseCache: make(map[string]remoteReleaseCacheItem),
 	}
+	service.trafficStore = NewTrafficStore(service.executableDir)
+	service.trafficCollector = NewTrafficCollector(service.trafficStore)
 	if profiles, err := service.loadProfilesLocked(); err == nil {
 		if profiles.Behavior.BackendDebugLog {
 			_ = configureCoreDebugLog(service.backendDebugLogPath(), true)
@@ -248,6 +252,12 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 
 func (s *CoreService) ServiceShutdown() error {
 	coreDebugf("service shutdown")
+	if s.trafficCollector != nil {
+		s.trafficCollector.Stop()
+	}
+	if s.trafficStore != nil {
+		s.trafficStore.Close()
+	}
 	s.mu.Lock()
 	s.shuttingDown = true
 	cancelStartup := s.startupCancel
@@ -310,11 +320,18 @@ func (s *CoreService) emitStateChangeEvent(app *application.App) {
 	}
 }
 
+func (s *CoreService) syncTrafficCollectorTargetLocked() {
+	if s.trafficCollector != nil {
+		s.trafficCollector.UpdateTarget(s.runningClashAPIURL, s.runningClashAPISecret)
+	}
+}
+
 func (s *CoreService) notifyStateChange() {
 	s.mu.Lock()
 	cb := s.onStateChange
 	app := s.app
 	isStopped := s.runningCoreTypeLocked() == ""
+	s.syncTrafficCollectorTargetLocked()
 	s.mu.Unlock()
 	if isStopped {
 		invalidateProxySettingsCache()
@@ -329,6 +346,7 @@ func (s *CoreService) notifyStateChangeLocked() {
 	if s.runningCoreTypeLocked() == "" {
 		invalidateProxySettingsCache()
 	}
+	s.syncTrafficCollectorTargetLocked()
 	cb := s.onStateChange
 	app := s.app
 	if cb != nil {

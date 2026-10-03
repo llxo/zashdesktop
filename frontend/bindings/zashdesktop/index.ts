@@ -9,5 +9,8 @@ export {
 export type {
     AppUpdateInfo,
     CoreConfig,
-    CoreSettingsPatch
+    CoreSettingsPatch,
+    TrafficItem,
+    TrafficRankRequest,
+    TrafficRankResult
 } from "./models.js";

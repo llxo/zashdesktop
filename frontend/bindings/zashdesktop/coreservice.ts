@@ -21,6 +21,10 @@ export function CheckUpdate(rawURL: string, rawCoreType: string): $CancellablePr
     return $Call.ByID(2721282167, rawURL, rawCoreType);
 }
 
+export function ClearTrafficData(): $CancellablePromise<void> {
+    return $Call.ByID(2270706196);
+}
+
 export function DeleteConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(2839170645, rawFileName, rawCoreType);
 }
@@ -55,6 +59,10 @@ export function GetCoreStateForType(rawCoreType: string): $CancellablePromise<$m
 
 export function GetSystemFonts(): $CancellablePromise<string[] | null> {
     return $Call.ByID(3946130123);
+}
+
+export function GetTrafficRank(req: $models.TrafficRankRequest): $CancellablePromise<$models.TrafficRankResult> {
+    return $Call.ByID(3721033365, req);
 }
 
 export function ImportConfig(rawContent: string, sourceFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
