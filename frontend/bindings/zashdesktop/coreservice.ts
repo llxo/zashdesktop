@@ -61,6 +61,10 @@ export function GetSystemFonts(): $CancellablePromise<string[] | null> {
     return $Call.ByID(3946130123);
 }
 
+export function GetTrafficMeta(): $CancellablePromise<$models.TrafficMeta> {
+    return $Call.ByID(455041338);
+}
+
 export function GetTrafficRank(req: $models.TrafficRankRequest): $CancellablePromise<$models.TrafficRankResult> {
     return $Call.ByID(3721033365, req);
 }
@@ -87,6 +91,10 @@ export function RestartCore(rawArgs: string, rawCoreType: string): $CancellableP
 
 export function SelectConfigFile(rawFileName: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {
     return $Call.ByID(1276464918, rawFileName, rawCoreType);
+}
+
+export function SetTrafficAutoClean(interval: string): $CancellablePromise<void> {
+    return $Call.ByID(765301969, interval);
 }
 
 export function StartCore(rawArgs: string, rawCoreType: string): $CancellablePromise<$models.CoreConfig> {

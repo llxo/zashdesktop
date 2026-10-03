@@ -21,7 +21,7 @@
       </div>
       <!-- v-memo: avoid re-rendering the selects on every connection poll (flicker on firefox) -->
       <div
-        v-memo="[aggregationType, autoCleanupInterval, locale]"
+        v-memo="[aggregationType, trafficTimeRange, trafficAutoCleanInterval, locale]"
         class="flex items-center gap-2 max-sm:flex-col max-sm:items-start"
       >
         <div class="flex items-center gap-2">
@@ -42,16 +42,30 @@
           />
         </div>
         <div class="flex items-center gap-2">
+          <span class="text-base-content/60 text-xs">{{ $t('trafficTimeRange') }}</span>
+          <SelectInput
+            v-model="trafficTimeRange"
+            class="select select-bordered select-sm w-32"
+            :options="[
+              { value: 'all', label: $t('trafficTimeRangeAll') },
+              { value: '24h', label: $t('trafficTimeRange24h') },
+              { value: '7d', label: $t('trafficTimeRange7d') },
+              { value: '30d', label: $t('trafficTimeRange30d') },
+            ]"
+          />
+        </div>
+        <div class="flex items-center gap-2">
           <span class="text-base-content/60 text-xs">{{ $t('autoCleanupInterval') }}</span>
           <SelectInput
-            v-model="autoCleanupInterval"
+            :model-value="trafficAutoCleanInterval"
             class="select select-bordered select-sm w-28"
             :options="[
-              { value: AutoCleanupInterval.Never, label: $t('autoCleanupIntervalNever') },
-              { value: AutoCleanupInterval.Week, label: $t('autoCleanupIntervalWeek') },
-              { value: AutoCleanupInterval.Month, label: $t('autoCleanupIntervalMonth') },
-              { value: AutoCleanupInterval.Quarter, label: $t('autoCleanupIntervalQuarter') },
+              { value: 'never', label: $t('autoCleanupIntervalNever') },
+              { value: 'week', label: $t('autoCleanupIntervalWeek') },
+              { value: 'month', label: $t('autoCleanupIntervalMonth') },
+              { value: 'quarter', label: $t('autoCleanupIntervalQuarter') },
             ]"
+            @update:model-value="updateTrafficAutoClean(String($event))"
           />
         </div>
       </div>
@@ -191,15 +205,16 @@ import { useStorage } from '@/helper/storage'
 import { useTooltip } from '@/helper/tooltip'
 import { prettyBytesHelper } from '@/helper/utils'
 import {
-  aggregateConnections,
   aggregatedDataMap,
   clearConnectionHistory,
   fetchDimensionHistory,
-  mergeAggregatedData,
   startConnectionHistoryPolling,
   stopConnectionHistoryPolling,
+  trafficAutoCleanInterval,
+  trafficStatsStartTime,
+  updateTrafficAutoClean,
+  type TrafficTimeRange,
 } from '@/store/connHistory'
-import { activeConnections } from '@/store/connections'
 import {
   ArrowDownCircleIcon,
   ArrowUpCircleIcon,
@@ -224,13 +239,6 @@ import ProxyName from '../proxies/ProxyName.vue'
 const { t, locale } = useI18n()
 const { showTip } = useTooltip()
 
-enum AutoCleanupInterval {
-  Never = 'never',
-  Week = 'week',
-  Month = 'month',
-  Quarter = 'quarter',
-}
-
 interface ConnectionHistoryData {
   key: string
   download: number
@@ -242,11 +250,13 @@ const aggregationType = useStorage<ConnectionHistoryType>(
   'cache/connection-history-aggregation-type',
   ConnectionHistoryType.SourceIP,
 )
+const trafficTimeRange = useStorage<TrafficTimeRange>(
+  'cache/connection-history-time-range',
+  'all',
+)
 const historicalData = computed(() => aggregatedDataMap.value[aggregationType.value])
 const aggregatedData = computed<ConnectionHistoryData[]>(() => {
-  const currentData = aggregateConnections(activeConnections.value, aggregationType.value)
-
-  return mergeAggregatedData(historicalData.value, currentData)
+  return historicalData.value || []
 })
 
 const totalStats = computed(() => {
@@ -381,64 +391,26 @@ const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems())
 const totalSize = computed(() => rowVirtualizer.value.getTotalSize() + 24)
 
 const showClearDialog = ref(false)
-const autoCleanupInterval = useStorage<AutoCleanupInterval>(
-  'config/connection-history-auto-cleanup-interval',
-  AutoCleanupInterval.Month,
-)
-// 这是统计起始时间戳,首次访问就要落盘固定下来,否则每次刷新都会被视为"刚开始统计",
-// 自动清理永远不会触发 —— 与其他纯 UI 偏好不同,这里需要保留 writeDefaults
-const startTime = useStorage<number>(
-  'cache/connection-history-stats-start-time',
-  Date.now(),
-  undefined,
-  {
-    writeDefaults: true,
-  },
-)
-const totalConnectionsTip = computed(() => {
-  const dayjsTime = dayjs(startTime.value)
 
+const totalConnectionsTip = computed(() => {
+  if (trafficTimeRange.value === '24h') {
+    return t('trafficTimeRange24h')
+  }
+  if (trafficTimeRange.value === '7d') {
+    return t('trafficTimeRange7d')
+  }
+  if (trafficTimeRange.value === '30d') {
+    return t('trafficTimeRange30d')
+  }
+  const dayjsTime = dayjs(trafficStatsStartTime.value)
   return t('totalConnectionsTip', {
     statsStartTime: `${dayjsTime.format('YYYY-MM-DD HH:mm')} (${dayjsTime.fromNow()})`,
   })
 })
-const getCleanupIntervalMs = (interval: AutoCleanupInterval): number => {
-  switch (interval) {
-    case AutoCleanupInterval.Week:
-      return 7 * 24 * 60 * 60 * 1000
-    case AutoCleanupInterval.Month:
-      return 30 * 24 * 60 * 60 * 1000
-    case AutoCleanupInterval.Quarter:
-      return 90 * 24 * 60 * 60 * 1000
-    case AutoCleanupInterval.Never:
-    default:
-      return 0
-  }
-}
-
-const checkAndPerformAutoCleanup = async () => {
-  if (autoCleanupInterval.value === AutoCleanupInterval.Never) {
-    return
-  }
-
-  const now = Date.now()
-  const intervalMs = getCleanupIntervalMs(autoCleanupInterval.value)
-  const timeSinceLastCleanup = now - startTime.value
-
-  if (timeSinceLastCleanup >= intervalMs) {
-    try {
-      await clearConnectionHistory()
-      startTime.value = now
-    } catch (error) {
-      console.error('Failed to perform auto cleanup:', error)
-    }
-  }
-}
 
 const handleClearHistory = async () => {
   try {
     await clearConnectionHistory()
-    startTime.value = Date.now()
     showClearDialog.value = false
     showNotification({
       content: t('clearConnectionHistorySuccess'),
@@ -454,12 +426,23 @@ const handleClearHistory = async () => {
 }
 
 watch(aggregationType, (newType) => {
-  fetchDimensionHistory(newType)
+  fetchDimensionHistory(newType, trafficTimeRange.value, true)
 })
 
+watch(trafficTimeRange, (newRange) => {
+  fetchDimensionHistory(aggregationType.value, newRange, true)
+})
+
+watch(
+  sorting,
+  () => {
+    fetchDimensionHistory(aggregationType.value, trafficTimeRange.value, true)
+  },
+  { deep: true },
+)
+
 onMounted(() => {
-  checkAndPerformAutoCleanup()
-  startConnectionHistoryPolling(aggregationType)
+  startConnectionHistoryPolling(aggregationType, trafficTimeRange, sorting)
 })
 
 onUnmounted(() => {

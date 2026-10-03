@@ -64,8 +64,16 @@ export interface TrafficItem {
     "count": number;
 }
 
+export interface TrafficMeta {
+    "startTime": number;
+    "autoCleanInterval": string;
+}
+
 export interface TrafficRankRequest {
     "dimension": string;
+    "timeRange"?: string;
+    "orderBy"?: string;
+    "orderDesc"?: boolean;
     "pageNum"?: number;
     "pageSize"?: number;
 }
@@ -75,4 +83,5 @@ export interface TrafficRankResult {
     "total": number;
     "pageNum": number;
     "pageSize": number;
+    "startTime": number;
 }

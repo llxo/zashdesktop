@@ -11,6 +11,7 @@ export type {
     CoreConfig,
     CoreSettingsPatch,
     TrafficItem,
+    TrafficMeta,
     TrafficRankRequest,
     TrafficRankResult
 } from "./models.js";

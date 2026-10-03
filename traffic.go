@@ -28,15 +28,24 @@ type TrafficItem struct {
 
 type TrafficRankRequest struct {
 	Dimension string `json:"dimension"`
+	TimeRange string `json:"timeRange,omitempty"`
+	OrderBy   string `json:"orderBy,omitempty"`
+	OrderDesc bool   `json:"orderDesc,omitempty"`
 	PageNum   int    `json:"pageNum,omitempty"`
 	PageSize  int    `json:"pageSize,omitempty"`
 }
 
 type TrafficRankResult struct {
-	List     []TrafficItem `json:"list"`
-	Total    int           `json:"total"`
-	PageNum  int           `json:"pageNum"`
-	PageSize int           `json:"pageSize"`
+	List      []TrafficItem `json:"list"`
+	Total     int           `json:"total"`
+	PageNum   int           `json:"pageNum"`
+	PageSize  int           `json:"pageSize"`
+	StartTime int64         `json:"startTime"`
+}
+
+type TrafficMeta struct {
+	StartTime         int64  `json:"startTime"`
+	AutoCleanInterval string `json:"autoCleanInterval"`
 }
 
 type ClashConnection struct {
@@ -65,8 +74,10 @@ type ClashConnectionsSnapshot struct {
 // ===================== 2. 统计引擎与存储 =====================
 
 const (
-	maxDimensionItems = 1500
-	trimDimensionKeep = 1000
+	maxTotalDimensionItems  = 1500
+	trimTotalDimensionKeep  = 1000
+	maxBucketDimensionItems = 400
+	trimBucketDimensionKeep = 250
 )
 
 type connMetaCache struct {
@@ -83,26 +94,114 @@ type lastConnTraffic struct {
 	meta     connMetaCache
 }
 
+type DimensionData struct {
+	Clients   map[string]*TrafficItem `json:"clients,omitempty"`
+	Domains   map[string]*TrafficItem `json:"domains,omitempty"`
+	Processes map[string]*TrafficItem `json:"processes,omitempty"`
+	Nodes     map[string]*TrafficItem `json:"nodes,omitempty"`
+	Rules     map[string]*TrafficItem `json:"rules,omitempty"`
+}
+
+func newDimensionData() *DimensionData {
+	return &DimensionData{
+		Clients:   make(map[string]*TrafficItem),
+		Domains:   make(map[string]*TrafficItem),
+		Processes: make(map[string]*TrafficItem),
+		Nodes:     make(map[string]*TrafficItem),
+		Rules:     make(map[string]*TrafficItem),
+	}
+}
+
+func (d *DimensionData) getMap(dimension string) map[string]*TrafficItem {
+	if d == nil {
+		return nil
+	}
+	switch dimension {
+	case "clients":
+		return d.Clients
+	case "domains":
+		return d.Domains
+	case "processes":
+		return d.Processes
+	case "nodes":
+		return d.Nodes
+	case "rules":
+		return d.Rules
+	default:
+		return nil
+	}
+}
+
+func (d *DimensionData) add(meta *connMetaCache, up, down int64, isNew bool) {
+	if d == nil {
+		return
+	}
+	if d.Clients == nil {
+		d.Clients = make(map[string]*TrafficItem)
+	}
+	if d.Domains == nil {
+		d.Domains = make(map[string]*TrafficItem)
+	}
+	if d.Processes == nil {
+		d.Processes = make(map[string]*TrafficItem)
+	}
+	if d.Nodes == nil {
+		d.Nodes = make(map[string]*TrafficItem)
+	}
+	if d.Rules == nil {
+		d.Rules = make(map[string]*TrafficItem)
+	}
+
+	addTraffic(d.Clients, meta.clientID, up, down, isNew)
+	addTraffic(d.Domains, meta.destination, up, down, isNew)
+	addTraffic(d.Processes, meta.process, up, down, isNew)
+	addTraffic(d.Nodes, meta.node, up, down, isNew)
+	addTraffic(d.Rules, meta.rule, up, down, isNew)
+}
+
+func (d *DimensionData) clone() *DimensionData {
+	if d == nil {
+		return nil
+	}
+	return &DimensionData{
+		Clients:   cloneTrafficMap(d.Clients),
+		Domains:   cloneTrafficMap(d.Domains),
+		Processes: cloneTrafficMap(d.Processes),
+		Nodes:     cloneTrafficMap(d.Nodes),
+		Rules:     cloneTrafficMap(d.Rules),
+	}
+}
+
 type trafficPersistData struct {
-	Clients   map[string]*TrafficItem `json:"clients"`
-	Domains   map[string]*TrafficItem `json:"domains"`
-	Processes map[string]*TrafficItem `json:"processes"`
-	Nodes     map[string]*TrafficItem `json:"nodes"`
-	Rules     map[string]*TrafficItem `json:"rules"`
+	// 兼容老版本顶层字段
+	LegacyClients   map[string]*TrafficItem `json:"clients,omitempty"`
+	LegacyDomains   map[string]*TrafficItem `json:"domains,omitempty"`
+	LegacyProcesses map[string]*TrafficItem `json:"processes,omitempty"`
+	LegacyNodes     map[string]*TrafficItem `json:"nodes,omitempty"`
+	LegacyRules     map[string]*TrafficItem `json:"rules,omitempty"`
+
+	// 新版本分层分桶字段
+	Total  *DimensionData            `json:"total,omitempty"`
+	Hourly map[string]*DimensionData `json:"hourly,omitempty"` // key: 2006010215
+	Daily  map[string]*DimensionData `json:"daily,omitempty"`  // key: 20060102
+
+	// 统计起始时间与自动清理周期
+	StartTime         int64  `json:"startTime,omitempty"`
+	AutoCleanInterval string `json:"autoCleanInterval,omitempty"`
 }
 
 type TrafficStore struct {
-	filePath        string
-	mu              sync.RWMutex
-	clients         map[string]*TrafficItem
-	domains         map[string]*TrafficItem
-	processes       map[string]*TrafficItem
-	nodes           map[string]*TrafficItem
-	rules           map[string]*TrafficItem
-	lastConnections map[string]lastConnTraffic
-	dirty           bool
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
+	filePath          string
+	mu                sync.RWMutex
+	total             *DimensionData
+	hourly            map[string]*DimensionData
+	daily             map[string]*DimensionData
+	lastConnections   map[string]lastConnTraffic
+	startTime         int64
+	autoCleanInterval string
+	dirty             bool
+	stopChan          chan struct{}
+	wg                sync.WaitGroup
 }
 
 func NewTrafficStore(dataDir string) *TrafficStore {
@@ -110,14 +209,14 @@ func NewTrafficStore(dataDir string) *TrafficStore {
 	_ = os.MkdirAll(dir, 0755)
 
 	store := &TrafficStore{
-		filePath:        filepath.Join(dir, "traffic.json"),
-		clients:         make(map[string]*TrafficItem),
-		domains:         make(map[string]*TrafficItem),
-		processes:       make(map[string]*TrafficItem),
-		nodes:           make(map[string]*TrafficItem),
-		rules:           make(map[string]*TrafficItem),
-		lastConnections: make(map[string]lastConnTraffic),
-		stopChan:        make(chan struct{}),
+		filePath:          filepath.Join(dir, "traffic.json"),
+		total:             newDimensionData(),
+		hourly:            make(map[string]*DimensionData),
+		daily:             make(map[string]*DimensionData),
+		lastConnections:   make(map[string]lastConnTraffic),
+		startTime:         time.Now().UnixMilli(),
+		autoCleanInterval: "month",
+		stopChan:          make(chan struct{}),
 	}
 
 	store.loadData()
@@ -140,23 +239,57 @@ func (s *TrafficStore) loadData() {
 		debugLogf("traffic", "failed to parse traffic file %q: %v", s.filePath, err)
 		return
 	}
-	if data.Clients != nil {
-		s.clients = data.Clients
+
+	if data.Total != nil {
+		s.total = data.Total
+	} else if data.LegacyClients != nil || data.LegacyDomains != nil {
+		s.total = &DimensionData{
+			Clients:   data.LegacyClients,
+			Domains:   data.LegacyDomains,
+			Processes: data.LegacyProcesses,
+			Nodes:     data.LegacyNodes,
+			Rules:     data.LegacyRules,
+		}
 	}
-	if data.Domains != nil {
-		s.domains = data.Domains
+	if s.total == nil {
+		s.total = newDimensionData()
 	}
-	if data.Processes != nil {
-		s.processes = data.Processes
+	if s.total.Clients == nil {
+		s.total.Clients = make(map[string]*TrafficItem)
 	}
-	if data.Nodes != nil {
-		s.nodes = data.Nodes
+	if s.total.Domains == nil {
+		s.total.Domains = make(map[string]*TrafficItem)
 	}
-	if data.Rules != nil {
-		s.rules = data.Rules
+	if s.total.Processes == nil {
+		s.total.Processes = make(map[string]*TrafficItem)
 	}
-	debugLogf("traffic", "loaded traffic history: clients=%d, domains=%d, processes=%d, nodes=%d, rules=%d",
-		len(s.clients), len(s.domains), len(s.processes), len(s.nodes), len(s.rules))
+	if s.total.Nodes == nil {
+		s.total.Nodes = make(map[string]*TrafficItem)
+	}
+	if s.total.Rules == nil {
+		s.total.Rules = make(map[string]*TrafficItem)
+	}
+
+	if data.Hourly != nil {
+		s.hourly = data.Hourly
+	}
+	if data.Daily != nil {
+		s.daily = data.Daily
+	}
+
+	if data.StartTime > 0 {
+		s.startTime = data.StartTime
+	} else {
+		s.startTime = time.Now().UnixMilli()
+	}
+	if data.AutoCleanInterval != "" {
+		s.autoCleanInterval = data.AutoCleanInterval
+	} else {
+		s.autoCleanInterval = "month"
+	}
+
+	debugLogf("traffic", "loaded traffic history: total_domains=%d, hourly_buckets=%d, daily_buckets=%d, autoClean=%s",
+		len(s.total.Domains), len(s.hourly), len(s.daily), s.autoCleanInterval)
 }
 
 func (s *TrafficStore) Close() {
@@ -179,7 +312,44 @@ func (s *TrafficStore) flushLoop() {
 	}
 }
 
+func getAutoCleanDuration(interval string) time.Duration {
+	switch strings.ToLower(strings.TrimSpace(interval)) {
+	case "week":
+		return 7 * 24 * time.Hour
+	case "month":
+		return 30 * 24 * time.Hour
+	case "quarter":
+		return 90 * 24 * time.Hour
+	default:
+		return 0
+	}
+}
+
+func (s *TrafficStore) clearDataLocked() {
+	s.total = newDimensionData()
+	s.hourly = make(map[string]*DimensionData)
+	s.daily = make(map[string]*DimensionData)
+	s.lastConnections = make(map[string]lastConnTraffic)
+}
+
+func (s *TrafficStore) checkAutoCleanLocked(now time.Time) {
+	dur := getAutoCleanDuration(s.autoCleanInterval)
+	if dur <= 0 || s.startTime <= 0 {
+		return
+	}
+	if now.Sub(time.UnixMilli(s.startTime)) >= dur {
+		s.clearDataLocked()
+		s.startTime = now.UnixMilli()
+		s.dirty = true
+		debugLogf("traffic", "auto cleaned traffic history in background (interval: %s, new startTime: %d)",
+			s.autoCleanInterval, s.startTime)
+	}
+}
+
 func cloneTrafficMap(src map[string]*TrafficItem) map[string]*TrafficItem {
+	if src == nil {
+		return nil
+	}
 	dst := make(map[string]*TrafficItem, len(src))
 	for k, v := range src {
 		if v != nil {
@@ -190,12 +360,16 @@ func cloneTrafficMap(src map[string]*TrafficItem) map[string]*TrafficItem {
 	return dst
 }
 
-func (s *TrafficStore) trimMapIfNeededLocked(targetMap map[string]*TrafficItem) {
-	if len(targetMap) <= maxDimensionItems {
+func trimMapIfNeeded(targetMap *map[string]*TrafficItem, maxLimit, keepLimit int) {
+	if targetMap == nil || *targetMap == nil {
 		return
 	}
-	items := make([]*TrafficItem, 0, len(targetMap))
-	for _, item := range targetMap {
+	m := *targetMap
+	if len(m) <= maxLimit {
+		return
+	}
+	items := make([]*TrafficItem, 0, len(m))
+	for _, item := range m {
 		if item != nil {
 			items = append(items, item)
 		}
@@ -203,53 +377,116 @@ func (s *TrafficStore) trimMapIfNeededLocked(targetMap map[string]*TrafficItem) 
 	sort.Slice(items, func(i, j int) bool {
 		return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
 	})
-	for i := trimDimensionKeep; i < len(items); i++ {
-		delete(targetMap, items[i].Name)
+	newMap := make(map[string]*TrafficItem, keepLimit)
+	for i := 0; i < keepLimit && i < len(items); i++ {
+		newMap[items[i].Name] = items[i]
 	}
+	*targetMap = newMap
+}
+
+func trimDimensionData(d *DimensionData, maxLimit, keepLimit int) {
+	if d == nil {
+		return
+	}
+	trimMapIfNeeded(&d.Domains, maxLimit, keepLimit)
+	trimMapIfNeeded(&d.Clients, maxLimit, keepLimit)
+	trimMapIfNeeded(&d.Processes, maxLimit, keepLimit)
+	trimMapIfNeeded(&d.Nodes, maxLimit, keepLimit)
+	trimMapIfNeeded(&d.Rules, maxLimit, keepLimit)
 }
 
 func (s *TrafficStore) Flush() {
 	s.mu.Lock()
+	now := time.Now()
+
+	// 0. 后台无人值守自动清理：检查是否达到预设的自动清理周期
+	s.checkAutoCleanLocked(now)
+
 	if !s.dirty {
 		s.mu.Unlock()
 		return
 	}
 
-	// 1. 容量超限时淘汰低流量项，防止内存与磁盘文件无界增长
-	s.trimMapIfNeededLocked(s.domains)
-	s.trimMapIfNeededLocked(s.clients)
-	s.trimMapIfNeededLocked(s.processes)
-	s.trimMapIfNeededLocked(s.nodes)
-	s.trimMapIfNeededLocked(s.rules)
+	hourKey := now.Format("2006010215")
+	dayKey := now.Format("20060102")
 
-	// 2. 浅克隆快照后立刻释放锁，避免序列化和磁盘 I/O 阻塞实时统计与前端查询
+	// 1. 清理超过 24 小时前的小时桶（最多保留 24 个）
+	hourCutoff := now.Add(-24 * time.Hour).Format("2006010215")
+	for k := range s.hourly {
+		if k < hourCutoff {
+			delete(s.hourly, k)
+		}
+	}
+
+	// 2. 清理超过 30 天前的天桶（最多保留 30 个）
+	dayCutoff := now.AddDate(0, 0, -30).Format("20060102")
+	for k := range s.daily {
+		if k < dayCutoff {
+			delete(s.daily, k)
+		}
+	}
+
+	// 3. 维度容量截断：历史桶早已截断过且不再增长，仅对正在累积的活跃桶截断，大幅降低排序开销
+	trimDimensionData(s.total, maxTotalDimensionItems, trimTotalDimensionKeep)
+	if hBucket := s.hourly[hourKey]; hBucket != nil {
+		trimDimensionData(hBucket, maxBucketDimensionItems, trimBucketDimensionKeep)
+	}
+	if dBucket := s.daily[dayKey]; dBucket != nil {
+		trimDimensionData(dBucket, maxBucketDimensionItems, trimBucketDimensionKeep)
+	}
+
+	// 4. 制作落盘快照：仅克隆正在写入的活跃桶，历史不可变桶浅引用，立即释放写锁！
+	hourlyClone := make(map[string]*DimensionData, len(s.hourly))
+	for k, v := range s.hourly {
+		if v != nil {
+			if k == hourKey {
+				hourlyClone[k] = v.clone()
+			} else {
+				hourlyClone[k] = v
+			}
+		}
+	}
+	dailyClone := make(map[string]*DimensionData, len(s.daily))
+	for k, v := range s.daily {
+		if v != nil {
+			if k == dayKey {
+				dailyClone[k] = v.clone()
+			} else {
+				dailyClone[k] = v
+			}
+		}
+	}
 	data := trafficPersistData{
-		Clients:   cloneTrafficMap(s.clients),
-		Domains:   cloneTrafficMap(s.domains),
-		Processes: cloneTrafficMap(s.processes),
-		Nodes:     cloneTrafficMap(s.nodes),
-		Rules:     cloneTrafficMap(s.rules),
+		Total:             s.total.clone(),
+		Hourly:            hourlyClone,
+		Daily:             dailyClone,
+		StartTime:         s.startTime,
+		AutoCleanInterval: s.autoCleanInterval,
 	}
 	s.dirty = false
 	filePath := s.filePath
-	s.mu.Unlock()
+	s.mu.Unlock() // 极速释放排他写锁，避免阻塞 WebSocket 统计与前端读取
 
-	// 3. 锁外执行序列化与落盘
+	// 5. 锁外执行序列化与原子落盘
 	bytes, err := json.Marshal(data)
 	if err != nil {
 		debugLogf("traffic", "failed to marshal traffic data: %v", err)
 		return
 	}
 	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, bytes, 0644); err == nil {
-		if err := os.Rename(tmp, filePath); err != nil {
-			_ = os.WriteFile(filePath, bytes, 0644)
-			_ = os.Remove(tmp)
-		}
-	} else {
-		_ = os.WriteFile(filePath, bytes, 0644)
+	if err := os.WriteFile(tmp, bytes, 0644); err != nil {
+		debugLogf("traffic", "failed to write traffic tmp file %q: %v", tmp, err)
+		return
 	}
-	debugLogf("traffic", "saved traffic snapshot to disk (clients=%d, domains=%d)", len(data.Clients), len(data.Domains))
+	if err := os.Rename(tmp, filePath); err != nil {
+		debugLogf("traffic", "failed to rename %q to %q: %v, attempting overwrite fallback", tmp, filePath, err)
+		if writeErr := os.WriteFile(filePath, bytes, 0644); writeErr != nil {
+			debugLogf("traffic", "failed fallback write to %q: %v", filePath, writeErr)
+		}
+		_ = os.Remove(tmp)
+	}
+	debugLogf("traffic", "saved traffic snapshot to disk (total_domains=%d, hourly=%d, daily=%d)",
+		len(data.Total.Domains), len(data.Hourly), len(data.Daily))
 }
 
 func getProcessName(m *ClashMetadata) string {
@@ -304,6 +541,22 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := time.Now()
+	hourKey := now.Format("2006010215")
+	dayKey := now.Format("20060102")
+
+	hBucket, hExists := s.hourly[hourKey]
+	if !hExists {
+		hBucket = newDimensionData()
+		s.hourly[hourKey] = hBucket
+	}
+
+	dBucket, dExists := s.daily[dayKey]
+	if !dExists {
+		dBucket = newDimensionData()
+		s.daily[dayKey] = dBucket
+	}
+
 	currentIDs := make(map[string]struct{}, len(conns))
 	changed := false
 
@@ -355,11 +608,11 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 				diffUp = 0
 			}
 
-			addTraffic(s.clients, meta.clientID, diffUp, diffDown, isNew)
-			addTraffic(s.domains, meta.destination, diffUp, diffDown, isNew)
-			addTraffic(s.processes, meta.process, diffUp, diffDown, isNew)
-			addTraffic(s.nodes, meta.node, diffUp, diffDown, isNew)
-			addTraffic(s.rules, meta.rule, diffUp, diffDown, isNew)
+			// 同时增量记账到：全量总桶、当前小时桶、当天桶
+			s.total.add(&meta, diffUp, diffDown, isNew)
+			hBucket.add(&meta, diffUp, diffDown, isNew)
+			dBucket.add(&meta, diffUp, diffDown, isNew)
+
 			changed = true
 			s.lastConnections[id] = lastConnTraffic{
 				Download: conn.Download,
@@ -387,58 +640,57 @@ func addTraffic(targetMap map[string]*TrafficItem, name string, up, down int64, 
 	}
 	item, exists := targetMap[name]
 	if !exists {
-		item = &TrafficItem{Name: name}
+		item = &TrafficItem{Name: name, Count: 1}
 		targetMap[name] = item
+	} else if isNew {
+		item.Count++
 	}
 	item.Up += up
 	item.Down += down
-	if isNew {
-		item.Count++
-	}
 }
 
-func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
-	s.mu.RLock()
+func addTrafficItemToMerged(target map[string]*TrafficItem, item *TrafficItem) {
+	if item == nil || item.Name == "" {
+		return
+	}
+	exist, ok := target[item.Name]
+	if !ok {
+		exist = &TrafficItem{Name: item.Name}
+		target[item.Name] = exist
+	}
+	exist.Up += item.Up
+	exist.Down += item.Down
+	exist.Count += item.Count
+}
 
-	res := TrafficRankResult{
-		List:     make([]TrafficItem, 0),
-		PageNum:  req.PageNum,
-		PageSize: req.PageSize,
-	}
-	if res.PageNum <= 0 {
-		res.PageNum = 1
-	}
-	if res.PageSize <= 0 {
-		res.PageSize = 200
-	}
-
-	var targetMap map[string]*TrafficItem
-	switch req.Dimension {
-	case "clients":
-		targetMap = s.clients
-	case "domains":
-		targetMap = s.domains
-	case "processes":
-		targetMap = s.processes
-	case "nodes":
-		targetMap = s.nodes
-	case "rules":
-		targetMap = s.rules
-	default:
-		s.mu.RUnlock()
-		return res
+func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRankRequest) TrafficRankResult {
+	orderDesc := true
+	if req.OrderBy != "" {
+		orderDesc = req.OrderDesc
 	}
 
-	items := make([]TrafficItem, 0, len(targetMap))
-	for _, item := range targetMap {
-		if item != nil {
-			items = append(items, *item)
-		}
-	}
-	s.mu.RUnlock() // 拷贝完后立即释放读锁！排序在锁外进行，避免长时间阻塞写入
-
+	orderBy := strings.ToLower(strings.TrimSpace(req.OrderBy))
 	sort.Slice(items, func(i, j int) bool {
-		return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
+		var a, b int64
+		switch orderBy {
+		case "download":
+			a, b = items[i].Down, items[j].Down
+		case "upload":
+			a, b = items[i].Up, items[j].Up
+		case "count":
+			a, b = items[i].Count, items[j].Count
+		case "total":
+			fallthrough
+		default:
+			a, b = items[i].Down+items[i].Up, items[j].Down+items[j].Up
+		}
+		if a == b {
+			return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
+		}
+		if orderDesc {
+			return a > b
+		}
+		return a < b
 	})
 
 	total := len(items)
@@ -455,18 +707,147 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 	return res
 }
 
+func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
+	s.mu.RLock()
+
+	res := TrafficRankResult{
+		List:      make([]TrafficItem, 0),
+		PageNum:   req.PageNum,
+		PageSize:  req.PageSize,
+		StartTime: s.startTime,
+	}
+	if res.PageNum <= 0 {
+		res.PageNum = 1
+	}
+	if res.PageSize <= 0 {
+		res.PageSize = 200
+	}
+
+	dimension := req.Dimension
+	timeRange := strings.ToLower(strings.TrimSpace(req.TimeRange))
+	if timeRange == "" {
+		timeRange = "all"
+	}
+
+	now := time.Now()
+	var mapsToMerge []map[string]*TrafficItem
+
+	switch timeRange {
+	case "24h":
+		hourCutoff := now.Add(-24 * time.Hour).Format("2006010215")
+		currentHourKey := now.Format("2006010215")
+		for k, bucket := range s.hourly {
+			if k >= hourCutoff && bucket != nil {
+				m := bucket.getMap(dimension)
+				if len(m) > 0 {
+					if k == currentHourKey {
+						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
+					} else {
+						mapsToMerge = append(mapsToMerge, m)
+					}
+				}
+			}
+		}
+		s.mu.RUnlock()
+
+	case "7d":
+		dayCutoff := now.AddDate(0, 0, -7).Format("20060102")
+		currentDayKey := now.Format("20060102")
+		for k, bucket := range s.daily {
+			if k >= dayCutoff && bucket != nil {
+				m := bucket.getMap(dimension)
+				if len(m) > 0 {
+					if k == currentDayKey {
+						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
+					} else {
+						mapsToMerge = append(mapsToMerge, m)
+					}
+				}
+			}
+		}
+		s.mu.RUnlock()
+
+	case "30d":
+		dayCutoff := now.AddDate(0, 0, -30).Format("20060102")
+		currentDayKey := now.Format("20060102")
+		for k, bucket := range s.daily {
+			if k >= dayCutoff && bucket != nil {
+				m := bucket.getMap(dimension)
+				if len(m) > 0 {
+					if k == currentDayKey {
+						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
+					} else {
+						mapsToMerge = append(mapsToMerge, m)
+					}
+				}
+			}
+		}
+		s.mu.RUnlock()
+
+	default: // "all"
+		targetMap := s.total.getMap(dimension)
+		if targetMap == nil {
+			s.mu.RUnlock()
+			return res
+		}
+		items := make([]TrafficItem, 0, len(targetMap))
+		for _, item := range targetMap {
+			if item != nil {
+				items = append(items, *item)
+			}
+		}
+		s.mu.RUnlock()
+		return formatRankResult(res, items, req)
+	}
+
+	merged := make(map[string]*TrafficItem)
+	for _, m := range mapsToMerge {
+		for _, item := range m {
+			addTrafficItemToMerged(merged, item)
+		}
+	}
+	items := make([]TrafficItem, 0, len(merged))
+	for _, item := range merged {
+		if item != nil {
+			items = append(items, *item)
+		}
+	}
+	return formatRankResult(res, items, req)
+}
+
 func (s *TrafficStore) ClearData() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.clients = make(map[string]*TrafficItem)
-	s.domains = make(map[string]*TrafficItem)
-	s.processes = make(map[string]*TrafficItem)
-	s.nodes = make(map[string]*TrafficItem)
-	s.rules = make(map[string]*TrafficItem)
+	s.clearDataLocked()
+	s.startTime = time.Now().UnixMilli()
 	s.dirty = true
-	_ = os.Remove(s.filePath)
-	debugLogf("traffic", "traffic stats cleared")
+	s.mu.Unlock()
+
+	s.Flush()
+	debugLogf("traffic", "traffic stats cleared and flushed")
+	return nil
+}
+
+func (s *TrafficStore) GetMeta() TrafficMeta {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return TrafficMeta{
+		StartTime:         s.startTime,
+		AutoCleanInterval: s.autoCleanInterval,
+	}
+}
+
+func (s *TrafficStore) SetAutoCleanInterval(interval string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	interval = strings.ToLower(strings.TrimSpace(interval))
+	switch interval {
+	case "never", "week", "month", "quarter":
+		s.autoCleanInterval = interval
+	default:
+		s.autoCleanInterval = "never"
+	}
+	s.dirty = true
+	debugLogf("traffic", "auto clean interval updated to: %s", s.autoCleanInterval)
 	return nil
 }
 
@@ -593,4 +974,20 @@ func (s *CoreService) ClearTrafficData() error {
 		return errors.New("traffic store not initialized")
 	}
 	return s.trafficStore.ClearData()
+}
+
+func (s *CoreService) GetTrafficMeta() (TrafficMeta, error) {
+	if s.trafficStore == nil {
+		debugLogf("traffic", "GetTrafficMeta failed: traffic store not initialized")
+		return TrafficMeta{}, errors.New("traffic store not initialized")
+	}
+	return s.trafficStore.GetMeta(), nil
+}
+
+func (s *CoreService) SetTrafficAutoClean(interval string) error {
+	if s.trafficStore == nil {
+		debugLogf("traffic", "SetTrafficAutoClean failed: traffic store not initialized")
+		return errors.New("traffic store not initialized")
+	}
+	return s.trafficStore.SetAutoCleanInterval(interval)
 }
