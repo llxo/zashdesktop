@@ -22,7 +22,11 @@ import type { Connection } from '@/types'
 import { watchOnce } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { computed, ref, shallowRef, watch } from 'vue'
-import { initAggregatedDataMap, saveConnectionHistory } from './connHistory'
+import {
+  initAggregatedDataMap,
+  saveConnectionHistory,
+  stopConnectionHistory,
+} from './connHistory'
 import {
   autoDisconnectIdleUDP,
   autoDisconnectIdleUDPTime,
@@ -114,6 +118,7 @@ export const initConnections = () => {
 // undefined 后渲染函数直接抛错,表格的 vnode 树就此损坏,之后新后端的数据正常
 // 流入也不再重绘,只能刷新页面。所以清空要与切换同步发生,不能等新流建起来。
 export const stopConnections = () => {
+  stopConnectionHistory()
   cancel?.()
   cancel = undefined
   activeConnections.value = []
