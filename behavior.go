@@ -36,9 +36,8 @@ var (
 	behaviorGlobalFree                            = systemKernel32.NewProc("GlobalFree")
 	behaviorPsapi                                 = windows.NewLazySystemDLL("psapi.dll")
 	behaviorEmptyWorkingSet                       = behaviorPsapi.NewProc("EmptyWorkingSet")
-	behaviorNtdll                                 = windows.NewLazySystemDLL("ntdll.dll")
-	behaviorNtSuspendProcess                      = behaviorNtdll.NewProc("NtSuspendProcess")
-	behaviorNtResumeProcess                       = behaviorNtdll.NewProc("NtResumeProcess")
+	procSuspendThread                             = systemKernel32.NewProc("SuspendThread")
+	procResumeThread                              = systemKernel32.NewProc("ResumeThread")
 )
 
 func readRunAsAdminSetting(applicationPath string) (bool, error) {
@@ -683,27 +682,95 @@ func trimProcessWorkingSet(h windows.Handle) {
 	}
 }
 
-func suspendWebView2Processes() []uint32 {
-	if behaviorNtSuspendProcess.Find() != nil {
+func getProcessThreadIDs(pid uint32) []uint32 {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
 		return nil
 	}
+	defer windows.CloseHandle(snap)
+
+	var entry windows.ThreadEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	if err := windows.Thread32First(snap, &entry); err != nil {
+		return nil
+	}
+
+	var threadIDs []uint32
+	for {
+		if entry.OwnerProcessID == pid {
+			threadIDs = append(threadIDs, entry.ThreadID)
+		}
+		if err := windows.Thread32Next(snap, &entry); err != nil {
+			break
+		}
+	}
+	return threadIDs
+}
+
+func suspendProcessThreads(pid uint32) bool {
+	if procSuspendThread.Find() != nil {
+		return false
+	}
+	tids := getProcessThreadIDs(pid)
+	if len(tids) == 0 {
+		return false
+	}
+	count := 0
+	for _, tid := range tids {
+		hThread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, tid)
+		if err != nil {
+			continue
+		}
+		r, _, _ := procSuspendThread.Call(uintptr(hThread))
+		windows.CloseHandle(hThread)
+		if int32(r) != -1 {
+			count++
+		}
+	}
+	return count > 0
+}
+
+func resumeProcessThreads(pid uint32) bool {
+	if procResumeThread.Find() != nil {
+		return false
+	}
+	tids := getProcessThreadIDs(pid)
+	if len(tids) == 0 {
+		return false
+	}
+	count := 0
+	for _, tid := range tids {
+		hThread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, tid)
+		if err != nil {
+			continue
+		}
+		r, _, _ := procResumeThread.Call(uintptr(hThread))
+		windows.CloseHandle(hThread)
+		if int32(r) != -1 {
+			count++
+		}
+	}
+	return count > 0
+}
+
+func suspendWebView2Processes() []uint32 {
 	pids := findWebView2ProcessPIDs()
-	const access = 0x0800 | windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA | windows.PROCESS_QUERY_LIMITED_INFORMATION
+	const access = windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA | windows.PROCESS_QUERY_LIMITED_INFORMATION
 	var suspended []uint32
 	for _, pid := range pids {
 		if h, err := windows.OpenProcess(access, false, pid); err == nil {
 			cmdLine := getProcessCommandLine(h)
 			// 差异化挂起核心分流：
-			// 仅挂起沙盒渲染进程（--type=renderer），坚决放行主 Browser 进程、GPU 进程与 Utility 进程。
+			// 仅挂起沙盒渲染进程（--type=renderer，即唯一的 WebView2: zashdesktop），坚决放行主 Browser 进程、GPU 进程与 Utility 进程。
 			// 确保主 Browser 进程的 Windows 消息泵与 UIA 探针畅通无阻，从根本上杜绝任务管理器 IPC 超时死锁与全局降级。
 			if strings.Contains(cmdLine, "--type=renderer") {
-				if r, _, callErr := behaviorNtSuspendProcess.Call(uintptr(h)); r == 0 {
+				if suspendProcessThreads(pid) {
 					suspended = append(suspended, pid)
-					debugLogf("window", "suspended webview2 renderer process (pid=%d)", pid)
+					debugLogf("window", "suspended webview2 renderer process via SuspendThread (pid=%d)", pid)
 					// 定向工作集修剪：仅对已挂起的沙盒渲染进程修剪物理工作集，坚决放行主 Browser 进程、GPU 进程与主程序自身
 					trimProcessWorkingSet(h)
 				} else {
-					debugLogf("window", "failed to suspend webview2 renderer process (pid=%d, status=0x%x): %v", pid, r, callErr)
+					debugLogf("window", "failed to suspend webview2 renderer threads (pid=%d)", pid)
 				}
 			}
 			windows.CloseHandle(h)
@@ -713,21 +780,14 @@ func suspendWebView2Processes() []uint32 {
 }
 
 func resumeWebView2Processes(pids []uint32) {
-	if len(pids) == 0 || behaviorNtResumeProcess.Find() != nil {
+	if len(pids) == 0 {
 		return
 	}
 	for _, pid := range pids {
-		h, err := windows.OpenProcess(0x0800, false, pid)
-		if err != nil {
-			debugLogf("window", "failed to open webview2 renderer process for resume (pid=%d): %v", pid, err)
-			continue
-		}
-		r, _, callErr := behaviorNtResumeProcess.Call(uintptr(h))
-		windows.CloseHandle(h)
-		if r != 0 {
-			debugLogf("window", "failed to resume webview2 renderer process (pid=%d, status=0x%x): %v", pid, r, callErr)
+		if resumeProcessThreads(pid) {
+			debugLogf("window", "resumed webview2 renderer process via ResumeThread (pid=%d)", pid)
 		} else {
-			debugLogf("window", "resumed webview2 renderer process (pid=%d)", pid)
+			debugLogf("window", "failed to resume webview2 renderer threads (pid=%d)", pid)
 		}
 	}
 }
