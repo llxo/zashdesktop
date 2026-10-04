@@ -35,8 +35,11 @@ func defaultCoreURLTemplate(coreType, channel string) string {
 }
 
 var (
-	semverPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9a-zA-Z.]+)?`)
-	alphaPattern  = regexp.MustCompile(`alpha(?:-smart)?-[0-9a-zA-Z]+`)
+	semverPattern         = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?`)
+	alphaPattern          = regexp.MustCompile(`alpha(?:-smart)?-[0-9a-zA-Z]+`)
+	atomEntryTagPattern   = regexp.MustCompile(`/releases/tag/([^"/?#\s]+)`)
+	platformSuffixPattern = regexp.MustCompile(`-(?:windows|linux|darwin|android|freebsd|openbsd)(?:-[0-9a-zA-Z_]+)*$`)
+	githubTagNamePattern  = regexp.MustCompile(`"tag_name"\s*:\s*"([^"]+)"`)
 )
 
 // -----------------------------------------------------------------------------
@@ -163,10 +166,6 @@ func (s *CoreService) setCachedLatestRelease(owner, repository, channel, version
 	}
 }
 
-func isCoreStaticReleaseTag(tag string) bool {
-	return strings.EqualFold(strings.TrimSpace(tag), mihomoPrereleaseTag)
-}
-
 // -----------------------------------------------------------------------------
 // Core URL & GitHub Repository Helpers
 // -----------------------------------------------------------------------------
@@ -287,6 +286,7 @@ func normalizeCoreVersion(value string) string {
 	if v := alphaPattern.FindString(value); v != "" {
 		return v
 	}
+	value = platformSuffixPattern.ReplaceAllString(value, "")
 	if v := semverPattern.FindString(value); v != "" {
 		return v
 	}
@@ -409,144 +409,227 @@ func normalizeCoreChannel(raw string) (string, error) {
 // Remote GitHub Release & Tag Detection
 // -----------------------------------------------------------------------------
 
-type githubRelease struct {
-	TagName     string        `json:"tag_name"`
-	HTMLURL     string        `json:"html_url"`
-	Body        string        `json:"body"`
-	PublishedAt string        `json:"published_at"`
-	Prerelease  bool          `json:"prerelease"`
-	Assets      []githubAsset `json:"assets"`
-}
-
-type githubAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-	Digest             string `json:"digest"`
-	Size               int64  `json:"size"`
-}
-
-type fetchReleaseResult struct {
-	url     string
-	version string
-	digest  string
-	err     error
-}
-
-func buildGitHubAPIURLs(endpoint string) []string {
-	endpoint = strings.TrimSpace(endpoint)
-	urls := make([]string, 0, 1+len(githubDownloadProxies))
-	urls = append(urls, endpoint)
-	for _, proxy := range githubDownloadProxies {
-		urls = append(urls, strings.TrimRight(proxy, "/")+"/"+endpoint)
-	}
-	return urls
-}
-
-func parseReleasePayload(r io.Reader, channel string, isMihomoPre bool) (string, string, error) {
-	var targetRelease githubRelease
-	if channel == coreChannelTest && !isMihomoPre {
-		var releases []githubRelease
-		if err := json.NewDecoder(io.LimitReader(r, 2<<20)).Decode(&releases); err != nil {
-			return "", "", fmt.Errorf("parse GitHub releases: %w", err)
-		}
-		for _, rel := range releases {
-			if rel.Prerelease || coreChannel(rel.TagName) == coreChannelTest {
-				targetRelease = rel
-				break
-			}
-		}
-		if targetRelease.TagName == "" && len(releases) > 0 {
-			targetRelease = releases[0]
-		}
-	} else {
-		if err := json.NewDecoder(io.LimitReader(r, 2<<20)).Decode(&targetRelease); err != nil {
-			return "", "", fmt.Errorf("parse GitHub release: %w", err)
-		}
-	}
-
-	v := normalizeCoreVersion(targetRelease.TagName)
-	if v == "" || isCoreStaticReleaseTag(targetRelease.TagName) {
-		for _, asset := range targetRelease.Assets {
-			if strings.HasSuffix(strings.ToLower(asset.Name), ".zip") {
-				if av := normalizeCoreVersion(asset.Name); av != "" {
-					v = av
-					break
-				}
-			}
-		}
-	}
-	if v == "" {
-		return "", "", errors.New("GitHub release has no valid core version")
-	}
-
-	digest := ""
-	for _, asset := range targetRelease.Assets {
-		lower := strings.ToLower(asset.Name)
-		if strings.Contains(lower, "windows") && strings.Contains(lower, "amd64") {
-			if strings.HasPrefix(strings.ToLower(asset.Digest), "sha256:") {
-				digest = strings.TrimSpace(asset.Digest[7:])
-				break
-			}
-		}
-	}
-
-	return v, digest, nil
-}
-
-func fetchSingleRelease(ctx context.Context, client *http.Client, targetURL, channel string, isMihomoPre bool) (string, string, error) {
+func fetchGitHubText(ctx context.Context, targetURL string, timeout time.Duration, maxBytes int64) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "zashdesktop")
 
+	client := newCoreHTTPClient(timeout)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", "", fmt.Errorf("HTTP status %s", resp.Status)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %s", resp.Status)
 	}
 
-	return parseReleasePayload(resp.Body, channel, isMihomoPre)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
-// fetchLatestCoreRelease 并发请求官方及加速镜像源，首个成功者立即胜出并取消其他请求
-func fetchLatestCoreRelease(owner, repository, channel string) (version string, sha256Digest string, err error) {
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
+func fetchLatestReleaseByRedirect(ctx context.Context, owner, repository string) (string, error) {
+	targetURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "zashdesktop")
 
-	isMihomoPre := (strings.EqualFold(owner, "MetaCubeX") || strings.EqualFold(owner, "vernesong")) && strings.EqualFold(repository, "mihomo") && channel == coreChannelTest
+	client := &http.Client{
+		Timeout:   6 * time.Second,
+		Transport: sharedCoreTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
+		return "", fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", errors.New("missing Location header in redirect")
+	}
+
+	m := atomEntryTagPattern.FindStringSubmatch(loc)
+	tag := ""
+	if len(m) > 1 {
+		tag = m[1]
+	} else {
+		tag = loc[strings.LastIndex(loc, "/")+1:]
+	}
+
+	version := normalizeCoreVersion(tag)
+	if version == "" {
+		return "", fmt.Errorf("unable to normalize version from redirect tag %q", tag)
+	}
+	return version, nil
+}
+
+func fetchLatestReleaseByAtom(ctx context.Context, owner, repository string) (string, error) {
+	targetURL := fmt.Sprintf("https://github.com/%s/%s/releases.atom", url.PathEscape(owner), url.PathEscape(repository))
+	content, err := fetchGitHubText(ctx, targetURL, 6*time.Second, 64*1024)
+	if err != nil {
+		return "", err
+	}
+
+	m := atomEntryTagPattern.FindStringSubmatch(content)
+	if len(m) < 2 {
+		return "", errors.New("no tag found in releases.atom")
+	}
+
+	version := normalizeCoreVersion(m[1])
+	if version == "" {
+		return "", fmt.Errorf("unable to normalize version from atom tag %q", m[1])
+	}
+	return version, nil
+}
+
+func fetchMihomoPrereleaseAlpha(ctx context.Context, owner, repository string) (string, error) {
+	targetURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/version.txt", url.PathEscape(owner), url.PathEscape(repository), mihomoPrereleaseTag)
+	content, err := fetchGitHubText(ctx, targetURL, 6*time.Second, 1024)
+	if err != nil {
+		return "", err
+	}
+
+	version := normalizeCoreVersion(strings.TrimSpace(content))
+	if version == "" {
+		return "", fmt.Errorf("unable to normalize version from version.txt %q", content)
+	}
+	return version, nil
+}
+
+// fetchLatestCoreReleaseAPI 请求官方 GitHub API 作为兜底回退
+func fetchLatestCoreReleaseAPI(ctx context.Context, owner, repository, channel string, isMihomoPre bool) (string, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repository))
 	if isMihomoPre {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repository), mihomoPrereleaseTag)
 	} else if channel == coreChannelTest {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=3", url.PathEscape(owner), url.PathEscape(repository))
 	}
 
-	candidates := buildGitHubAPIURLs(endpoint)
+	content, err := fetchGitHubText(ctx, endpoint, 10*time.Second, 2*1024*1024)
+	if err != nil {
+		debugLogf("core", "official GitHub API %s check update failed: %v", endpoint, err)
+		return "", err
+	}
+
+	var targetTag string
+
+	if channel == coreChannelTest && !isMihomoPre {
+		var list []struct {
+			TagName    string `json:"tag_name"`
+			Prerelease bool   `json:"prerelease"`
+		}
+		if err := json.Unmarshal([]byte(content), &list); err == nil && len(list) > 0 {
+			for _, rel := range list {
+				if rel.Prerelease || coreChannel(rel.TagName) == coreChannelTest {
+					targetTag = rel.TagName
+					break
+				}
+			}
+			if targetTag == "" {
+				targetTag = list[0].TagName
+			}
+		}
+	} else {
+		var single struct {
+			TagName string `json:"tag_name"`
+		}
+		if err := json.Unmarshal([]byte(content), &single); err == nil {
+			targetTag = single.TagName
+		}
+	}
+
+	if targetTag == "" {
+		if m := githubTagNamePattern.FindStringSubmatch(content); len(m) > 1 {
+			targetTag = m[1]
+		}
+	}
+
+	if isMihomoPre {
+		if v := alphaPattern.FindString(content); v != "" {
+			debugLogf("core", "latest release fetched from official GitHub API %s (alphaPattern): version=%s", endpoint, v)
+			targetTag = v
+		}
+	}
+
+	version := normalizeCoreVersion(targetTag)
+	if version == "" {
+		return "", fmt.Errorf("unable to parse tag_name from GitHub API response")
+	}
+
+	debugLogf("core", "latest release fetched from official GitHub API %s: version=%s", endpoint, version)
+	return version, nil
+}
+
+type coreReleaseChannelResult struct {
+	name    string
+	version string
+	err     error
+}
+
+// fetchLatestCoreRelease 双通道并发竞速（Web极速通道与官方API通道），首个成功者立即胜出
+func fetchLatestCoreRelease(owner, repository, channel string) (version string, sha256Digest string, err error) {
+	isMihomoPre := (strings.EqualFold(owner, "MetaCubeX") || strings.EqualFold(owner, "vernesong")) && strings.EqualFold(repository, "mihomo") && channel == coreChannelTest
+
+	debugLogf("core", "start checking latest release: %s/%s (%s) with concurrent dual-channel (web + official api)", owner, repository, channel)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resultCh := make(chan fetchReleaseResult, len(candidates))
-	client := newCoreHTTPClient(10 * time.Second)
+	resultCh := make(chan coreReleaseChannelResult, 2)
 
-	for _, candidate := range candidates {
-		go func(targetURL string) {
-			v, digest, fetchErr := fetchSingleRelease(ctx, client, targetURL, channel, isMihomoPre)
-			resultCh <- fetchReleaseResult{
-				url:     targetURL,
-				version: v,
-				digest:  digest,
-				err:     fetchErr,
-			}
-		}(candidate)
-	}
+	// 通道 1：Web 极速通道（302 / releases.atom / version.txt）
+	go func() {
+		debugLogf("core", "requesting web channel for %s/%s (%s)", owner, repository, channel)
+		var v string
+		var fetchErr error
+
+		if isMihomoPre {
+			v, fetchErr = fetchMihomoPrereleaseAlpha(ctx, owner, repository)
+		} else if channel == coreChannelTest {
+			v, fetchErr = fetchLatestReleaseByAtom(ctx, owner, repository)
+		} else {
+			v, fetchErr = fetchLatestReleaseByRedirect(ctx, owner, repository)
+		}
+
+		if fetchErr != nil {
+			debugLogf("core", "web channel finished with error for %s/%s: %v", owner, repository, fetchErr)
+		} else {
+			debugLogf("core", "web channel finished successfully for %s/%s: version=%s", owner, repository, v)
+		}
+		resultCh <- coreReleaseChannelResult{name: "web", version: v, err: fetchErr}
+	}()
+
+	// 通道 2：官方 API 通道
+	go func() {
+		debugLogf("core", "requesting official api channel for %s/%s (%s)", owner, repository, channel)
+		v, fetchErr := fetchLatestCoreReleaseAPI(ctx, owner, repository, channel, isMihomoPre)
+		if fetchErr != nil {
+			debugLogf("core", "official api channel finished with error for %s/%s: %v", owner, repository, fetchErr)
+		} else {
+			debugLogf("core", "official api channel finished successfully for %s/%s: version=%s", owner, repository, v)
+		}
+		resultCh <- coreReleaseChannelResult{name: "api", version: v, err: fetchErr}
+	}()
 
 	var lastErr error
-	for i := 0; i < len(candidates); i++ {
+	for i := 0; i < 2; i++ {
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
@@ -556,18 +639,17 @@ func fetchLatestCoreRelease(owner, repository, channel string) (version string, 
 		case res := <-resultCh:
 			if res.err == nil && res.version != "" {
 				cancel()
-				debugLogf("core", "latest release fetched from %s: version=%s digest=%s", res.url, res.version, res.digest)
-				return res.version, res.digest, nil
+				debugLogf("core", "latest release fetched: %s/%s version=%s (winner: %s channel)", owner, repository, res.version, res.name)
+				return res.version, "", nil
 			}
 			lastErr = res.err
-			debugLogf("core", "candidate %s check update failed: %v", res.url, res.err)
 		}
 	}
 
 	if lastErr != nil {
 		return "", "", fmt.Errorf("check core update failed: %w", lastErr)
 	}
-	return "", "", errors.New("check core update: all endpoints failed")
+	return "", "", errors.New("check core update: all channels failed")
 }
 
 func findLatestReleaseForURL(downloadURLTemplate, channel string) (string, string, error) {

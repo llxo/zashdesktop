@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,15 +66,76 @@ func (s *CoreService) GetAppUpdateInfo() (AppUpdateInfo, error) {
 	return s.CheckAppUpdate()
 }
 
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
+	Size               int64  `json:"size"`
+}
+
+type githubRelease struct {
+	TagName     string        `json:"tag_name"`
+	HTMLURL     string        `json:"html_url"`
+	Body        string        `json:"body"`
+	PublishedAt string        `json:"published_at"`
+	Assets      []githubAsset `json:"assets"`
+}
+
 type appReleaseTarget struct {
 	release     githubRelease
 	binaryAsset *githubAsset
 	sha256Asset *githubAsset
 }
 
-func fetchLatestAppRelease(client *http.Client) (appReleaseTarget, error) {
+func fetchLatestAppTagByRedirect(ctx context.Context, owner, repo string) (string, error) {
+	targetURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", url.PathEscape(owner), url.PathEscape(repo))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "zashdesktop")
+
+	client := &http.Client{
+		Timeout:   6 * time.Second,
+		Transport: sharedCoreTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
+		return "", fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", errors.New("missing Location header in redirect")
+	}
+
+	m := atomEntryTagPattern.FindStringSubmatch(loc)
+	tag := ""
+	if len(m) > 1 {
+		tag = m[1]
+	} else {
+		cleanLoc := strings.TrimRight(strings.Split(loc, "?")[0], "/")
+		tag = cleanLoc[strings.LastIndex(cleanLoc, "/")+1:]
+	}
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", fmt.Errorf("unable to extract tag from redirect %q", loc)
+	}
+	return tag, nil
+}
+
+func fetchLatestAppRelease(ctx context.Context, client *http.Client) (appReleaseTarget, error) {
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", appGithubOwner, appGithubRepo)
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		debugLogf("update", "create app release request failed: %v", err)
 		return appReleaseTarget{}, fmt.Errorf("lookup app release: %w", err)
@@ -123,22 +186,123 @@ func fetchLatestAppRelease(client *http.Client) (appReleaseTarget, error) {
 }
 
 func (s *CoreService) CheckAppUpdate() (AppUpdateInfo, error) {
-	debugLogf("update", "checking app update from GitHub: owner=%s repo=%s currentVersion=%s", appGithubOwner, appGithubRepo, appVersion)
-	client := newCoreHTTPClient(30 * time.Second)
-	target, err := fetchLatestAppRelease(client)
-	if err != nil {
-		return AppUpdateInfo{}, err
+	debugLogf("update", "start checking app update: current=%s owner=%s repo=%s (concurrent dual-channel)", appVersion, appGithubOwner, appGithubRepo)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type appCheckResult struct {
+		isTarget bool
+		target   appReleaseTarget
+		fastTag  string
+		err      error
+	}
+
+	resultCh := make(chan appCheckResult, 2)
+	client := newCoreHTTPClient(10 * time.Second)
+
+	// 通道 1：官方 API 完整 release 通道
+	go func() {
+		debugLogf("update", "requesting official api channel for app update")
+		target, err := fetchLatestAppRelease(ctx, client)
+		if err != nil {
+			debugLogf("update", "official api channel finished with error: %v", err)
+		} else {
+			debugLogf("update", "official api channel finished successfully: tag=%s", target.release.TagName)
+		}
+		resultCh <- appCheckResult{isTarget: true, target: target, err: err}
+	}()
+
+	// 通道 2：Web 302 极速 Tag 检测通道
+	go func() {
+		debugLogf("update", "requesting fast 302 redirect channel for app update")
+		tag, err := fetchLatestAppTagByRedirect(ctx, appGithubOwner, appGithubRepo)
+		if err != nil {
+			debugLogf("update", "fast 302 redirect channel finished with error: %v", err)
+		} else {
+			debugLogf("update", "fast 302 redirect channel finished successfully: tag=%s", tag)
+		}
+		resultCh <- appCheckResult{isTarget: false, fastTag: tag, err: err}
+	}()
+
+	var (
+		lastErr     error
+		foundTarget bool
+		finalTarget appReleaseTarget
+		fastTag     string
+	)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return AppUpdateInfo{}, fmt.Errorf("check app update timed out: %w", lastErr)
+			}
+			return AppUpdateInfo{}, ctx.Err()
+		case res := <-resultCh:
+			if res.err == nil {
+				if res.isTarget {
+					cancel()
+					finalTarget = res.target
+					foundTarget = true
+					debugLogf("update", "app update fetched by official API channel (winner): latest=%s", finalTarget.release.TagName)
+					break
+				} else {
+					fastTag = res.fastTag
+					// 若通过 302 确认当前已是最新版，立即秒级胜出！
+					if !isAppUpdateAvailable(appVersion, fastTag) {
+						cancel()
+						debugLogf("update", "app is already up-to-date by fast 302 channel (winner): current=%s latest=%s", appVersion, fastTag)
+						info := AppUpdateInfo{
+							CurrentVersion:  appVersion,
+							LatestVersion:   fastTag,
+							UpdateAvailable: false,
+						}
+						s.mu.Lock()
+						s.cachedAppUpdate = info
+						s.mu.Unlock()
+						return info, nil
+					}
+					debugLogf("update", "new app version detected via fast 302 (%s > %s), awaiting full release metadata from API", fastTag, appVersion)
+				}
+			} else {
+				lastErr = res.err
+			}
+		}
+		if foundTarget {
+			break
+		}
+	}
+
+	if !foundTarget {
+		if fastTag != "" && isAppUpdateAvailable(appVersion, fastTag) {
+			debugLogf("update", "official API channel failed (%v), fallback to fast 302 tag: %s", lastErr, fastTag)
+			info := AppUpdateInfo{
+				CurrentVersion:  appVersion,
+				LatestVersion:   fastTag,
+				UpdateAvailable: true,
+				ReleaseURL:      fmt.Sprintf("https://github.com/%s/%s/releases/tag/%s", appGithubOwner, appGithubRepo, fastTag),
+			}
+			s.mu.Lock()
+			s.cachedAppUpdate = info
+			s.mu.Unlock()
+			return info, nil
+		}
+		if lastErr != nil {
+			return AppUpdateInfo{}, fmt.Errorf("check app update failed: %w", lastErr)
+		}
+		return AppUpdateInfo{}, errors.New("check app update: all channels failed")
 	}
 
 	info := AppUpdateInfo{
 		CurrentVersion:  appVersion,
-		LatestVersion:   target.release.TagName,
-		UpdateAvailable: isAppUpdateAvailable(appVersion, target.release.TagName),
-		ReleaseURL:      target.release.HTMLURL,
-		ReleaseNotes:    target.release.Body,
-		PublishedAt:     target.release.PublishedAt,
-		DownloadURL:     target.binaryAsset.BrowserDownloadURL,
-		AssetSize:       target.binaryAsset.Size,
+		LatestVersion:   finalTarget.release.TagName,
+		UpdateAvailable: isAppUpdateAvailable(appVersion, finalTarget.release.TagName),
+		ReleaseURL:      finalTarget.release.HTMLURL,
+		ReleaseNotes:    finalTarget.release.Body,
+		PublishedAt:     finalTarget.release.PublishedAt,
+		DownloadURL:     finalTarget.binaryAsset.BrowserDownloadURL,
+		AssetSize:       finalTarget.binaryAsset.Size,
 	}
 
 	s.mu.Lock()
@@ -167,7 +331,9 @@ func (s *CoreService) InstallAppUpdate() error {
 
 	debugLogf("update", "starting app update installation")
 	client := newCoreHTTPClient(30 * time.Second)
-	target, err := fetchLatestAppRelease(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	target, err := fetchLatestAppRelease(ctx, client)
 	if err != nil {
 		return err
 	}
@@ -207,8 +373,8 @@ func (s *CoreService) InstallAppUpdate() error {
 	tempFilePath, err := downloadFile(binaryAsset.BrowserDownloadURL, exeDir, DownloadOptions{
 		ExpectedSHA256: expectedSHA,
 		MaxBytes:       maxAppBinaryDownload,
-		Timeout:        15 * time.Minute,
 		FilePattern:    fmt.Sprintf(".%s-update-*.tmp", exeBase),
+		UseGitHubProxy: s.isGitHubProxyEnabled(),
 	})
 	if err != nil {
 		debugLogf("update", "download update binary failed: %v", err)

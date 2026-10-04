@@ -18,6 +18,7 @@ type sharedBehaviorConfig struct {
 	AutoStartSingBox bool  `json:"autoStartSingBox"`
 	AutoStartMihomo  bool  `json:"autoStartMihomo"`
 	BackendDebugLog  bool  `json:"backendDebugLog"`
+	GitHubProxy      bool  `json:"githubProxy"`
 	StopCoreOnExit   *bool `json:"stopCoreOnExit,omitempty"`
 }
 
@@ -282,7 +283,21 @@ func applySharedBehavior(config *CoreConfig, behavior sharedBehaviorConfig) {
 	config.AutoStartSingBox = behavior.AutoStartSingBox
 	config.AutoStartMihomo = behavior.AutoStartMihomo
 	config.BackendDebugLog = behavior.BackendDebugLog
+	config.GitHubProxy = behavior.GitHubProxy
 	config.StopCoreOnExit = behavior.shouldStopCoreOnExit()
+}
+
+func (s *CoreService) isGitHubProxyEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cachedProfiles != nil {
+		return s.cachedProfiles.Behavior.GitHubProxy
+	}
+	profiles, err := s.loadProfilesLocked()
+	if err != nil {
+		return false
+	}
+	return profiles.Behavior.GitHubProxy
 }
 
 func (s *CoreService) saveConfigLocked(config CoreConfig) error {

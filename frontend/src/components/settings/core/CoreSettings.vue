@@ -60,6 +60,7 @@ const emptyCoreConfig = (type: CoreType): CoreConfig => ({
   autoStartSingBox: false,
   autoStartMihomo: false,
   backendDebugLog: false,
+  githubProxy: false,
   stopCoreOnExit: true,
   clashApiUrl: '',
   clashApiHost: '127.0.0.1',

@@ -60,6 +60,7 @@ type CoreConfig struct {
 	AutoStartSingBox  bool   `json:"autoStartSingBox"`
 	AutoStartMihomo   bool   `json:"autoStartMihomo"`
 	BackendDebugLog   bool   `json:"backendDebugLog"`
+	GitHubProxy       bool   `json:"githubProxy"`
 	StopCoreOnExit    bool   `json:"stopCoreOnExit"`
 	ClashAPIURL       string `json:"clashApiUrl"`
 	ClashAPIHost      string `json:"clashApiHost"`
@@ -77,6 +78,7 @@ type CoreSettingsPatch struct {
 	AutoStartMihomo  *bool   `json:"autoStartMihomo,omitempty"`
 	StopCoreOnExit   *bool   `json:"stopCoreOnExit,omitempty"`
 	BackendDebugLog  *bool   `json:"backendDebugLog,omitempty"`
+	GitHubProxy      *bool   `json:"githubProxy,omitempty"`
 }
 
 type coreVersionCacheItem struct {
@@ -420,7 +422,8 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 
 	hasBehavior := patch.RunAsAdmin != nil || patch.AutoStart != nil ||
 		patch.AutoStartSingBox != nil || patch.AutoStartMihomo != nil ||
-		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil
+		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil ||
+		patch.GitHubProxy != nil
 
 	if hasBehavior {
 		runAsAdmin := config.RunAsAdmin
@@ -443,6 +446,10 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 		if patch.BackendDebugLog != nil {
 			backendDebugLog = *patch.BackendDebugLog
 		}
+		gitHubProxy := config.GitHubProxy
+		if patch.GitHubProxy != nil {
+			gitHubProxy = *patch.GitHubProxy
+		}
 		stopCoreOnExit := config.StopCoreOnExit
 		if patch.StopCoreOnExit != nil {
 			stopCoreOnExit = *patch.StopCoreOnExit
@@ -461,6 +468,7 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 			AutoStartSingBox: autoStartSingBox,
 			AutoStartMihomo:  autoStartMihomo,
 			BackendDebugLog:  backendDebugLog,
+			GitHubProxy:      gitHubProxy,
 			StopCoreOnExit:   &stopCoreOnExit,
 		}
 		if behavior.AutoStartSingBox && behavior.AutoStartMihomo {

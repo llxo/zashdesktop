@@ -94,6 +94,20 @@
             />
           </div>
         </label>
+        <label class="setting-item">
+          <span class="w-20 sm:w-24 shrink-0 text-sm font-medium whitespace-nowrap">
+            {{ $t('githubProxy') }}
+          </span>
+          <div class="flex flex-1 justify-end">
+            <input
+              v-model="behaviorConfig.githubProxy"
+              class="toggle"
+              type="checkbox"
+              :disabled="isSavingBehavior"
+              @change="updateSetting('githubProxy')"
+            />
+          </div>
+        </label>
       </div>
     </section>
 
@@ -183,6 +197,7 @@ type BehaviorField =
   | 'autoStartMihomo'
   | 'stopCoreOnExit'
   | 'backendDebugLog'
+  | 'githubProxy'
 
 let cachedBehavior: any = null
 
@@ -194,6 +209,7 @@ const behaviorConfig = reactive({
   autoStartMihomo: cachedBehavior?.autoStartMihomo ?? false,
   stopCoreOnExit: cachedBehavior?.stopCoreOnExit ?? true,
   backendDebugLog: cachedBehavior?.backendDebugLog ?? false,
+  githubProxy: cachedBehavior?.githubProxy ?? false,
 })
 
 const isSavingBehavior = ref(false)
@@ -227,6 +243,7 @@ const loadBehaviorConfig = async () => {
       behaviorConfig.autoStartMihomo = config.autoStartMihomo
       behaviorConfig.stopCoreOnExit = config.stopCoreOnExit
       behaviorConfig.backendDebugLog = config.backendDebugLog
+      behaviorConfig.githubProxy = config.githubProxy ?? false
       cachedBehavior = { ...behaviorConfig }
     }
   } catch {}
@@ -268,6 +285,7 @@ const updateSetting = async (key: BehaviorField) => {
       behaviorConfig.autoStartMihomo = updated.autoStartMihomo
       behaviorConfig.stopCoreOnExit = updated.stopCoreOnExit
       behaviorConfig.backendDebugLog = updated.backendDebugLog
+      behaviorConfig.githubProxy = updated.githubProxy ?? false
       cachedBehavior = { ...behaviorConfig }
     }
   } catch (error) {

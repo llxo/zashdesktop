@@ -119,6 +119,7 @@
 import * as CoreService from '../../../../bindings/zashdesktop/coreservice'
 import type { CoreConfig } from '../../../../bindings/zashdesktop/models'
 import SegmentedControl, { type SegmentOption } from '@/components/common/SegmentedControl.vue'
+import { showConfirmDialog } from '@/helper/confirmDialog'
 import { showNotification } from '@/helper/notification'
 import {
   ArrowDownCircleIcon,
@@ -292,13 +293,41 @@ const checkUpdate = async (notifyError = true, force = false) => {
 const downloadCore = async () => {
   if (isDownloading.value) return
   isDownloading.value = true
+  let shouldResetLoading = true
   try {
     await CoreService.DownloadCore(currentDownloadURL.value, props.coreType)
     showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
   } catch (error) {
-    showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
+    const errorMsg = String(error)
+    const isProxyDisabled = !props.config.githubProxy || errorMsg.includes('githubProxyDisabled')
+    if (isProxyDisabled) {
+      isDownloading.value = false
+      const { confirmed } = await showConfirmDialog({
+        title: t('githubProxyPromptTitle'),
+        message: t('githubProxyPromptMessage'),
+        confirmText: t('enableAndRetry'),
+      })
+      if (confirmed) {
+        try {
+          const updated = await CoreService.UpdateCoreSettings({ githubProxy: true })
+          if (updated) {
+            emit('update:config', updated)
+            props.config.githubProxy = true
+          }
+          shouldResetLoading = false
+          await downloadCore()
+          return
+        } catch (saveErr) {
+          showNotification({ content: String(saveErr), type: 'alert-error', timeout: 0 })
+        }
+      }
+      return
+    }
+    showNotification({ content: errorMsg, type: 'alert-error', timeout: 0 })
   } finally {
-    isDownloading.value = false
+    if (shouldResetLoading) {
+      isDownloading.value = false
+    }
   }
 }
 

@@ -38,6 +38,7 @@ export interface CoreConfig {
     "autoStartSingBox": boolean;
     "autoStartMihomo": boolean;
     "backendDebugLog": boolean;
+    "githubProxy": boolean;
     "stopCoreOnExit": boolean;
     "clashApiUrl": string;
     "clashApiHost": string;
@@ -55,6 +56,7 @@ export interface CoreSettingsPatch {
     "autoStartMihomo"?: boolean | null;
     "stopCoreOnExit"?: boolean | null;
     "backendDebugLog"?: boolean | null;
+    "githubProxy"?: boolean | null;
 }
 
 export interface TrafficItem {

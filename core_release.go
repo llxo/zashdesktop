@@ -2,9 +2,13 @@ package main
 
 import (
 	"archive/zip"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,22 +53,20 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 		targetVersion = ""
 	}
 
-	expectedSHA256 := ""
 	owner, repo := parseGitHubRepo(downloadURLTemplate)
 	if cached, ok := s.getCachedLatestRelease(owner, repo, config.Channel); ok {
 		if targetVersion == "" {
 			targetVersion = cached.version
 		}
-		expectedSHA256 = cached.digest
 	}
 
 	if targetVersion == "" {
 		var err error
-		targetVersion, expectedSHA256, err = findLatestReleaseForURL(downloadURLTemplate, config.Channel)
+		targetVersion, _, err = findLatestReleaseForURL(downloadURLTemplate, config.Channel)
 		if err != nil {
 			return CoreConfig{}, "", "", err
 		}
-		s.setCachedLatestRelease(owner, repo, config.Channel, targetVersion, expectedSHA256)
+		s.setCachedLatestRelease(owner, repo, config.Channel, targetVersion, "")
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {
@@ -72,14 +74,24 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 	}
 
 	downloadURL := strings.ReplaceAll(downloadURLTemplate, "{version}", targetVersion)
+	targetFile := filepath.Base(downloadURL)
+
+	tag := targetVersion
+	if config.Channel == coreChannelTest && normalizedCoreType(config.CoreType) == coreTypeMihomo {
+		tag = mihomoPrereleaseTag
+	}
+	expectedSHA256 := fetchReleaseAssetDigest(owner, repo, tag, targetFile)
 
 	archivePath, err := downloadFile(downloadURL, s.executableDir, DownloadOptions{
 		ExpectedSHA256: expectedSHA256,
 		MaxBytes:       maxCoreDownload,
-		Timeout:        20 * time.Minute,
 		FilePattern:    ".core-download-*.zip",
+		UseGitHubProxy: s.isGitHubProxyEnabled(),
 	})
 	if err != nil {
+		if !s.isGitHubProxyEnabled() && !strings.Contains(err.Error(), "checksum mismatch") {
+			return CoreConfig{}, "", "", fmt.Errorf("%w (githubProxyDisabled)", err)
+		}
 		return CoreConfig{}, "", "", err
 	}
 	return config, archivePath, targetVersion, nil
@@ -88,6 +100,70 @@ func (s *CoreService) downloadCoreArchive(rawURL string, config CoreConfig) (Cor
 // -----------------------------------------------------------------------------
 // Archive Extraction & Binary Replacement
 // -----------------------------------------------------------------------------
+
+func fetchReleaseAssetDigest(owner, repo, tag, targetFilename string) string {
+	if owner == "" || repo == "" || tag == "" {
+		return ""
+	}
+
+	tags := []string{tag}
+	trimmed := strings.TrimPrefix(tag, "v")
+	if trimmed != tag {
+		tags = append(tags, trimmed)
+	} else {
+		tags = append(tags, "v"+tag)
+	}
+
+	client := newCoreHTTPClient(5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, t := range tags {
+		endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(t))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "zashdesktop")
+		req.Header.Set("Accept", "application/vnd.github+json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			debugLogf("release", "fetch asset digest HTTP failed for %s: %v", endpoint, err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+
+		var payload struct {
+			Assets []struct {
+				Name   string `json:"name"`
+				Digest string `json:"digest"`
+			} `json:"assets"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		// 严格精确匹配目标文件名
+		for _, a := range payload.Assets {
+			if strings.EqualFold(a.Name, targetFilename) {
+				if strings.HasPrefix(strings.ToLower(a.Digest), "sha256:") {
+					digest := strings.TrimSpace(a.Digest[7:])
+					debugLogf("release", "asset digest exact match: %s -> sha256:%s", a.Name, digest)
+					return digest
+				}
+			}
+		}
+	}
+
+	debugLogf("release", "unable to resolve asset digest for %s/%s@%s (target=%s), proceeding without checksum", owner, repo, tag, targetFilename)
+	return ""
+}
 
 func isCoreArchiveExecutable(name, coreType string) bool {
 	prefix := coreExecutableBaseName
