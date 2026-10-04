@@ -341,6 +341,7 @@ type App struct {
 	saveTimer             *time.Timer
 	saveMu                sync.Mutex
 	freezeTimer           *time.Timer
+	deepTrimTimer         *time.Timer
 	suspendedWebView2PIDs []uint32
 	isWebView2Suspended   bool
 	isFreezing            bool
@@ -362,6 +363,10 @@ func (a *App) resumeWebView2Locked() (resumed bool, waitChan <-chan struct{}) {
 	if a.freezeTimer != nil {
 		a.freezeTimer.Stop()
 		a.freezeTimer = nil
+	}
+	if a.deepTrimTimer != nil {
+		a.deepTrimTimer.Stop()
+		a.deepTrimTimer = nil
 	}
 	if a.isFreezing {
 		a.needResume = true
@@ -518,6 +523,10 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.freezeTimer.Stop()
 		a.freezeTimer = nil
 	}
+	if a.deepTrimTimer != nil {
+		a.deepTrimTimer.Stop()
+		a.deepTrimTimer = nil
+	}
 	if a.forceClose || a.quitting {
 		_, waitChan := a.resumeWebView2Locked()
 		a.mu.Unlock()
@@ -577,8 +586,21 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 			a.isWebView2Suspended = true
 		}
 
-		// 直接执行全量子进程与主程序物理工作集修剪（极低内存驻留）
+		// 立即执行首轮全量子进程与主程序物理工作集修剪
 		trimAllWebView2WorkingSets()
+
+		// 延迟 1.5 秒平息期：等待 GPU 与主 Browser 进程彻底完成 Direct3D 交换链注销与资源释放，二次执行深度睡眠修剪
+		if a.deepTrimTimer != nil {
+			a.deepTrimTimer.Stop()
+		}
+		a.deepTrimTimer = time.AfterFunc(1500*time.Millisecond, func() {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if a.window == nil || a.quitting || a.forceClose || !a.isWebView2Suspended {
+				return
+			}
+			trimAllWebView2WorkingSets()
+		})
 	})
 	a.mu.Unlock()
 }
