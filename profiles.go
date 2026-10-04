@@ -125,9 +125,6 @@ func (s *CoreService) syncSystemBehaviorOnce(behavior *sharedBehaviorConfig) {
 	if runAsAdmin, err := readRunAsAdminSetting(s.applicationPath); err == nil {
 		behavior.RunAsAdmin = runAsAdmin
 	}
-	if autoStart, err := readAutoStartSetting(); err == nil {
-		behavior.AutoStart = autoStart
-	}
 }
 
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {

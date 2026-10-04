@@ -1064,9 +1064,6 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 	config.ConfigPath = s.configFilePath(*config)
 	config.ConfigAvailable = fileExists(config.ConfigPath)
 	config.IsAdmin = isPrivilegedCached()
-	if autoStart, err := readAutoStartSetting(); err == nil {
-		config.AutoStart = autoStart
-	}
 	if config.RunArgs == "" {
 		config.RunArgs = defaultRunArgs(config.CoreType)
 	}
