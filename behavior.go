@@ -12,10 +12,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/go-ole/go-ole"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -287,6 +289,71 @@ func writeAutoStartSetting(applicationPath string, enabled bool) error {
 	return nil
 }
 
+func createShortcutNative(shortcutPath, targetPath, workDir, description string) error {
+	_ = ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
+	defer ole.CoUninitialize()
+
+	clsidShellLink := ole.NewGUID("{00021401-0000-0000-C000-000000000046}")
+	iidShellLink := ole.NewGUID("{000214F9-0000-0000-C000-000000000046}")
+
+	unk, err := ole.CreateInstance(clsidShellLink, iidShellLink)
+	if err != nil {
+		return fmt.Errorf("create ShellLink COM instance: %w", err)
+	}
+	defer unk.Release()
+
+	vtable := (*[32]uintptr)(unsafe.Pointer(unk.RawVTable))
+
+	targetUTF16, err := windows.UTF16PtrFromString(targetPath)
+	if err != nil {
+		return err
+	}
+	// IShellLinkW::SetPath (vtable index 20)
+	if r, _, _ := syscall.SyscallN(vtable[20], uintptr(unsafe.Pointer(unk)), uintptr(unsafe.Pointer(targetUTF16))); r != 0 {
+		return fmt.Errorf("SetPath failed: %w", syscall.Errno(r))
+	}
+
+	if workDir != "" {
+		if workDirUTF16, err := windows.UTF16PtrFromString(workDir); err == nil {
+			// IShellLinkW::SetWorkingDirectory (vtable index 9)
+			_, _, _ = syscall.SyscallN(vtable[9], uintptr(unsafe.Pointer(unk)), uintptr(unsafe.Pointer(workDirUTF16)))
+		}
+	}
+
+	// IShellLinkW::SetIconLocation (vtable index 17)
+	_, _, _ = syscall.SyscallN(vtable[17], uintptr(unsafe.Pointer(unk)), uintptr(unsafe.Pointer(targetUTF16)), 0)
+
+	if description != "" {
+		if descUTF16, err := windows.UTF16PtrFromString(description); err == nil {
+			// IShellLinkW::SetDescription (vtable index 7)
+			_, _, _ = syscall.SyscallN(vtable[7], uintptr(unsafe.Pointer(unk)), uintptr(unsafe.Pointer(descUTF16)))
+		}
+	}
+
+	// Query IPersistFile
+	iidPersistFile := ole.NewGUID("{0000010B-0000-0000-C000-000000000046}")
+	var persistFile *ole.IUnknown
+	r, _, _ := syscall.SyscallN(unk.VTable().QueryInterface, uintptr(unsafe.Pointer(unk)), uintptr(unsafe.Pointer(iidPersistFile)), uintptr(unsafe.Pointer(&persistFile)))
+	if r != 0 {
+		return fmt.Errorf("query IPersistFile failed: %w", syscall.Errno(r))
+	}
+	defer persistFile.Release()
+
+	// IPersistFile::Save (vtable index 6)
+	persistVtable := (*[16]uintptr)(unsafe.Pointer(persistFile.RawVTable))
+	shortcutUTF16, err := windows.UTF16PtrFromString(shortcutPath)
+	if err != nil {
+		return err
+	}
+
+	r, _, _ = syscall.SyscallN(persistVtable[6], uintptr(unsafe.Pointer(persistFile)), uintptr(unsafe.Pointer(shortcutUTF16)), 1)
+	if r != 0 {
+		return fmt.Errorf("IPersistFile.Save failed: %w", syscall.Errno(r))
+	}
+
+	return nil
+}
+
 func ensureProgramDataShortcut(applicationPath string) error {
 	if strings.TrimSpace(applicationPath) == "" {
 		return errors.New("application path is empty")
@@ -313,26 +380,14 @@ func ensureProgramDataShortcut(applicationPath string) error {
 	}
 	shortcutPath := filepath.Join(startMenuDir, shortcutBase+".lnk")
 
-	// 若快捷方式已存在则跳过，避免重复拉起 PowerShell 进程
+	// 若快捷方式已存在则跳过，避免重复操作
 	if _, err := os.Stat(shortcutPath); err == nil {
 		return nil
 	}
 
 	workDir := filepath.Dir(applicationPath)
-
-	psScript := fmt.Sprintf(
-		`$wsh = New-Object -ComObject WScript.Shell; $s = $wsh.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.WorkingDirectory = '%s'; $s.IconLocation = '%s,0'; $s.Description = '%s'; $s.Save()`,
-		strings.ReplaceAll(shortcutPath, `'`, `''`),
-		strings.ReplaceAll(applicationPath, `'`, `''`),
-		strings.ReplaceAll(workDir, `'`, `''`),
-		strings.ReplaceAll(applicationPath, `'`, `''`),
-		strings.ReplaceAll(shortcutBase, `'`, `''`),
-	)
-
-	command := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	configureCoreCommand(command)
-	if err := command.Run(); err != nil {
-		debugLogf("system", "create start menu shortcut via PowerShell failed: %v", err)
+	if err := createShortcutNative(shortcutPath, applicationPath, workDir, shortcutBase); err != nil {
+		debugLogf("system", "create start menu shortcut via native COM failed: %v", err)
 		return err
 	}
 	debugLogf("system", "created start menu shortcut at %q", shortcutPath)
