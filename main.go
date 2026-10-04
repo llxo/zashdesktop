@@ -18,6 +18,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"golang.org/x/sys/windows"
 )
 
 //go:embed all:frontend/dist
@@ -34,6 +35,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize core service: %v", err)
 	}
+	relaunchAsAdminIfNeeded(coreService)
 	controller := &App{
 		coreService:     coreService,
 		launch:          launch,
@@ -706,6 +708,51 @@ func getWebviewCacheDirs() []string {
 		return nil
 	}
 	return []string{filepath.Join(userDataDir, "EBWebView")}
+}
+
+func relaunchAsAdminIfNeeded(service *CoreService) {
+	if service == nil {
+		return
+	}
+	service.mu.Lock()
+	profiles := service.cachedProfiles
+	service.mu.Unlock()
+	if profiles == nil || !profiles.Behavior.RunAsAdmin {
+		return
+	}
+	if isPrivilegedCached() {
+		return
+	}
+	for _, arg := range os.Args[1:] {
+		if arg == "--no-elevate" {
+			return
+		}
+	}
+
+	executable, _, err := executablePathAndDir()
+	if err != nil {
+		return
+	}
+
+	verb, _ := windows.UTF16PtrFromString("runas")
+	exe, _ := windows.UTF16PtrFromString(executable)
+
+	var forwardArgs []string
+	for _, arg := range os.Args[1:] {
+		if arg != "--no-elevate" {
+			forwardArgs = append(forwardArgs, fmt.Sprintf("%q", arg))
+		}
+	}
+	forwardArgs = append(forwardArgs, "--no-elevate")
+	argsStr := strings.Join(forwardArgs, " ")
+	args, _ := windows.UTF16PtrFromString(argsStr)
+
+	err = windows.ShellExecute(0, verb, exe, args, nil, windows.SW_SHOWNORMAL)
+	if err == nil {
+		debugLogf("app", "relaunched as administrator via UAC, exiting current instance")
+		os.Exit(0)
+	}
+	debugLogf("app", "relaunch as administrator rejected or failed: %v, continuing with normal privileges", err)
 }
 
 

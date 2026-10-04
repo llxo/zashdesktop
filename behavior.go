@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	behaviorLayersKey = `Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers`
 	autoStartTaskName = "zashdesktop"
 	autoStartDelay    = 30
 )
@@ -39,77 +38,6 @@ var (
 	procSuspendThread                             = systemKernel32.NewProc("SuspendThread")
 	procResumeThread                              = systemKernel32.NewProc("ResumeThread")
 )
-
-func readRunAsAdminSetting(applicationPath string) (bool, error) {
-	if strings.TrimSpace(applicationPath) == "" {
-		return false, nil
-	}
-
-	key, err := registry.OpenKey(registry.CURRENT_USER, behaviorLayersKey, registry.QUERY_VALUE)
-	if errors.Is(err, registry.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("open administrator compatibility settings: %w", err)
-	}
-	defer key.Close()
-
-	value, _, err := key.GetStringValue(applicationPath)
-	if errors.Is(err, registry.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read administrator compatibility setting: %w", err)
-	}
-	for _, item := range strings.Fields(value) {
-		if strings.EqualFold(item, "RunAsAdmin") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func writeRunAsAdminSetting(applicationPath string, enabled bool) error {
-	if strings.TrimSpace(applicationPath) == "" {
-		debugLogf("system", "write RunAsAdmin setting failed: empty application path")
-		return errors.New("application path is empty")
-	}
-
-	if current, err := readRunAsAdminSetting(applicationPath); err == nil && current == enabled {
-		return nil
-	}
-
-	if enabled {
-		key, _, err := registry.CreateKey(registry.CURRENT_USER, behaviorLayersKey, registry.SET_VALUE)
-		if err != nil {
-			debugLogf("system", "create registry key %q failed: %v", behaviorLayersKey, err)
-			return fmt.Errorf("create administrator compatibility settings: %w", err)
-		}
-		defer key.Close()
-		if err := key.SetStringValue(applicationPath, "RunAsAdmin"); err != nil {
-			debugLogf("system", "set RunAsAdmin registry value for %q failed: %v", applicationPath, err)
-			return fmt.Errorf("enable administrator mode: %w", err)
-		}
-		debugLogf("system", "enabled RunAsAdmin registry setting for %q", applicationPath)
-		return nil
-	}
-
-	key, err := registry.OpenKey(registry.CURRENT_USER, behaviorLayersKey, registry.SET_VALUE)
-	if errors.Is(err, registry.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		debugLogf("system", "open registry key %q failed: %v", behaviorLayersKey, err)
-		return fmt.Errorf("open administrator compatibility settings: %w", err)
-	}
-	defer key.Close()
-	if err := key.DeleteValue(applicationPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
-		debugLogf("system", "delete RunAsAdmin registry value for %q failed: %v", applicationPath, err)
-		return fmt.Errorf("disable administrator mode: %w", err)
-	}
-	debugLogf("system", "disabled RunAsAdmin registry setting for %q", applicationPath)
-	return nil
-}
 
 func readAutoStartSetting() (bool, error) {
 	command := exec.Command("schtasks.exe", "/Query", "/TN", autoStartTaskName)

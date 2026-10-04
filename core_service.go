@@ -229,11 +229,6 @@ func (s *CoreService) ServiceStartup(ctx context.Context, _ application.ServiceO
 	s.startupDone = startupDone
 	s.shuttingDown = false
 	startupConfig, configErr := s.loadConfigLocked()
-	if configErr == nil {
-		if s.cachedProfiles != nil {
-			s.syncSystemBehaviorOnce(&s.cachedProfiles.Behavior)
-		}
-	}
 	s.syncTrafficCollectorTargetLocked()
 	s.mu.Unlock()
 	if configErr == nil {
@@ -453,12 +448,6 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 			stopCoreOnExit = *patch.StopCoreOnExit
 		}
 
-		if patch.RunAsAdmin != nil && runAsAdmin != config.RunAsAdmin {
-			if err := writeRunAsAdminSetting(s.applicationPath, runAsAdmin); err != nil {
-				debugLogf("system", "update settings write RunAsAdmin failed: %v", err)
-				return CoreConfig{}, err
-			}
-		}
 		if patch.AutoStart != nil && autoStart != config.AutoStart {
 			if err := writeAutoStartSetting(s.applicationPath, autoStart); err != nil {
 				debugLogf("system", "update settings write auto start failed: %v", err)

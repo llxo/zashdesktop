@@ -118,15 +118,6 @@ func configToProfileItem(config CoreConfig) persistedProfileItem {
 	}
 }
 
-func (s *CoreService) syncSystemBehaviorOnce(behavior *sharedBehaviorConfig) {
-	if s.applicationPath == "" || behavior == nil {
-		return
-	}
-	if runAsAdmin, err := readRunAsAdminSetting(s.applicationPath); err == nil {
-		behavior.RunAsAdmin = runAsAdmin
-	}
-}
-
 func (s *CoreService) loadConfigLocked() (CoreConfig, error) {
 	profiles, err := s.loadProfilesLocked()
 	if err != nil {
