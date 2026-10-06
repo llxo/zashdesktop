@@ -86,4 +86,7 @@ export interface TrafficRankResult {
     "pageNum": number;
     "pageSize": number;
     "startTime": number;
+    "totalDownload": number;
+    "totalUpload": number;
+    "totalCount": number;
 }

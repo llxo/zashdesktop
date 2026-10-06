@@ -36,11 +36,14 @@ type TrafficRankRequest struct {
 }
 
 type TrafficRankResult struct {
-	List      []TrafficItem `json:"list"`
-	Total     int           `json:"total"`
-	PageNum   int           `json:"pageNum"`
-	PageSize  int           `json:"pageSize"`
-	StartTime int64         `json:"startTime"`
+	List          []TrafficItem `json:"list"`
+	Total         int           `json:"total"`
+	PageNum       int           `json:"pageNum"`
+	PageSize      int           `json:"pageSize"`
+	StartTime     int64         `json:"startTime"`
+	TotalDownload int64         `json:"totalDownload"`
+	TotalUpload   int64         `json:"totalUpload"`
+	TotalCount    int64         `json:"totalCount"`
 }
 
 type TrafficMeta struct {
@@ -172,6 +175,16 @@ func (d *DimensionData) clone() *DimensionData {
 	}
 }
 
+type lastConnTrafficPersist struct {
+	Download    int64  `json:"download"`
+	Upload      int64  `json:"upload"`
+	ClientID    string `json:"clientID"`
+	Destination string `json:"destination"`
+	Process     string `json:"process"`
+	Node        string `json:"node"`
+	Rule        string `json:"rule"`
+}
+
 type trafficPersistData struct {
 	// 兼容老版本顶层字段
 	LegacyClients   map[string]*TrafficItem `json:"clients,omitempty"`
@@ -184,6 +197,9 @@ type trafficPersistData struct {
 	Total  *DimensionData            `json:"total,omitempty"`
 	Hourly map[string]*DimensionData `json:"hourly,omitempty"` // key: 2006010215
 	Daily  map[string]*DimensionData `json:"daily,omitempty"`  // key: 20060102
+
+	// 连接读数基准（防止重启后长连接重复计算增量）
+	LastConnections map[string]lastConnTrafficPersist `json:"lastConnections,omitempty"`
 
 	// 统计起始时间与自动清理周期
 	StartTime         int64  `json:"startTime,omitempty"`
@@ -275,6 +291,22 @@ func (s *TrafficStore) loadData() {
 	}
 	if data.Daily != nil {
 		s.daily = data.Daily
+	}
+	if data.LastConnections != nil {
+		s.lastConnections = make(map[string]lastConnTraffic, len(data.LastConnections))
+		for k, v := range data.LastConnections {
+			s.lastConnections[k] = lastConnTraffic{
+				Download: v.Download,
+				Upload:   v.Upload,
+				meta: connMetaCache{
+					clientID:    v.ClientID,
+					destination: v.Destination,
+					process:     v.Process,
+					node:        v.Node,
+					rule:        v.Rule,
+				},
+			}
+		}
 	}
 
 	if data.StartTime > 0 {
@@ -456,10 +488,23 @@ func (s *TrafficStore) Flush() {
 			}
 		}
 	}
+	lastConnsClone := make(map[string]lastConnTrafficPersist, len(s.lastConnections))
+	for k, v := range s.lastConnections {
+		lastConnsClone[k] = lastConnTrafficPersist{
+			Download:    v.Download,
+			Upload:      v.Upload,
+			ClientID:    v.meta.clientID,
+			Destination: v.meta.destination,
+			Process:     v.meta.process,
+			Node:        v.meta.node,
+			Rule:        v.meta.rule,
+		}
+	}
 	data := trafficPersistData{
 		Total:             s.total.clone(),
 		Hourly:            hourlyClone,
 		Daily:             dailyClone,
+		LastConnections:   lastConnsClone,
 		StartTime:         s.startTime,
 		AutoCleanInterval: s.autoCleanInterval,
 	}
@@ -640,7 +685,11 @@ func addTraffic(targetMap map[string]*TrafficItem, name string, up, down int64, 
 	}
 	item, exists := targetMap[name]
 	if !exists {
-		item = &TrafficItem{Name: name, Count: 1}
+		var initCount int64
+		if isNew {
+			initCount = 1
+		}
+		item = &TrafficItem{Name: name, Count: initCount}
 		targetMap[name] = item
 	} else if isNew {
 		item.Count++
@@ -668,6 +717,16 @@ func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRan
 	if req.OrderBy != "" {
 		orderDesc = req.OrderDesc
 	}
+
+	var totalDown, totalUp, totalCount int64
+	for i := range items {
+		totalDown += items[i].Down
+		totalUp += items[i].Up
+		totalCount += items[i].Count
+	}
+	res.TotalDownload = totalDown
+	res.TotalUpload = totalUp
+	res.TotalCount = totalCount
 
 	orderBy := strings.ToLower(strings.TrimSpace(req.OrderBy))
 	sort.Slice(items, func(i, j int) bool {
@@ -730,21 +789,16 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 	}
 
 	now := time.Now()
-	var mapsToMerge []map[string]*TrafficItem
+	merged := make(map[string]*TrafficItem)
 
 	switch timeRange {
 	case "24h":
 		hourCutoff := now.Add(-24 * time.Hour).Format("2006010215")
-		currentHourKey := now.Format("2006010215")
 		for k, bucket := range s.hourly {
 			if k >= hourCutoff && bucket != nil {
 				m := bucket.getMap(dimension)
-				if len(m) > 0 {
-					if k == currentHourKey {
-						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
-					} else {
-						mapsToMerge = append(mapsToMerge, m)
-					}
+				for _, item := range m {
+					addTrafficItemToMerged(merged, item)
 				}
 			}
 		}
@@ -752,16 +806,11 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 
 	case "7d":
 		dayCutoff := now.AddDate(0, 0, -7).Format("20060102")
-		currentDayKey := now.Format("20060102")
 		for k, bucket := range s.daily {
 			if k >= dayCutoff && bucket != nil {
 				m := bucket.getMap(dimension)
-				if len(m) > 0 {
-					if k == currentDayKey {
-						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
-					} else {
-						mapsToMerge = append(mapsToMerge, m)
-					}
+				for _, item := range m {
+					addTrafficItemToMerged(merged, item)
 				}
 			}
 		}
@@ -769,16 +818,11 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 
 	case "30d":
 		dayCutoff := now.AddDate(0, 0, -30).Format("20060102")
-		currentDayKey := now.Format("20060102")
 		for k, bucket := range s.daily {
 			if k >= dayCutoff && bucket != nil {
 				m := bucket.getMap(dimension)
-				if len(m) > 0 {
-					if k == currentDayKey {
-						mapsToMerge = append(mapsToMerge, cloneTrafficMap(m))
-					} else {
-						mapsToMerge = append(mapsToMerge, m)
-					}
+				for _, item := range m {
+					addTrafficItemToMerged(merged, item)
 				}
 			}
 		}
@@ -786,26 +830,14 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 
 	default: // "all"
 		targetMap := s.total.getMap(dimension)
-		if targetMap == nil {
-			s.mu.RUnlock()
-			return res
-		}
-		items := make([]TrafficItem, 0, len(targetMap))
-		for _, item := range targetMap {
-			if item != nil {
-				items = append(items, *item)
+		if targetMap != nil {
+			for _, item := range targetMap {
+				addTrafficItemToMerged(merged, item)
 			}
 		}
 		s.mu.RUnlock()
-		return formatRankResult(res, items, req)
 	}
 
-	merged := make(map[string]*TrafficItem)
-	for _, m := range mapsToMerge {
-		for _, item := range m {
-			addTrafficItemToMerged(merged, item)
-		}
-	}
 	items := make([]TrafficItem, 0, len(merged))
 	for _, item := range merged {
 		if item != nil {

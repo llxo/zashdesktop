@@ -211,6 +211,7 @@ import {
   startConnectionHistoryPolling,
   stopConnectionHistoryPolling,
   trafficAutoCleanInterval,
+  trafficOverallStats,
   trafficStatsStartTime,
   updateTrafficAutoClean,
   type TrafficTimeRange,
@@ -259,19 +260,9 @@ const aggregatedData = computed<ConnectionHistoryData[]>(() => {
   return historicalData.value || []
 })
 
-const totalStats = computed(() => {
-  return aggregatedData.value.reduce(
-    (acc, item) => {
-      acc.download += item.download
-      acc.upload += item.upload
-      acc.count += item.count
-      return acc
-    },
-    { download: 0, upload: 0, count: 0 },
-  )
-})
+const totalStats = computed(() => trafficOverallStats.value)
 
-const aggregateSourceCount = computed(() => aggregatedData.value.length)
+const aggregateSourceCount = computed(() => trafficOverallStats.value.totalItems)
 
 const aggregateSourceLabel = computed(() => {
   if (aggregationType.value === ConnectionHistoryType.SourceIP) {

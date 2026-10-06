@@ -34,6 +34,21 @@ const emptyView = (): Record<ConnectionHistoryType, ConnectionHistoryData[]> => 
 // 展示态: 直接由 Go 后端 GetTrafficRank 填充
 export const aggregatedDataMap = shallowRef(emptyView())
 
+export interface TrafficOverallStats {
+  download: number
+  upload: number
+  count: number
+  totalItems: number
+}
+
+// 后端计算的真实全局汇总（不受 PageSize 截断影响）
+export const trafficOverallStats = ref<TrafficOverallStats>({
+  download: 0,
+  upload: 0,
+  count: 0,
+  totalItems: 0,
+})
+
 export type TrafficTimeRange = 'all' | '24h' | '7d' | '30d'
 
 // 后端托管的统计起始时间与自动清理周期
@@ -110,6 +125,12 @@ export const fetchDimensionHistory = async (
     if (seq === fetchSeq && res && res.list) {
       if (res.startTime) {
         trafficStatsStartTime.value = res.startTime
+      }
+      trafficOverallStats.value = {
+        download: res.totalDownload ?? 0,
+        upload: res.totalUpload ?? 0,
+        count: res.totalCount ?? 0,
+        totalItems: res.total ?? res.list.length,
       }
       aggregatedDataMap.value = {
         ...aggregatedDataMap.value,
@@ -225,6 +246,12 @@ export const clearConnectionHistory = async () => {
     console.error('Failed to clear traffic in backend:', e)
   }
   aggregatedDataMap.value = emptyView()
+  trafficOverallStats.value = {
+    download: 0,
+    upload: 0,
+    count: 0,
+    totalItems: 0,
+  }
 }
 
 // 兼容保留接口，直接返回空，避免前端在 activeConnections 上重复累加
