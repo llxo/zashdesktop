@@ -224,6 +224,10 @@ type TrafficStore struct {
 	autoCleanInterval string
 	dirty             bool
 
+	// 历史日桶不可变内存缓存（key: YYYYMMDD，最多缓存 30 天，占用约 1~2MB 内存，彻底消除 7d/30d 重复读盘与 JSON 反序列化）
+	dailyCacheMu sync.RWMutex
+	dailyCache   map[string]*DimensionData
+
 	// 7d/30d 查询结果短期缓存（TTL ~2.5s，仅缓存最终的 Top 200 切片结果，零原始大对象常驻）
 	queryCacheMu sync.Mutex
 	queryCache   map[string]cachedRankResult
@@ -245,6 +249,7 @@ func NewTrafficStore(dataDir string) *TrafficStore {
 		today:             newDimensionData(),
 		todayDate:         time.Now().Format("20060102"),
 		lastConnections:   make(map[string]lastConnTraffic),
+		dailyCache:        make(map[string]*DimensionData),
 		queryCache:        make(map[string]cachedRankResult),
 		startTime:         time.Now().UnixMilli(),
 		autoCleanInterval: "month",
@@ -282,6 +287,11 @@ func (s *TrafficStore) saveDailyFile(dateKey string, d *DimensionData) {
 	if d == nil || dateKey == "" {
 		return
 	}
+	// 同步写入内存缓存，克隆一份避免外部引用被后续变更
+	s.dailyCacheMu.Lock()
+	s.dailyCache[dateKey] = d.clone()
+	s.dailyCacheMu.Unlock()
+
 	filePath := filepath.Join(s.dailyDir, dateKey+".json")
 	if err := atomicWriteJSON(filePath, d); err != nil {
 		debugLogf("traffic", "failed to save daily traffic %s: %v", dateKey, err)
@@ -292,6 +302,16 @@ func (s *TrafficStore) saveDailyFile(dateKey string, d *DimensionData) {
 
 func (s *TrafficStore) cleanOldDailyFiles(now time.Time) {
 	cutoffDate := now.AddDate(0, 0, -30).Format("20060102")
+
+	// 同步清理内存缓存中超过 30 天的历史天
+	s.dailyCacheMu.Lock()
+	for k := range s.dailyCache {
+		if k < cutoffDate {
+			delete(s.dailyCache, k)
+		}
+	}
+	s.dailyCacheMu.Unlock()
+
 	entries, err := os.ReadDir(s.dailyDir)
 	if err != nil {
 		return
@@ -311,11 +331,19 @@ func (s *TrafficStore) cleanOldDailyFiles(now time.Time) {
 	}
 }
 
-// readDailyBucket 瞬时读取并反序列化单个历史天桶，用完即随函数出栈被 GC，不占用持久内存缓存
+// readDailyBucket 读取并反序列化单个历史天桶。优先命中不可变内存缓存，未命中时回退读取磁盘并写入缓存。
 func (s *TrafficStore) readDailyBucket(dateKey string) *DimensionData {
 	if dateKey == "" {
 		return nil
 	}
+
+	s.dailyCacheMu.RLock()
+	cached, ok := s.dailyCache[dateKey]
+	s.dailyCacheMu.RUnlock()
+	if ok {
+		return cached
+	}
+
 	filePath := filepath.Join(s.dailyDir, dateKey+".json")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -326,6 +354,11 @@ func (s *TrafficStore) readDailyBucket(dateKey string) *DimensionData {
 		debugLogf("traffic", "failed to parse daily traffic file %s: %v", filePath, err)
 		return nil
 	}
+
+	s.dailyCacheMu.Lock()
+	s.dailyCache[dateKey] = &bucket
+	s.dailyCacheMu.Unlock()
+
 	return &bucket
 }
 
@@ -435,11 +468,16 @@ func (s *TrafficStore) clearDataLocked() {
 	s.total = newDimensionData()
 	s.today = newDimensionData()
 	s.todayDate = time.Now().Format("20060102")
-	s.lastConnections = make(map[string]lastConnTraffic)
+	// 不能清空 s.lastConnections。避免长连接将其累计的全部历史流量倒灌进新统计中。
+	// s.lastConnections = make(map[string]lastConnTraffic)
 
 	s.queryCacheMu.Lock()
 	s.queryCache = make(map[string]cachedRankResult)
 	s.queryCacheMu.Unlock()
+
+	s.dailyCacheMu.Lock()
+	s.dailyCache = make(map[string]*DimensionData)
+	s.dailyCacheMu.Unlock()
 
 	entries, err := os.ReadDir(s.dailyDir)
 	if err == nil {
