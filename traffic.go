@@ -77,10 +77,10 @@ type ClashConnectionsSnapshot struct {
 // ===================== 2. 统计引擎与存储 =====================
 
 const (
-	maxTotalDimensionItems  = 1500
-	trimTotalDimensionKeep  = 1000
-	maxBucketDimensionItems = 400
-	trimBucketDimensionKeep = 250
+	maxTotalDimensionItems  = 800
+	trimTotalDimensionKeep  = 500
+	maxBucketDimensionItems = 500
+	trimBucketDimensionKeep = 350
 )
 
 type connMetaCache struct {
@@ -98,9 +98,12 @@ type lastConnTraffic struct {
 }
 
 type DimensionData struct {
-	Clients   map[string]*TrafficItem `json:"clients,omitempty"`
-	Domains   map[string]*TrafficItem `json:"domains,omitempty"`
-	Processes map[string]*TrafficItem `json:"processes,omitempty"`
+	TotalDownload int64                   `json:"totalDownload,omitempty"`
+	TotalUpload   int64                   `json:"totalUpload,omitempty"`
+	TotalCount    int64                   `json:"totalCount,omitempty"`
+	Clients       map[string]*TrafficItem `json:"clients,omitempty"`
+	Domains       map[string]*TrafficItem `json:"domains,omitempty"`
+	Processes     map[string]*TrafficItem `json:"processes,omitempty"`
 	Nodes     map[string]*TrafficItem `json:"nodes,omitempty"`
 	Rules     map[string]*TrafficItem `json:"rules,omitempty"`
 }
@@ -112,6 +115,34 @@ func newDimensionData() *DimensionData {
 		Processes: make(map[string]*TrafficItem),
 		Nodes:     make(map[string]*TrafficItem),
 		Rules:     make(map[string]*TrafficItem),
+	}
+}
+
+func (d *DimensionData) ensureSummaryInitialized() {
+	if d == nil {
+		return
+	}
+	if d.TotalDownload > 0 || d.TotalUpload > 0 || d.TotalCount > 0 {
+		return
+	}
+	var m map[string]*TrafficItem
+	if len(d.Domains) > 0 {
+		m = d.Domains
+	} else if len(d.Clients) > 0 {
+		m = d.Clients
+	} else if len(d.Processes) > 0 {
+		m = d.Processes
+	} else if len(d.Nodes) > 0 {
+		m = d.Nodes
+	} else if len(d.Rules) > 0 {
+		m = d.Rules
+	}
+	for _, item := range m {
+		if item != nil {
+			d.TotalDownload += item.Down
+			d.TotalUpload += item.Up
+			d.TotalCount += item.Count
+		}
 	}
 }
 
@@ -155,6 +186,12 @@ func (d *DimensionData) add(meta *connMetaCache, up, down int64, isNew bool) {
 		d.Rules = make(map[string]*TrafficItem)
 	}
 
+	d.TotalDownload += down
+	d.TotalUpload += up
+	if isNew {
+		d.TotalCount++
+	}
+
 	addTraffic(d.Clients, meta.clientID, up, down, isNew)
 	addTraffic(d.Domains, meta.destination, up, down, isNew)
 	addTraffic(d.Processes, meta.process, up, down, isNew)
@@ -167,11 +204,14 @@ func (d *DimensionData) clone() *DimensionData {
 		return nil
 	}
 	return &DimensionData{
-		Clients:   cloneTrafficMap(d.Clients),
-		Domains:   cloneTrafficMap(d.Domains),
-		Processes: cloneTrafficMap(d.Processes),
-		Nodes:     cloneTrafficMap(d.Nodes),
-		Rules:     cloneTrafficMap(d.Rules),
+		TotalDownload: d.TotalDownload,
+		TotalUpload:   d.TotalUpload,
+		TotalCount:    d.TotalCount,
+		Clients:       cloneTrafficMap(d.Clients),
+		Domains:       cloneTrafficMap(d.Domains),
+		Processes:     cloneTrafficMap(d.Processes),
+		Nodes:         cloneTrafficMap(d.Nodes),
+		Rules:         cloneTrafficMap(d.Rules),
 	}
 }
 
@@ -185,51 +225,71 @@ type lastConnTrafficPersist struct {
 	Rule        string `json:"rule"`
 }
 
-type trafficPersistData struct {
-	// 兼容老版本顶层字段
-	LegacyClients   map[string]*TrafficItem `json:"clients,omitempty"`
-	LegacyDomains   map[string]*TrafficItem `json:"domains,omitempty"`
-	LegacyProcesses map[string]*TrafficItem `json:"processes,omitempty"`
-	LegacyNodes     map[string]*TrafficItem `json:"nodes,omitempty"`
-	LegacyRules     map[string]*TrafficItem `json:"rules,omitempty"`
+type currentTrafficPersistData struct {
+	Total             *DimensionData                    `json:"total,omitempty"`
+	Today             *DimensionData                    `json:"today,omitempty"`
+	TodayDate         string                            `json:"todayDate,omitempty"`
+	LastConnections   map[string]lastConnTrafficPersist `json:"lastConnections,omitempty"`
+	StartTime         int64                             `json:"startTime,omitempty"`
+	AutoCleanInterval string                            `json:"autoCleanInterval,omitempty"`
+}
 
-	// 新版本分层分桶字段
-	Total  *DimensionData            `json:"total,omitempty"`
-	Hourly map[string]*DimensionData `json:"hourly,omitempty"` // key: 2006010215
-	Daily  map[string]*DimensionData `json:"daily,omitempty"`  // key: 20060102
-
-	// 连接读数基准（防止重启后长连接重复计算增量）
+type legacyTrafficPersistData struct {
+	LegacyClients   map[string]*TrafficItem           `json:"clients,omitempty"`
+	LegacyDomains   map[string]*TrafficItem           `json:"domains,omitempty"`
+	LegacyProcesses map[string]*TrafficItem           `json:"processes,omitempty"`
+	LegacyNodes     map[string]*TrafficItem           `json:"nodes,omitempty"`
+	LegacyRules     map[string]*TrafficItem           `json:"rules,omitempty"`
+	Total           *DimensionData                    `json:"total,omitempty"`
+	Hourly          map[string]*DimensionData         `json:"hourly,omitempty"`
+	Daily           map[string]*DimensionData         `json:"daily,omitempty"`
 	LastConnections map[string]lastConnTrafficPersist `json:"lastConnections,omitempty"`
+	StartTime       int64                             `json:"startTime,omitempty"`
+	AutoCleanInterval string                          `json:"autoCleanInterval,omitempty"`
+}
 
-	// 统计起始时间与自动清理周期
-	StartTime         int64  `json:"startTime,omitempty"`
-	AutoCleanInterval string `json:"autoCleanInterval,omitempty"`
+type cachedRankResult struct {
+	result    TrafficRankResult
+	expiresAt time.Time
 }
 
 type TrafficStore struct {
-	filePath          string
+	baseDir           string
+	currentFile       string
+	dailyDir          string
+	legacyFile        string
 	mu                sync.RWMutex
 	total             *DimensionData
-	hourly            map[string]*DimensionData
-	daily             map[string]*DimensionData
+	today             *DimensionData
+	todayDate         string // 格式: 20060102
 	lastConnections   map[string]lastConnTraffic
 	startTime         int64
 	autoCleanInterval string
 	dirty             bool
-	stopChan          chan struct{}
-	wg                sync.WaitGroup
+
+	// 7d/30d 查询结果短期缓存（TTL ~2.5s，仅缓存最终的 Top 200 切片结果，零原始大对象常驻）
+	queryCacheMu sync.Mutex
+	queryCache   map[string]cachedRankResult
+
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 func NewTrafficStore(dataDir string) *TrafficStore {
-	dir := filepath.Join(dataDir, "data")
-	_ = os.MkdirAll(dir, 0755)
+	baseDir := filepath.Join(dataDir, "data", "traffic")
+	dailyDir := filepath.Join(baseDir, "daily")
+	_ = os.MkdirAll(dailyDir, 0755)
 
 	store := &TrafficStore{
-		filePath:          filepath.Join(dir, "traffic.json"),
+		baseDir:           baseDir,
+		currentFile:       filepath.Join(baseDir, "current.json"),
+		dailyDir:          dailyDir,
+		legacyFile:        filepath.Join(dataDir, "data", "traffic.json"),
 		total:             newDimensionData(),
-		hourly:            make(map[string]*DimensionData),
-		daily:             make(map[string]*DimensionData),
+		today:             newDimensionData(),
+		todayDate:         time.Now().Format("20060102"),
 		lastConnections:   make(map[string]lastConnTraffic),
+		queryCache:        make(map[string]cachedRankResult),
 		startTime:         time.Now().UnixMilli(),
 		autoCleanInterval: "month",
 		stopChan:          make(chan struct{}),
@@ -242,56 +302,193 @@ func NewTrafficStore(dataDir string) *TrafficStore {
 	return store
 }
 
-func (s *TrafficStore) loadData() {
-	content, err := os.ReadFile(s.filePath)
+func atomicWriteJSON(filePath string, v any) error {
+	bytes, err := json.Marshal(v)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			debugLogf("traffic", "failed to read traffic file %q: %v", s.filePath, err)
+		return fmt.Errorf("marshal failed: %w", err)
+	}
+	tmp := filePath + ".tmp"
+	if err := os.WriteFile(tmp, bytes, 0644); err != nil {
+		return fmt.Errorf("write tmp %q failed: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, filePath); err != nil {
+		debugLogf("traffic", "failed to rename %q to %q: %v, attempting overwrite fallback", tmp, filePath, err)
+		if writeErr := os.WriteFile(filePath, bytes, 0644); writeErr != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("fallback write to %q failed: %w", filePath, writeErr)
 		}
+		_ = os.Remove(tmp)
+	}
+	return nil
+}
+
+func (s *TrafficStore) saveDailyFile(dateKey string, d *DimensionData) {
+	if d == nil || dateKey == "" {
 		return
 	}
-	var data trafficPersistData
-	if err := json.Unmarshal(content, &data); err != nil {
-		debugLogf("traffic", "failed to parse traffic file %q: %v", s.filePath, err)
+	filePath := filepath.Join(s.dailyDir, dateKey+".json")
+	if err := atomicWriteJSON(filePath, d); err != nil {
+		debugLogf("traffic", "failed to save daily traffic %s: %v", dateKey, err)
 		return
+	}
+	debugLogf("traffic", "archived daily traffic file: %s", filePath)
+}
+
+func (s *TrafficStore) cleanOldDailyFiles(now time.Time) {
+	cutoffDate := now.AddDate(0, 0, -30).Format("20060102")
+	entries, err := os.ReadDir(s.dailyDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".tmp") {
+			baseName := strings.TrimSuffix(strings.TrimSuffix(name, ".tmp"), ".json")
+			if len(baseName) == 8 && baseName < cutoffDate {
+				_ = os.Remove(filepath.Join(s.dailyDir, name))
+				debugLogf("traffic", "cleaned expired daily file: %s", name)
+			}
+		}
+	}
+}
+
+// readDailyBucket 瞬时读取并反序列化单个历史天桶，用完即随函数出栈被 GC，不占用持久内存缓存
+func (s *TrafficStore) readDailyBucket(dateKey string) *DimensionData {
+	if dateKey == "" {
+		return nil
+	}
+	filePath := filepath.Join(s.dailyDir, dateKey+".json")
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+	var bucket DimensionData
+	if err := json.Unmarshal(content, &bucket); err != nil {
+		debugLogf("traffic", "failed to parse daily traffic file %s: %v", filePath, err)
+		return nil
+	}
+	bucket.ensureSummaryInitialized()
+	return &bucket
+}
+
+func (s *TrafficStore) migrateLegacyFileIfNeeded(now time.Time) bool {
+	if _, err := os.Stat(s.currentFile); err == nil {
+		return false
+	}
+	content, err := os.ReadFile(s.legacyFile)
+	if err != nil {
+		return false
+	}
+	var legacy legacyTrafficPersistData
+	if err := json.Unmarshal(content, &legacy); err != nil {
+		debugLogf("traffic", "legacy traffic unmarshal failed: %v", err)
+		return false
 	}
 
-	if data.Total != nil {
-		s.total = data.Total
-	} else if data.LegacyClients != nil || data.LegacyDomains != nil {
+	debugLogf("traffic", "migrating legacy traffic.json to new cold/hot layout...")
+	todayKey := now.Format("20060102")
+
+	if legacy.Total != nil {
+		s.total = legacy.Total
+	} else if legacy.LegacyClients != nil || legacy.LegacyDomains != nil {
 		s.total = &DimensionData{
-			Clients:   data.LegacyClients,
-			Domains:   data.LegacyDomains,
-			Processes: data.LegacyProcesses,
-			Nodes:     data.LegacyNodes,
-			Rules:     data.LegacyRules,
+			Clients:   legacy.LegacyClients,
+			Domains:   legacy.LegacyDomains,
+			Processes: legacy.LegacyProcesses,
+			Nodes:     legacy.LegacyNodes,
+			Rules:     legacy.LegacyRules,
 		}
 	}
 	if s.total == nil {
 		s.total = newDimensionData()
 	}
-	if s.total.Clients == nil {
-		s.total.Clients = make(map[string]*TrafficItem)
+
+	for k, v := range legacy.Daily {
+		if v == nil {
+			continue
+		}
+		if k == todayKey {
+			s.today = v
+		} else {
+			s.saveDailyFile(k, v)
+		}
 	}
-	if s.total.Domains == nil {
-		s.total.Domains = make(map[string]*TrafficItem)
-	}
-	if s.total.Processes == nil {
-		s.total.Processes = make(map[string]*TrafficItem)
-	}
-	if s.total.Nodes == nil {
-		s.total.Nodes = make(map[string]*TrafficItem)
-	}
-	if s.total.Rules == nil {
-		s.total.Rules = make(map[string]*TrafficItem)
+	if s.today == nil {
+		s.today = newDimensionData()
 	}
 
-	if data.Hourly != nil {
-		s.hourly = data.Hourly
+	if legacy.LastConnections != nil {
+		s.lastConnections = make(map[string]lastConnTraffic, len(legacy.LastConnections))
+		for k, v := range legacy.LastConnections {
+			s.lastConnections[k] = lastConnTraffic{
+				Download: v.Download,
+				Upload:   v.Upload,
+				meta: connMetaCache{
+					clientID:    v.ClientID,
+					destination: v.Destination,
+					process:     v.Process,
+					node:        v.Node,
+					rule:        v.Rule,
+				},
+			}
+		}
 	}
-	if data.Daily != nil {
-		s.daily = data.Daily
+
+	if legacy.StartTime > 0 {
+		s.startTime = legacy.StartTime
 	}
+	if legacy.AutoCleanInterval != "" {
+		s.autoCleanInterval = legacy.AutoCleanInterval
+	}
+	s.total.ensureSummaryInitialized()
+	s.today.ensureSummaryInitialized()
+	s.todayDate = todayKey
+	s.dirty = true
+	s.Flush()
+	debugLogf("traffic", "successfully migrated legacy traffic data to current.json and daily/")
+	return true
+}
+
+func (s *TrafficStore) loadData() {
+	now := time.Now()
+	todayKey := now.Format("20060102")
+
+	if s.migrateLegacyFileIfNeeded(now) {
+		return
+	}
+
+	content, err := os.ReadFile(s.currentFile)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			debugLogf("traffic", "failed to read current traffic file %q: %v", s.currentFile, err)
+		}
+		s.todayDate = todayKey
+		return
+	}
+	var data currentTrafficPersistData
+	if err := json.Unmarshal(content, &data); err != nil {
+		debugLogf("traffic", "failed to parse current traffic file %q: %v", s.currentFile, err)
+		s.todayDate = todayKey
+		return
+	}
+
+	if data.Total != nil {
+		s.total = data.Total
+	}
+	if s.total == nil {
+		s.total = newDimensionData()
+	}
+	s.total.ensureSummaryInitialized()
+	if data.StartTime > 0 {
+		s.startTime = data.StartTime
+	}
+	if data.AutoCleanInterval != "" {
+		s.autoCleanInterval = data.AutoCleanInterval
+	}
+
 	if data.LastConnections != nil {
 		s.lastConnections = make(map[string]lastConnTraffic, len(data.LastConnections))
 		for k, v := range data.LastConnections {
@@ -309,19 +506,25 @@ func (s *TrafficStore) loadData() {
 		}
 	}
 
-	if data.StartTime > 0 {
-		s.startTime = data.StartTime
+	// 检查关机/重启期间是否跨天
+	if data.TodayDate != "" && data.TodayDate != todayKey {
+		if data.Today != nil {
+			trimDimensionData(data.Today, maxBucketDimensionItems, trimBucketDimensionKeep)
+			s.saveDailyFile(data.TodayDate, data.Today)
+		}
+		s.today = newDimensionData()
+		s.todayDate = todayKey
+		s.dirty = true
 	} else {
-		s.startTime = time.Now().UnixMilli()
+		if data.Today != nil {
+			s.today = data.Today
+		}
+		s.todayDate = todayKey
 	}
-	if data.AutoCleanInterval != "" {
-		s.autoCleanInterval = data.AutoCleanInterval
-	} else {
-		s.autoCleanInterval = "month"
-	}
+	s.today.ensureSummaryInitialized()
 
-	debugLogf("traffic", "loaded traffic history: total_domains=%d, hourly_buckets=%d, daily_buckets=%d, autoClean=%s",
-		len(s.total.Domains), len(s.hourly), len(s.daily), s.autoCleanInterval)
+	debugLogf("traffic", "loaded traffic store: total_domains=%d, today_domains=%d, date=%s",
+		len(s.total.Domains), len(s.today.Domains), s.todayDate)
 }
 
 func (s *TrafficStore) Close() {
@@ -359,9 +562,22 @@ func getAutoCleanDuration(interval string) time.Duration {
 
 func (s *TrafficStore) clearDataLocked() {
 	s.total = newDimensionData()
-	s.hourly = make(map[string]*DimensionData)
-	s.daily = make(map[string]*DimensionData)
+	s.today = newDimensionData()
+	s.todayDate = time.Now().Format("20060102")
 	s.lastConnections = make(map[string]lastConnTraffic)
+
+	s.queryCacheMu.Lock()
+	s.queryCache = make(map[string]cachedRankResult)
+	s.queryCacheMu.Unlock()
+
+	entries, err := os.ReadDir(s.dailyDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp")) {
+				_ = os.Remove(filepath.Join(s.dailyDir, e.Name()))
+			}
+		}
+	}
 }
 
 func (s *TrafficStore) checkAutoCleanLocked(now time.Time) {
@@ -406,13 +622,51 @@ func trimMapIfNeeded(targetMap *map[string]*TrafficItem, maxLimit, keepLimit int
 			items = append(items, item)
 		}
 	}
+
+	newMap := make(map[string]*TrafficItem, keepLimit)
+
+	// 1. 主轨保护：优先保留总流量（Down + Up）最高的条目（配额 75%）
+	trafficKeep := (keepLimit * 3) / 4
 	sort.Slice(items, func(i, j int) bool {
 		return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
 	})
-	newMap := make(map[string]*TrafficItem, keepLimit)
-	for i := 0; i < keepLimit && i < len(items); i++ {
+	for i := 0; i < trafficKeep && i < len(items); i++ {
 		newMap[items[i].Name] = items[i]
 	}
+
+	// 2. 双轨保护：保护高频连接条目（按 Count 排序补充，配额 15%）
+	countLimit := trafficKeep + (keepLimit*15)/100
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Count > items[j].Count
+	})
+	for i := 0; i < len(items) && len(newMap) < countLimit; i++ {
+		if _, exists := newMap[items[i].Name]; !exists {
+			newMap[items[i].Name] = items[i]
+		}
+	}
+
+	// 3. 补充保护：按上传量（Up）排序补充剩余配额，保护高上传单向流
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Up > items[j].Up
+	})
+	for i := 0; i < len(items) && len(newMap) < keepLimit; i++ {
+		if _, exists := newMap[items[i].Name]; !exists {
+			newMap[items[i].Name] = items[i]
+		}
+	}
+
+	// 4. 兜底保护：若上述特定维度去重后仍未填满 keepLimit，按总流量顺序补充完毕
+	if len(newMap) < keepLimit {
+		sort.Slice(items, func(i, j int) bool {
+			return (items[i].Down + items[i].Up) > (items[j].Down + items[j].Up)
+		})
+		for i := 0; i < len(items) && len(newMap) < keepLimit; i++ {
+			if _, exists := newMap[items[i].Name]; !exists {
+				newMap[items[i].Name] = items[i]
+			}
+		}
+	}
+
 	*targetMap = newMap
 }
 
@@ -427,67 +681,63 @@ func trimDimensionData(d *DimensionData, maxLimit, keepLimit int) {
 	trimMapIfNeeded(&d.Rules, maxLimit, keepLimit)
 }
 
+func (s *TrafficStore) rotateDayLocked(now time.Time, newTodayKey string) {
+	oldDate := s.todayDate
+	oldToday := s.today
+
+	if oldDate != "" && oldToday != nil {
+		trimDimensionData(oldToday, maxBucketDimensionItems, trimBucketDimensionKeep)
+		s.saveDailyFile(oldDate, oldToday)
+	}
+
+	s.todayDate = newTodayKey
+	s.today = newDimensionData()
+	s.dirty = true
+
+	s.cleanOldDailyFiles(now)
+
+	s.queryCacheMu.Lock()
+	s.queryCache = make(map[string]cachedRankResult)
+	s.queryCacheMu.Unlock()
+}
+
+func (s *TrafficStore) checkDayRotationLocked(now time.Time) {
+	todayKey := now.Format("20060102")
+	if s.todayDate != todayKey {
+		s.rotateDayLocked(now, todayKey)
+	}
+}
+
+func (s *TrafficStore) checkDayRotation(now time.Time) {
+	todayKey := now.Format("20060102")
+	s.mu.RLock()
+	needRotate := s.todayDate != todayKey
+	s.mu.RUnlock()
+
+	if needRotate {
+		s.mu.Lock()
+		if s.todayDate != todayKey {
+			s.rotateDayLocked(now, todayKey)
+		}
+		s.mu.Unlock()
+	}
+}
+
 func (s *TrafficStore) Flush() {
 	s.mu.Lock()
 	now := time.Now()
 
-	// 0. 后台无人值守自动清理：检查是否达到预设的自动清理周期
 	s.checkAutoCleanLocked(now)
+	s.checkDayRotationLocked(now)
 
 	if !s.dirty {
 		s.mu.Unlock()
 		return
 	}
 
-	hourKey := now.Format("2006010215")
-	dayKey := now.Format("20060102")
-
-	// 1. 清理超过 24 小时前的小时桶（最多保留 24 个）
-	hourCutoff := now.Add(-24 * time.Hour).Format("2006010215")
-	for k := range s.hourly {
-		if k < hourCutoff {
-			delete(s.hourly, k)
-		}
-	}
-
-	// 2. 清理超过 30 天前的天桶（最多保留 30 个）
-	dayCutoff := now.AddDate(0, 0, -30).Format("20060102")
-	for k := range s.daily {
-		if k < dayCutoff {
-			delete(s.daily, k)
-		}
-	}
-
-	// 3. 维度容量截断：历史桶早已截断过且不再增长，仅对正在累积的活跃桶截断，大幅降低排序开销
 	trimDimensionData(s.total, maxTotalDimensionItems, trimTotalDimensionKeep)
-	if hBucket := s.hourly[hourKey]; hBucket != nil {
-		trimDimensionData(hBucket, maxBucketDimensionItems, trimBucketDimensionKeep)
-	}
-	if dBucket := s.daily[dayKey]; dBucket != nil {
-		trimDimensionData(dBucket, maxBucketDimensionItems, trimBucketDimensionKeep)
-	}
+	trimDimensionData(s.today, maxBucketDimensionItems, trimBucketDimensionKeep)
 
-	// 4. 制作落盘快照：仅克隆正在写入的活跃桶，历史不可变桶浅引用，立即释放写锁！
-	hourlyClone := make(map[string]*DimensionData, len(s.hourly))
-	for k, v := range s.hourly {
-		if v != nil {
-			if k == hourKey {
-				hourlyClone[k] = v.clone()
-			} else {
-				hourlyClone[k] = v
-			}
-		}
-	}
-	dailyClone := make(map[string]*DimensionData, len(s.daily))
-	for k, v := range s.daily {
-		if v != nil {
-			if k == dayKey {
-				dailyClone[k] = v.clone()
-			} else {
-				dailyClone[k] = v
-			}
-		}
-	}
 	lastConnsClone := make(map[string]lastConnTrafficPersist, len(s.lastConnections))
 	for k, v := range s.lastConnections {
 		lastConnsClone[k] = lastConnTrafficPersist{
@@ -500,38 +750,25 @@ func (s *TrafficStore) Flush() {
 			Rule:        v.meta.rule,
 		}
 	}
-	data := trafficPersistData{
+
+	data := currentTrafficPersistData{
 		Total:             s.total.clone(),
-		Hourly:            hourlyClone,
-		Daily:             dailyClone,
+		Today:             s.today.clone(),
+		TodayDate:         s.todayDate,
 		LastConnections:   lastConnsClone,
 		StartTime:         s.startTime,
 		AutoCleanInterval: s.autoCleanInterval,
 	}
 	s.dirty = false
-	filePath := s.filePath
-	s.mu.Unlock() // 极速释放排他写锁，避免阻塞 WebSocket 统计与前端读取
+	currentFile := s.currentFile
+	s.mu.Unlock()
 
-	// 5. 锁外执行序列化与原子落盘
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		debugLogf("traffic", "failed to marshal traffic data: %v", err)
+	if err := atomicWriteJSON(currentFile, data); err != nil {
+		debugLogf("traffic", "failed to save current traffic data: %v", err)
 		return
 	}
-	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, bytes, 0644); err != nil {
-		debugLogf("traffic", "failed to write traffic tmp file %q: %v", tmp, err)
-		return
-	}
-	if err := os.Rename(tmp, filePath); err != nil {
-		debugLogf("traffic", "failed to rename %q to %q: %v, attempting overwrite fallback", tmp, filePath, err)
-		if writeErr := os.WriteFile(filePath, bytes, 0644); writeErr != nil {
-			debugLogf("traffic", "failed fallback write to %q: %v", filePath, writeErr)
-		}
-		_ = os.Remove(tmp)
-	}
-	debugLogf("traffic", "saved traffic snapshot to disk (total_domains=%d, hourly=%d, daily=%d)",
-		len(data.Total.Domains), len(data.Hourly), len(data.Daily))
+	debugLogf("traffic", "saved current traffic snapshot to disk (total_domains=%d, today_domains=%d)",
+		len(data.Total.Domains), len(data.Today.Domains))
 }
 
 func getProcessName(m *ClashMetadata) string {
@@ -587,20 +824,7 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	hourKey := now.Format("2006010215")
-	dayKey := now.Format("20060102")
-
-	hBucket, hExists := s.hourly[hourKey]
-	if !hExists {
-		hBucket = newDimensionData()
-		s.hourly[hourKey] = hBucket
-	}
-
-	dBucket, dExists := s.daily[dayKey]
-	if !dExists {
-		dBucket = newDimensionData()
-		s.daily[dayKey] = dBucket
-	}
+	s.checkDayRotationLocked(now)
 
 	currentIDs := make(map[string]struct{}, len(conns))
 	changed := false
@@ -617,7 +841,7 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 		if isNew || diffDown > 0 || diffUp > 0 {
 			var meta connMetaCache
 			if hadPrev {
-				// 长连接直接复用元数据，避免每秒重复调用 filepath.Base、strings.ToLower 与 net.ParseIP
+				// 长连接直接复用元数据，避免重复调用字符串处理
 				meta = prev.meta
 			} else {
 				process := getProcessName(&conn.Metadata)
@@ -653,10 +877,9 @@ func (s *TrafficStore) HandleConnections(conns []ClashConnection) {
 				diffUp = 0
 			}
 
-			// 同时增量记账到：全量总桶、当前小时桶、当天桶
+			// 极简两级记账：仅计入全量总桶与当天桶
 			s.total.add(&meta, diffUp, diffDown, isNew)
-			hBucket.add(&meta, diffUp, diffDown, isNew)
-			dBucket.add(&meta, diffUp, diffDown, isNew)
+			s.today.add(&meta, diffUp, diffDown, isNew)
 
 			changed = true
 			s.lastConnections[id] = lastConnTraffic{
@@ -712,21 +935,28 @@ func addTrafficItemToMerged(target map[string]*TrafficItem, item *TrafficItem) {
 	exist.Count += item.Count
 }
 
-func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRankRequest) TrafficRankResult {
+func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRankRequest, summaryDown, summaryUp, summaryCount int64) TrafficRankResult {
 	orderDesc := true
 	if req.OrderBy != "" {
 		orderDesc = req.OrderDesc
 	}
 
-	var totalDown, totalUp, totalCount int64
-	for i := range items {
-		totalDown += items[i].Down
-		totalUp += items[i].Up
-		totalCount += items[i].Count
+	// 优先使用传入的真实全局累计计数器，确保长尾截断后顶部总流量和总连接数一个字节都不丢！
+	if summaryDown > 0 || summaryUp > 0 || summaryCount > 0 {
+		res.TotalDownload = summaryDown
+		res.TotalUpload = summaryUp
+		res.TotalCount = summaryCount
+	} else {
+		var totalDown, totalUp, totalCount int64
+		for i := range items {
+			totalDown += items[i].Down
+			totalUp += items[i].Up
+			totalCount += items[i].Count
+		}
+		res.TotalDownload = totalDown
+		res.TotalUpload = totalUp
+		res.TotalCount = totalCount
 	}
-	res.TotalDownload = totalDown
-	res.TotalUpload = totalUp
-	res.TotalCount = totalCount
 
 	orderBy := strings.ToLower(strings.TrimSpace(req.OrderBy))
 	sort.Slice(items, func(i, j int) bool {
@@ -767,75 +997,108 @@ func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRan
 }
 
 func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
-	s.mu.RLock()
-
-	res := TrafficRankResult{
-		List:      make([]TrafficItem, 0),
-		PageNum:   req.PageNum,
-		PageSize:  req.PageSize,
-		StartTime: s.startTime,
-	}
-	if res.PageNum <= 0 {
-		res.PageNum = 1
-	}
-	if res.PageSize <= 0 {
-		res.PageSize = 200
-	}
-
 	dimension := req.Dimension
 	timeRange := strings.ToLower(strings.TrimSpace(req.TimeRange))
 	if timeRange == "" {
 		timeRange = "all"
 	}
+	// 兼容老版本 24h 传参，映射为 today
+	if timeRange == "24h" {
+		timeRange = "today"
+	}
+
+	pageNum := req.PageNum
+	if pageNum <= 0 {
+		pageNum = 1
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 200
+	}
 
 	now := time.Now()
+	s.checkDayRotation(now)
+
+	// 1. 查询全部（all）或今天（today）：直接极速读内存，零跨桶合并！
+	if timeRange == "all" || timeRange == "today" {
+		s.mu.RLock()
+		res := TrafficRankResult{
+			List:      make([]TrafficItem, 0),
+			PageNum:   pageNum,
+			PageSize:  pageSize,
+			StartTime: s.startTime,
+		}
+		var targetMap map[string]*TrafficItem
+		var summaryDown, summaryUp, summaryCount int64
+		if timeRange == "today" {
+			targetMap = s.today.getMap(dimension)
+			summaryDown = s.today.TotalDownload
+			summaryUp = s.today.TotalUpload
+			summaryCount = s.today.TotalCount
+		} else {
+			targetMap = s.total.getMap(dimension)
+			summaryDown = s.total.TotalDownload
+			summaryUp = s.total.TotalUpload
+			summaryCount = s.total.TotalCount
+		}
+		items := make([]TrafficItem, 0, len(targetMap))
+		for _, item := range targetMap {
+			if item != nil {
+				items = append(items, *item)
+			}
+		}
+		s.mu.RUnlock()
+		return formatRankResult(res, items, req, summaryDown, summaryUp, summaryCount)
+	}
+
+	// 2. 查询 7d 或 30d：先检查短缓存（TTL 2.5秒，消除前端 1s 高频轮询下的重复合并计算）
+	cacheKey := fmt.Sprintf("%s:%s:%s:%t:%d:%d",
+		dimension, timeRange, req.OrderBy, req.OrderDesc, pageNum, pageSize)
+
+	s.queryCacheMu.Lock()
+	if cached, ok := s.queryCache[cacheKey]; ok {
+		if now.Before(cached.expiresAt) {
+			res := cached.result
+			s.queryCacheMu.Unlock()
+			return res
+		}
+		delete(s.queryCache, cacheKey)
+	}
+	s.queryCacheMu.Unlock()
+
+	// 3. 构建多天合并数据：以当天的 today 为基准
+	s.mu.RLock()
+	startTime := s.startTime
 	merged := make(map[string]*TrafficItem)
 
-	switch timeRange {
-	case "24h":
-		hourCutoff := now.Add(-24 * time.Hour).Format("2006010215")
-		for k, bucket := range s.hourly {
-			if k >= hourCutoff && bucket != nil {
-				m := bucket.getMap(dimension)
-				for _, item := range m {
-					addTrafficItemToMerged(merged, item)
-				}
-			}
-		}
-		s.mu.RUnlock()
+	todayMap := s.today.getMap(dimension)
+	for _, item := range todayMap {
+		addTrafficItemToMerged(merged, item)
+	}
+	summaryDown := s.today.TotalDownload
+	summaryUp := s.today.TotalUpload
+	summaryCount := s.today.TotalCount
+	s.mu.RUnlock()
 
-	case "7d":
-		dayCutoff := now.AddDate(0, 0, -7).Format("20060102")
-		for k, bucket := range s.daily {
-			if k >= dayCutoff && bucket != nil {
-				m := bucket.getMap(dimension)
-				for _, item := range m {
-					addTrafficItemToMerged(merged, item)
-				}
-			}
-		}
-		s.mu.RUnlock()
+	// 确定历史回溯天数
+	daysBack := 6
+	if timeRange == "30d" {
+		daysBack = 29
+	}
 
-	case "30d":
-		dayCutoff := now.AddDate(0, 0, -30).Format("20060102")
-		for k, bucket := range s.daily {
-			if k >= dayCutoff && bucket != nil {
-				m := bucket.getMap(dimension)
-				for _, item := range m {
-					addTrafficItemToMerged(merged, item)
-				}
-			}
-		}
-		s.mu.RUnlock()
+	for i := 1; i <= daysBack; i++ {
+		dateKey := now.AddDate(0, 0, -i).Format("20060102")
+		bucket := s.readDailyBucket(dateKey)
+		if bucket != nil {
+			summaryDown += bucket.TotalDownload
+			summaryUp += bucket.TotalUpload
+			summaryCount += bucket.TotalCount
 
-	default: // "all"
-		targetMap := s.total.getMap(dimension)
-		if targetMap != nil {
-			for _, item := range targetMap {
+			m := bucket.getMap(dimension)
+			for _, item := range m {
 				addTrafficItemToMerged(merged, item)
 			}
 		}
-		s.mu.RUnlock()
 	}
 
 	items := make([]TrafficItem, 0, len(merged))
@@ -844,7 +1107,24 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 			items = append(items, *item)
 		}
 	}
-	return formatRankResult(res, items, req)
+
+	res := TrafficRankResult{
+		List:      make([]TrafficItem, 0),
+		PageNum:   pageNum,
+		PageSize:  pageSize,
+		StartTime: startTime,
+	}
+	result := formatRankResult(res, items, req, summaryDown, summaryUp, summaryCount)
+
+	// 写入短缓存（2.5 秒有效，仅占用不足 10KB 内存，过期或跨天时主动淘汰）
+	s.queryCacheMu.Lock()
+	s.queryCache[cacheKey] = cachedRankResult{
+		result:    result,
+		expiresAt: now.Add(2500 * time.Millisecond),
+	}
+	s.queryCacheMu.Unlock()
+
+	return result
 }
 
 func (s *TrafficStore) ClearData() error {

@@ -660,6 +660,7 @@ const ru: LANG_MESSAGE = {
   autoCleanupIntervalNever: 'Никогда',
   trafficTimeRange: 'Диапазон времени',
   trafficTimeRangeAll: 'За все время',
+  trafficTimeRangeToday: 'Сегодня',
   trafficTimeRange24h: 'Последние 24 часа',
   trafficTimeRange7d: 'Последние 7 дней',
   trafficTimeRange30d: 'Последние 30 дней',

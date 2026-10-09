@@ -48,7 +48,7 @@
             class="select select-bordered select-sm w-32"
             :options="[
               { value: 'all', label: $t('trafficTimeRangeAll') },
-              { value: '24h', label: $t('trafficTimeRange24h') },
+              { value: 'today', label: $t('trafficTimeRangeToday') },
               { value: '7d', label: $t('trafficTimeRange7d') },
               { value: '30d', label: $t('trafficTimeRange30d') },
             ]"
@@ -255,6 +255,9 @@ const trafficTimeRange = useStorage<TrafficTimeRange>(
   'cache/connection-history-time-range',
   'all',
 )
+if (trafficTimeRange.value === '24h') {
+  trafficTimeRange.value = 'today'
+}
 const historicalData = computed(() => aggregatedDataMap.value[aggregationType.value])
 const aggregatedData = computed<ConnectionHistoryData[]>(() => {
   return historicalData.value || []
@@ -384,8 +387,8 @@ const totalSize = computed(() => rowVirtualizer.value.getTotalSize() + 24)
 const showClearDialog = ref(false)
 
 const totalConnectionsTip = computed(() => {
-  if (trafficTimeRange.value === '24h') {
-    return t('trafficTimeRange24h')
+  if (trafficTimeRange.value === 'today' || trafficTimeRange.value === '24h') {
+    return t('trafficTimeRangeToday')
   }
   if (trafficTimeRange.value === '7d') {
     return t('trafficTimeRange7d')
