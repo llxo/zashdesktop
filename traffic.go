@@ -118,34 +118,6 @@ func newDimensionData() *DimensionData {
 	}
 }
 
-func (d *DimensionData) ensureSummaryInitialized() {
-	if d == nil {
-		return
-	}
-	if d.TotalDownload > 0 || d.TotalUpload > 0 || d.TotalCount > 0 {
-		return
-	}
-	var m map[string]*TrafficItem
-	if len(d.Domains) > 0 {
-		m = d.Domains
-	} else if len(d.Clients) > 0 {
-		m = d.Clients
-	} else if len(d.Processes) > 0 {
-		m = d.Processes
-	} else if len(d.Nodes) > 0 {
-		m = d.Nodes
-	} else if len(d.Rules) > 0 {
-		m = d.Rules
-	}
-	for _, item := range m {
-		if item != nil {
-			d.TotalDownload += item.Down
-			d.TotalUpload += item.Up
-			d.TotalCount += item.Count
-		}
-	}
-}
-
 func (d *DimensionData) getMap(dimension string) map[string]*TrafficItem {
 	if d == nil {
 		return nil
@@ -234,20 +206,6 @@ type currentTrafficPersistData struct {
 	AutoCleanInterval string                            `json:"autoCleanInterval,omitempty"`
 }
 
-type legacyTrafficPersistData struct {
-	LegacyClients   map[string]*TrafficItem           `json:"clients,omitempty"`
-	LegacyDomains   map[string]*TrafficItem           `json:"domains,omitempty"`
-	LegacyProcesses map[string]*TrafficItem           `json:"processes,omitempty"`
-	LegacyNodes     map[string]*TrafficItem           `json:"nodes,omitempty"`
-	LegacyRules     map[string]*TrafficItem           `json:"rules,omitempty"`
-	Total           *DimensionData                    `json:"total,omitempty"`
-	Hourly          map[string]*DimensionData         `json:"hourly,omitempty"`
-	Daily           map[string]*DimensionData         `json:"daily,omitempty"`
-	LastConnections map[string]lastConnTrafficPersist `json:"lastConnections,omitempty"`
-	StartTime       int64                             `json:"startTime,omitempty"`
-	AutoCleanInterval string                          `json:"autoCleanInterval,omitempty"`
-}
-
 type cachedRankResult struct {
 	result    TrafficRankResult
 	expiresAt time.Time
@@ -257,7 +215,6 @@ type TrafficStore struct {
 	baseDir           string
 	currentFile       string
 	dailyDir          string
-	legacyFile        string
 	mu                sync.RWMutex
 	total             *DimensionData
 	today             *DimensionData
@@ -284,7 +241,6 @@ func NewTrafficStore(dataDir string) *TrafficStore {
 		baseDir:           baseDir,
 		currentFile:       filepath.Join(baseDir, "current.json"),
 		dailyDir:          dailyDir,
-		legacyFile:        filepath.Join(dataDir, "data", "traffic.json"),
 		total:             newDimensionData(),
 		today:             newDimensionData(),
 		todayDate:         time.Now().Format("20060102"),
@@ -370,95 +326,12 @@ func (s *TrafficStore) readDailyBucket(dateKey string) *DimensionData {
 		debugLogf("traffic", "failed to parse daily traffic file %s: %v", filePath, err)
 		return nil
 	}
-	bucket.ensureSummaryInitialized()
 	return &bucket
-}
-
-func (s *TrafficStore) migrateLegacyFileIfNeeded(now time.Time) bool {
-	if _, err := os.Stat(s.currentFile); err == nil {
-		return false
-	}
-	content, err := os.ReadFile(s.legacyFile)
-	if err != nil {
-		return false
-	}
-	var legacy legacyTrafficPersistData
-	if err := json.Unmarshal(content, &legacy); err != nil {
-		debugLogf("traffic", "legacy traffic unmarshal failed: %v", err)
-		return false
-	}
-
-	debugLogf("traffic", "migrating legacy traffic.json to new cold/hot layout...")
-	todayKey := now.Format("20060102")
-
-	if legacy.Total != nil {
-		s.total = legacy.Total
-	} else if legacy.LegacyClients != nil || legacy.LegacyDomains != nil {
-		s.total = &DimensionData{
-			Clients:   legacy.LegacyClients,
-			Domains:   legacy.LegacyDomains,
-			Processes: legacy.LegacyProcesses,
-			Nodes:     legacy.LegacyNodes,
-			Rules:     legacy.LegacyRules,
-		}
-	}
-	if s.total == nil {
-		s.total = newDimensionData()
-	}
-
-	for k, v := range legacy.Daily {
-		if v == nil {
-			continue
-		}
-		if k == todayKey {
-			s.today = v
-		} else {
-			s.saveDailyFile(k, v)
-		}
-	}
-	if s.today == nil {
-		s.today = newDimensionData()
-	}
-
-	if legacy.LastConnections != nil {
-		s.lastConnections = make(map[string]lastConnTraffic, len(legacy.LastConnections))
-		for k, v := range legacy.LastConnections {
-			s.lastConnections[k] = lastConnTraffic{
-				Download: v.Download,
-				Upload:   v.Upload,
-				meta: connMetaCache{
-					clientID:    v.ClientID,
-					destination: v.Destination,
-					process:     v.Process,
-					node:        v.Node,
-					rule:        v.Rule,
-				},
-			}
-		}
-	}
-
-	if legacy.StartTime > 0 {
-		s.startTime = legacy.StartTime
-	}
-	if legacy.AutoCleanInterval != "" {
-		s.autoCleanInterval = legacy.AutoCleanInterval
-	}
-	s.total.ensureSummaryInitialized()
-	s.today.ensureSummaryInitialized()
-	s.todayDate = todayKey
-	s.dirty = true
-	s.Flush()
-	debugLogf("traffic", "successfully migrated legacy traffic data to current.json and daily/")
-	return true
 }
 
 func (s *TrafficStore) loadData() {
 	now := time.Now()
 	todayKey := now.Format("20060102")
-
-	if s.migrateLegacyFileIfNeeded(now) {
-		return
-	}
 
 	content, err := os.ReadFile(s.currentFile)
 	if err != nil {
@@ -481,7 +354,6 @@ func (s *TrafficStore) loadData() {
 	if s.total == nil {
 		s.total = newDimensionData()
 	}
-	s.total.ensureSummaryInitialized()
 	if data.StartTime > 0 {
 		s.startTime = data.StartTime
 	}
@@ -521,7 +393,6 @@ func (s *TrafficStore) loadData() {
 		}
 		s.todayDate = todayKey
 	}
-	s.today.ensureSummaryInitialized()
 
 	debugLogf("traffic", "loaded traffic store: total_domains=%d, today_domains=%d, date=%s",
 		len(s.total.Domains), len(s.today.Domains), s.todayDate)
@@ -941,22 +812,9 @@ func formatRankResult(res TrafficRankResult, items []TrafficItem, req TrafficRan
 		orderDesc = req.OrderDesc
 	}
 
-	// 优先使用传入的真实全局累计计数器，确保长尾截断后顶部总流量和总连接数一个字节都不丢！
-	if summaryDown > 0 || summaryUp > 0 || summaryCount > 0 {
-		res.TotalDownload = summaryDown
-		res.TotalUpload = summaryUp
-		res.TotalCount = summaryCount
-	} else {
-		var totalDown, totalUp, totalCount int64
-		for i := range items {
-			totalDown += items[i].Down
-			totalUp += items[i].Up
-			totalCount += items[i].Count
-		}
-		res.TotalDownload = totalDown
-		res.TotalUpload = totalUp
-		res.TotalCount = totalCount
-	}
+	res.TotalDownload = summaryDown
+	res.TotalUpload = summaryUp
+	res.TotalCount = summaryCount
 
 	orderBy := strings.ToLower(strings.TrimSpace(req.OrderBy))
 	sort.Slice(items, func(i, j int) bool {
@@ -1001,10 +859,6 @@ func (s *TrafficStore) GetRank(req TrafficRankRequest) TrafficRankResult {
 	timeRange := strings.ToLower(strings.TrimSpace(req.TimeRange))
 	if timeRange == "" {
 		timeRange = "all"
-	}
-	// 兼容老版本 24h 传参，映射为 today
-	if timeRange == "24h" {
-		timeRange = "today"
 	}
 
 	pageNum := req.PageNum

@@ -653,7 +653,6 @@ const zh = {
   trafficTimeRange: '时间范围',
   trafficTimeRangeAll: '全部累计',
   trafficTimeRangeToday: '今日',
-  trafficTimeRange24h: '最近 24 小时',
   trafficTimeRange7d: '最近 7 天',
   trafficTimeRange30d: '最近 30 天',
   remainingTraffic: '剩余流量',

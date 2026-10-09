@@ -49,7 +49,7 @@ export const trafficOverallStats = ref<TrafficOverallStats>({
   totalItems: 0,
 })
 
-export type TrafficTimeRange = 'all' | 'today' | '24h' | '7d' | '30d'
+export type TrafficTimeRange = 'all' | 'today' | '7d' | '30d'
 
 // 后端托管的统计起始时间与自动清理周期
 export const trafficStatsStartTime = ref<number>(Date.now())

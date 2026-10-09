@@ -659,7 +659,6 @@ const en = {
   trafficTimeRange: 'Time Range',
   trafficTimeRangeAll: 'All Time',
   trafficTimeRangeToday: 'Today',
-  trafficTimeRange24h: 'Last 24 Hours',
   trafficTimeRange7d: 'Last 7 Days',
   trafficTimeRange30d: 'Last 30 Days',
   remainingTraffic: 'Remaining',

@@ -645,7 +645,6 @@ const zhTW: LANG_MESSAGE = {
   trafficTimeRange: '時間範圍',
   trafficTimeRangeAll: '全部累計',
   trafficTimeRangeToday: '今日',
-  trafficTimeRange24h: '最近 24 小時',
   trafficTimeRange7d: '最近 7 天',
   trafficTimeRange30d: '最近 30 天',
   remainingTraffic: '剩餘流量',

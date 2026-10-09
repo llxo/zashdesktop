@@ -255,9 +255,6 @@ const trafficTimeRange = useStorage<TrafficTimeRange>(
   'cache/connection-history-time-range',
   'all',
 )
-if (trafficTimeRange.value === '24h') {
-  trafficTimeRange.value = 'today'
-}
 const historicalData = computed(() => aggregatedDataMap.value[aggregationType.value])
 const aggregatedData = computed<ConnectionHistoryData[]>(() => {
   return historicalData.value || []
@@ -387,7 +384,7 @@ const totalSize = computed(() => rowVirtualizer.value.getTotalSize() + 24)
 const showClearDialog = ref(false)
 
 const totalConnectionsTip = computed(() => {
-  if (trafficTimeRange.value === 'today' || trafficTimeRange.value === '24h') {
+  if (trafficTimeRange.value === 'today') {
     return t('trafficTimeRangeToday')
   }
   if (trafficTimeRange.value === '7d') {
