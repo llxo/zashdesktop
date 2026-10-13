@@ -314,6 +314,9 @@ func (s *CoreService) setOnStateChange(cb func()) {
 }
 
 func (s *CoreService) emitStateChangeEvent(app *application.App) {
+	if app == nil {
+		app = application.Get()
+	}
 	if app != nil && app.Event != nil {
 		go app.Event.Emit("core:state-changed")
 	}
@@ -628,7 +631,7 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 300*time.Millisecond, done)
 		debugLogf("core", "clash API port readiness check: host=%s port=%s ready=%t", config.ClashAPIHost, config.ClashAPIPort, ready)
 		if !ready {
-			go s.pollPortReadyAsync(config.ClashAPIHost, config.ClashAPIPort, 5*time.Second, done)
+			go s.pollPortReadyAsync(config.ClashAPIHost, config.ClashAPIPort, done)
 		}
 	}
 
@@ -637,13 +640,29 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	return config, nil
 }
 
-func (s *CoreService) pollPortReadyAsync(host, port string, timeout time.Duration, done chan struct{}) {
-	ready := waitForPortReady(host, port, timeout, done)
-	if ready {
-		debugLogf("core", "clash API port became ready asynchronously: host=%s port=%s", host, port)
-		s.notifyStateChange()
-	} else {
-		debugLogf("core", "clash API port failed to become ready within %v: host=%s port=%s", timeout, host, port)
+func (s *CoreService) pollPortReadyAsync(host, port string, done chan struct{}) {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	target := net.JoinHostPort(host, port)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			debugLogf("core", "clash API port became ready asynchronously: host=%s port=%s", host, port)
+			s.notifyStateChange()
+			return
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 

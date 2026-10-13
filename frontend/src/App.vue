@@ -2,6 +2,7 @@
 // 后端会话(内核探测 + 首屏数据 + 常驻流)自己跟着 activeBackend 走,
 // 这里只需保证模块被加载,不依赖任何页面挂载。
 import { startBackendSession, stopBackendSession } from './assembly/session'
+import { backendProbe } from './assembly/version'
 import { computed, onMounted, onUnmounted, ref, type Ref, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { Events } from '@wailsio/runtime'
@@ -160,7 +161,9 @@ const checkRunningCore = async () => {
     const isRunning = Boolean(config?.running && config.clashApiUrl)
     const pid = config?.pid || 0
     if (isRunning) {
-      if (!lastCoreRunning || lastCorePID !== pid) {
+      const isConnected = backendProbe.value?.status === 'connected'
+      const isProbing = backendProbe.value?.status === 'probing'
+      if (!lastCoreRunning || lastCorePID !== pid || (!isConnected && !isProbing)) {
         lastCoreRunning = true
         lastCorePID = pid
         syncManagedBackendFromCore(config)
