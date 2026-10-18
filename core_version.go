@@ -11,9 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	version "github.com/hashicorp/go-version"
 )
 
 const (
@@ -309,7 +310,33 @@ func parseCoreVersionOutput(output, coreType string) string {
 	return normalizeCoreVersion(line)
 }
 
-// compareVersions 比较两个版本号，遵循标准版本主次数字递进规则。v1 > v2 返回 1，v1 < v2 返回 -1，相等返回 0
+func sanitizeSemVer(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
+	if v == "" {
+		return ""
+	}
+	parts := strings.SplitN(v, "+", 2)
+	buildMeta := ""
+	if len(parts) == 2 {
+		buildMeta = "+" + parts[1]
+	}
+	mainAndPre := parts[0]
+
+	dashIdx := strings.IndexByte(mainAndPre, '-')
+	if dashIdx == -1 {
+		return v
+	}
+	mainPart := mainAndPre[:dashIdx]
+	prePart := mainAndPre[dashIdx+1:]
+
+	// 将预发布标识中的连字符规整为点号，使 SemVer 解析器能独立识别数值段与文本段
+	prePart = strings.ReplaceAll(prePart, "-", ".")
+	return mainPart + "-" + prePart + buildMeta
+}
+
+// compareVersions 使用工业级版本比对库比较两个版本号。v1 > v2 返回 1，v1 < v2 返回 -1，相等返回 0
 func compareVersions(v1, v2 string) int {
 	v1 = normalizeCoreVersion(v1)
 	v2 = normalizeCoreVersion(v2)
@@ -317,31 +344,12 @@ func compareVersions(v1, v2 string) int {
 		return 0
 	}
 
-	p1 := strings.Split(strings.Split(v1, "-")[0], ".")
-	p2 := strings.Split(strings.Split(v2, "-")[0], ".")
-	for i := 0; i < len(p1) || i < len(p2); i++ {
-		var n1, n2 int
-		if i < len(p1) {
-			n1, _ = strconv.Atoi(p1[i])
-		}
-		if i < len(p2) {
-			n2, _ = strconv.Atoi(p2[i])
-		}
-		if n1 != n2 {
-			if n1 > n2 {
-				return 1
-			}
-			return -1
-		}
+	ver1, err1 := version.NewVersion(sanitizeSemVer(v1))
+	ver2, err2 := version.NewVersion(sanitizeSemVer(v2))
+	if err1 == nil && err2 == nil {
+		return ver1.Compare(ver2)
 	}
-	hasPre1 := strings.Contains(v1, "-")
-	hasPre2 := strings.Contains(v2, "-")
-	if !hasPre1 && hasPre2 {
-		return 1
-	}
-	if hasPre1 && !hasPre2 {
-		return -1
-	}
+
 	return strings.Compare(v1, v2)
 }
 
