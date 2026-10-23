@@ -296,8 +296,13 @@ const updateSetting = async (key: BehaviorField) => {
   }
 }
 
+let lastAppCheckTime = 0
+
 const checkAppUpdate = async (notify = true) => {
-  if (isCheckingAppUpdate.value || isUpdatingApp.value) return
+  const now = Date.now()
+  if (now - lastAppCheckTime < 600 || isCheckingAppUpdate.value || isUpdatingApp.value) return
+  lastAppCheckTime = now
+
   isCheckingAppUpdate.value = true
   try {
     const info = await CoreService.CheckAppUpdate()

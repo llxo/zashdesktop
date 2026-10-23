@@ -60,10 +60,10 @@ func (s *CoreService) GetAppUpdateInfo() (AppUpdateInfo, error) {
 	s.mu.Lock()
 	cached := s.cachedAppUpdate
 	s.mu.Unlock()
-	if cached.LatestVersion != "" {
-		return cached, nil
+	if cached.CurrentVersion == "" {
+		cached.CurrentVersion = appVersion
 	}
-	return s.CheckAppUpdate()
+	return cached, nil
 }
 
 type githubAsset struct {
