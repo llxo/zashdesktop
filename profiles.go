@@ -170,6 +170,11 @@ func (s *CoreService) loadProfileFromStoreLocked(profiles persistedCoreProfiles,
 	if !ok {
 		item = defaultProfileItem(normCore)
 	}
+	if s.viewChannel != nil {
+		if vc, exists := s.viewChannel[normCore]; exists && vc != "" {
+			item.Channel = vc
+		}
+	}
 	return s.profileItemToConfig(item, profiles.Behavior), nil
 }
 
@@ -312,8 +317,18 @@ func (s *CoreService) saveConfigLockedWithActiveCore(config CoreConfig, activate
 	config.CoreType = normCore
 	if activate {
 		profiles.ActiveCore = normCore
+		if s.viewChannel != nil {
+			s.viewChannel[normCore] = config.Channel
+		}
 	}
-	profiles.Profiles[normCore] = configToProfileItem(config)
+	item := configToProfileItem(config)
+	if !activate {
+		// 启动成功才持久化渠道；未激活时保持磁盘已有渠道不变，避免切换查看时意外篡改自启渠道
+		if existing, ok := profiles.Profiles[normCore]; ok && existing.Channel != "" {
+			item.Channel = existing.Channel
+		}
+	}
+	profiles.Profiles[normCore] = item
 	return s.writeProfilesLocked(profiles)
 }
 

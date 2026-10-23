@@ -124,6 +124,7 @@ type CoreService struct {
 	versionCache       map[string]coreVersionCacheItem
 	remoteReleaseMu    sync.Mutex
 	remoteReleaseCache map[string]remoteReleaseCacheItem
+	viewChannel        map[string]string
 	trafficStore       *TrafficStore
 	trafficCollector   *TrafficCollector
 }
@@ -141,6 +142,7 @@ func NewCoreService() (*CoreService, error) {
 		lastDeletedFiles:   make(map[string]deletedConfigFile),
 		versionCache:       make(map[string]coreVersionCacheItem),
 		remoteReleaseCache: make(map[string]remoteReleaseCacheItem),
+		viewChannel:        make(map[string]string),
 	}
 	service.trafficStore = NewTrafficStore(service.executableDir)
 	service.trafficCollector = NewTrafficCollector(service.trafficStore)
@@ -405,6 +407,8 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil ||
 		patch.GitHubProxy != nil
 
+	isOnlyChannelChange := patch.Channel != nil && patch.RunArgs == nil && !hasBehavior
+
 	if patch.Channel != nil {
 		channel, err := normalizeCoreChannel(*patch.Channel)
 		if err != nil {
@@ -495,6 +499,19 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 				return CoreConfig{}, err
 			}
 		}
+	}
+
+	if isOnlyChannelChange {
+		// 纯切换渠道仅更新内存中当前维护的视图状态，绝不提前写入磁盘，只有核心真正启动成功才持久化渠道
+		s.mu.Lock()
+		if s.viewChannel == nil {
+			s.viewChannel = make(map[string]string)
+		}
+		s.viewChannel[config.CoreType] = config.Channel
+		s.applyRuntimeState(&config)
+		s.mu.Unlock()
+		debugLogf("core", "channel view switched (in-memory): core=%s channel=%s", config.CoreType, config.Channel)
+		return config, nil
 	}
 
 	saved, err := s.commitConfigUpdate(config)
