@@ -193,16 +193,6 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	if config.Channel == "" {
 		config.Channel = coreChannelStable
 	}
-	defer func() {
-		if config.LatestVersion == "" {
-			downloadURL := defaultCoreURLTemplate(config.CoreType, config.Channel)
-			owner, repository := parseGitHubRepo(downloadURL)
-			if cached, ok := s.getCachedLatestRelease(owner, repository, config.Channel); ok {
-				config.LatestVersion = cached.version
-				config.UpdateAvailable = isCoreUpdateAvailable(cached.version, config.Version, config.Channel, config.CoreType)
-			}
-		}
-	}()
 	suppliedVersion := normalizeCoreVersion(supplied)
 	corePath := s.corePathFor(config.CoreType, config.Channel)
 	config.CorePath = corePath
@@ -210,7 +200,6 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	stat, err := os.Stat(corePath)
 	if err != nil || stat.IsDir() {
 		config.Installed = false
-		config.InstalledVersion = ""
 		config.Version = suppliedVersion
 		return
 	}
@@ -218,40 +207,30 @@ func (s *CoreService) applyCurrentVersion(config *CoreConfig, supplied string) {
 	config.Installed = true
 	if suppliedVersion != "" {
 		config.Version = suppliedVersion
-		config.InstalledVersion = suppliedVersion
 		return
 	}
 
+	// 1. 优先比对内存缓存（文件修改时间与大小比对）
 	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok && cached.modTime.Equal(stat.ModTime()) && cached.size == stat.Size() {
-		if cached.version != "" {
-			config.Version = cached.version
-			config.VersionDetail = cached.detail
-			config.InstalledVersion = cached.version
-		} else if config.InstalledVersion != "" {
-			config.Version = config.InstalledVersion
-		}
+		config.Version = cached.version
 		return
 	}
 
-	version, versionDetail, err := readCoreVersionDetail(corePath, config.CoreType)
-	s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
-		modTime: stat.ModTime(),
-		size:    stat.Size(),
-		version: version,
-		detail:  versionDetail,
-	})
+	// 2. 内存缓存未命中或文件外部变更：执行一次探测并更新内存缓存
+	version, err := readCoreVersion(corePath, config.CoreType)
 	if err == nil && version != "" {
 		config.Version = version
-		config.VersionDetail = versionDetail
-		config.InstalledVersion = version
-	} else if config.InstalledVersion != "" {
-		config.Version = config.InstalledVersion
+		s.setCachedCoreVersion(config.CoreType, config.Channel, coreVersionCacheItem{
+			modTime: stat.ModTime(),
+			size:    stat.Size(),
+			version: version,
+		})
 	}
 }
 
-func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
+func readCoreVersion(corePath, coreType string) (string, error) {
 	if !fileExists(corePath) {
-		return "", "", fmt.Errorf("%s core is not installed", coreType)
+		return "", fmt.Errorf("%s core is not installed", coreType)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -264,14 +243,14 @@ func readCoreVersionDetail(corePath, coreType string) (string, string, error) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		debugLogf("release", "execute %s %v failed: %v", corePath, versionArgs, err)
-		return "", "", fmt.Errorf("read %s core version: %w", coreType, err)
+		return "", fmt.Errorf("read %s core version: %w", coreType, err)
 	}
 	version := parseCoreVersionOutput(string(output), coreType)
 	if version == "" {
 		debugLogf("release", "unable to parse version from output: %q", string(output))
-		return "", "", fmt.Errorf("unable to read %s core version", coreType)
+		return "", fmt.Errorf("unable to read %s core version", coreType)
 	}
-	return version, strings.TrimSpace(string(output)), nil
+	return version, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -688,7 +667,6 @@ func (s *CoreService) checkUpdateInternal(rawURL, rawCoreType string, force bool
 		debugLogf("release", "check update loadConfigSnapshot failed: %v", err)
 		return CoreConfig{}, err
 	}
-	s.applyCurrentVersion(&config, "")
 
 	downloadURL := strings.TrimSpace(rawURL)
 	if downloadURL == "" {

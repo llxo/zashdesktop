@@ -15,10 +15,8 @@ export interface AppUpdateInfo {
 export interface CoreConfig {
     "coreType": string;
     "version": string;
-    "versionDetail": string;
     "channel": string;
     "corePath": string;
-    "installedVersion": string;
     "installed": boolean;
     "latestVersion": string;
     "updateAvailable": boolean;

@@ -37,11 +37,9 @@ const (
 type CoreConfig struct {
 	CoreType         string `json:"coreType"`
 	Version          string `json:"version"`
-	VersionDetail     string `json:"versionDetail"`
-	Channel           string `json:"channel"`
-	CorePath          string `json:"corePath"`
-	InstalledVersion  string `json:"installedVersion"`
-	Installed         bool   `json:"installed"`
+	Channel          string `json:"channel"`
+	CorePath         string `json:"corePath"`
+	Installed        bool   `json:"installed"`
 	LatestVersion     string `json:"latestVersion"`
 	UpdateAvailable   bool   `json:"updateAvailable"`
 	RunArgs           string `json:"runArgs"`
@@ -85,7 +83,6 @@ type coreVersionCacheItem struct {
 	modTime time.Time
 	size    int64
 	version string
-	detail  string
 }
 
 type CoreService struct {
@@ -403,6 +400,11 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 		return CoreConfig{}, err
 	}
 
+	hasBehavior := patch.RunAsAdmin != nil || patch.AutoStart != nil ||
+		patch.AutoStartSingBox != nil || patch.AutoStartMihomo != nil ||
+		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil ||
+		patch.GitHubProxy != nil
+
 	if patch.Channel != nil {
 		channel, err := normalizeCoreChannel(*patch.Channel)
 		if err != nil {
@@ -412,8 +414,6 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 		config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 		config.Installed = fileExists(config.CorePath)
 		config.Version = ""
-		config.VersionDetail = ""
-		config.InstalledVersion = ""
 		s.applyCurrentVersion(&config, "")
 		config.LatestVersion = ""
 		config.UpdateAvailable = false
@@ -422,11 +422,6 @@ func (s *CoreService) UpdateCoreSettings(patch CoreSettingsPatch) (CoreConfig, e
 	if patch.RunArgs != nil {
 		config.RunArgs = strings.TrimSpace(*patch.RunArgs)
 	}
-
-	hasBehavior := patch.RunAsAdmin != nil || patch.AutoStart != nil ||
-		patch.AutoStartSingBox != nil || patch.AutoStartMihomo != nil ||
-		patch.StopCoreOnExit != nil || patch.BackendDebugLog != nil ||
-		patch.GitHubProxy != nil
 
 	if hasBehavior {
 		runAsAdmin := config.RunAsAdmin
@@ -809,8 +804,6 @@ func (s *CoreService) applyCoreUpgrade(coreType, archivePath, targetVersion stri
 			return CoreConfig{}, fmt.Errorf("restart %s core after update: %w", coreType, restartErr)
 		}
 		config = restarted
-	} else {
-		s.notifyStateChange()
 	}
 	return config, nil
 }
@@ -822,7 +815,7 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 	}
 
 	config.CorePath = corePath
-	installedVersion, versionDetail, versionErr := readCoreVersionDetail(corePath, config.CoreType)
+	installedVersion, versionErr := readCoreVersion(corePath, config.CoreType)
 	if versionErr != nil {
 		return CoreConfig{}, versionErr
 	}
@@ -831,12 +824,9 @@ func (s *CoreService) installCoreArchiveLocked(config CoreConfig, archivePath, t
 			modTime: stat.ModTime(),
 			size:    stat.Size(),
 			version: installedVersion,
-			detail:  versionDetail,
 		})
 	}
 	config.Version = installedVersion
-	config.VersionDetail = versionDetail
-	config.InstalledVersion = installedVersion
 	config.Installed = true
 	config.LatestVersion = targetVersion
 	config.UpdateAvailable = isCoreUpdateAvailable(targetVersion, installedVersion, config.Channel, config.CoreType)

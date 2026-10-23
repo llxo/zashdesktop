@@ -37,10 +37,8 @@ const coreType = computed(() => props.coreType)
 const emptyCoreConfig = (type: CoreType): CoreConfig => ({
   coreType: type,
   version: '',
-  versionDetail: '',
   channel: '',
   corePath: '',
-  installedVersion: '',
   installed: false,
   latestVersion: '',
   updateAvailable: false,
@@ -79,23 +77,6 @@ let unsubStateChange: (() => void) | undefined
 let stateChangeTimer: ReturnType<typeof setTimeout> | undefined
 
 const applyConfig = (next: CoreConfig) => {
-  const cached = coreConfigCache[next.coreType]
-  if (
-    !next.latestVersion &&
-    cached?.latestVersion &&
-    next.channel === cached.channel
-  ) {
-    next.latestVersion = cached.latestVersion
-    next.updateAvailable = cached.updateAvailable
-  } else if (
-    !next.latestVersion &&
-    config.latestVersion &&
-    next.coreType === config.coreType &&
-    next.channel === config.channel
-  ) {
-    next.latestVersion = config.latestVersion
-    next.updateAvailable = config.updateAvailable
-  }
   Object.assign(config, next)
   coreConfigCache[config.coreType] = { ...config }
 }

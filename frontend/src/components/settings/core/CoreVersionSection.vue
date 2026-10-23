@@ -38,7 +38,7 @@
             :aria-label="$t('checkUpdate')"
             :title="$t('checkUpdate')"
             :disabled="isChecking || isDownloading"
-            @click="handleManualCheckUpdate"
+            @click="checkUpdate"
           >
             <span
               v-if="isChecking"
@@ -60,13 +60,13 @@
         <div
           class="flex flex-1 justify-end"
           :class="{
-            'pointer-events-none opacity-60': isSavingChannel || isDownloading,
+            'pointer-events-none opacity-60': isSwitchingChannel || isDownloading,
           }"
         >
           <SegmentedControl
             :model-value="currentChannel"
             :options="channelOptions"
-            @update:model-value="saveChannel"
+            @update:model-value="switchChannel"
           />
         </div>
       </div>
@@ -126,7 +126,7 @@ import {
   ArrowPathIcon,
   ArrowRightIcon,
 } from '@heroicons/vue/24/outline'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   builtInDownloadSources,
@@ -155,10 +155,9 @@ const currentChannel = computed<CoreChannel>(() => (props.config.channel === 'te
 
 const installedVersionLabel = computed(() => {
   if (!props.config.installed) return t('coreNotInstalled')
-  return props.config.installedVersion || props.config.version || t('coreInstalled')
+  return props.config.version || t('coreInstalled')
 })
 
-const isSavingChannel = ref(false)
 const isChecking = ref(false)
 const isDownloading = ref(false)
 
@@ -196,96 +195,71 @@ const handleSourceChange = () => {
   try {
     localStorage.setItem(sourceStorageKey.value, selectedSourceLabel.value)
   } catch {}
-  debounceCheckUpdate(false, true, 400)
 }
 
-const saveChannel = async (rawChannel: string) => {
-  if (isSavingChannel.value || rawChannel === currentChannel.value) return
-  isSavingChannel.value = true
+const isSwitchingChannel = ref(false)
+
+const switchChannel = async (rawChannel: string) => {
+  if (isSwitchingChannel.value || rawChannel === currentChannel.value) return
+  isSwitchingChannel.value = true
   try {
     const updated = await CoreService.UpdateCoreSettings({
       coreType: props.coreType,
       channel: rawChannel,
     })
     if (updated) {
-      emit('update:config', updated)
-      props.config.latestVersion = ''
-      props.config.updateAvailable = false
-      debounceCheckUpdate(false, true, 200)
+      emit('update:config', {
+        ...props.config,
+        ...updated,
+        latestVersion: '',
+        updateAvailable: false,
+      })
     }
   } catch (error) {
     showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
   } finally {
-    isSavingChannel.value = false
+    isSwitchingChannel.value = false
   }
 }
 
-let activeCheckKey = ''
-let checkSequence = 0
-let checkUpdateTimer: ReturnType<typeof setTimeout> | undefined
-let lastManualCheckTime = 0
+let lastCheckTime = 0
 
-const handleManualCheckUpdate = () => {
+const checkUpdate = async () => {
   const now = Date.now()
-  if (now - lastManualCheckTime < 800 || isChecking.value) return
-  lastManualCheckTime = now
-  void checkUpdate(true, true)
-}
+  if (now - lastCheckTime < 600 || isChecking.value) return
+  lastCheckTime = now
 
-const debounceCheckUpdate = (notifyError = false, force = false, delay = 400) => {
-  if (checkUpdateTimer) {
-    clearTimeout(checkUpdateTimer)
-  }
-  checkUpdateTimer = setTimeout(() => {
-    checkUpdateTimer = undefined
-    void checkUpdate(notifyError, force)
-  }, delay)
-}
-
-const checkUpdate = async (notifyError = true, force = false) => {
   const targetCoreType = props.coreType
   const targetChannel = currentChannel.value
-  const checkKey = `${targetCoreType}:${targetChannel}`
 
-  if (isChecking.value && activeCheckKey === checkKey && !force) return null
-  activeCheckKey = checkKey
-  const sequence = ++checkSequence
   isChecking.value = true
   try {
-    const downloadURL = currentDownloadURL.value
-    const next = force
-      ? await CoreService.ForceCheckUpdate(downloadURL, targetCoreType)
-      : await CoreService.CheckUpdate(downloadURL, targetCoreType)
+    const next = await CoreService.ForceCheckUpdate(currentDownloadURL.value, targetCoreType)
     if (
-      sequence === checkSequence &&
+      next &&
       props.coreType === targetCoreType &&
       currentChannel.value === targetChannel
     ) {
-      props.config.latestVersion = next.latestVersion
-      props.config.updateAvailable = next.updateAvailable
-      if (next.installedVersion) {
-        props.config.installedVersion = next.installedVersion
-      }
-      if (next.version) {
-        props.config.version = next.version
-      }
-      emit('update:config', { ...props.config })
+      emit('update:config', {
+        ...props.config,
+        latestVersion: next.latestVersion,
+        updateAvailable: next.updateAvailable,
+        ...(next.version ? { version: next.version } : {}),
+      })
     }
-    return next
   } catch (error) {
     if (
-      notifyError &&
-      sequence === checkSequence &&
       props.coreType === targetCoreType &&
       currentChannel.value === targetChannel
     ) {
       showNotification({ content: String(error), type: 'alert-error', timeout: 0 })
     }
-    return null
   } finally {
-    if (sequence === checkSequence) {
+    if (
+      props.coreType === targetCoreType &&
+      currentChannel.value === targetChannel
+    ) {
       isChecking.value = false
-      activeCheckKey = ''
     }
   }
 }
@@ -295,7 +269,17 @@ const downloadCore = async () => {
   isDownloading.value = true
   let shouldResetLoading = true
   try {
-    await CoreService.DownloadCore(currentDownloadURL.value, props.coreType)
+    const updated = await CoreService.DownloadCore(currentDownloadURL.value, props.coreType)
+    if (updated) {
+      emit('update:config', {
+        ...props.config,
+        ...updated,
+        latestVersion: updated.latestVersion || '',
+        updateAvailable: Boolean(updated.updateAvailable),
+        ...(updated.version ? { version: updated.version } : {}),
+        installed: updated.installed,
+      })
+    }
     showNotification({ content: 'coreDownloadSuccess', type: 'alert-success' })
   } catch (error) {
     const errorMsg = String(error)
@@ -309,10 +293,16 @@ const downloadCore = async () => {
       })
       if (confirmed) {
         try {
-          const updated = await CoreService.UpdateCoreSettings({ githubProxy: true })
+          const updated = await CoreService.UpdateCoreSettings({
+            coreType: props.coreType,
+            githubProxy: true,
+          })
           if (updated) {
-            emit('update:config', updated)
-            props.config.githubProxy = true
+            emit('update:config', {
+              ...props.config,
+              ...updated,
+              githubProxy: true,
+            })
           }
           shouldResetLoading = false
           await downloadCore()
@@ -334,8 +324,6 @@ const downloadCore = async () => {
 watch(
   () => props.coreType,
   () => {
-    checkSequence += 1
-    activeCheckKey = ''
     isChecking.value = false
     loadSavedSource()
   },
@@ -351,32 +339,7 @@ watch(
   },
 )
 
-watch(
-  () => [props.coreType, props.config.channel] as const,
-  ([nextType, nextChannel], [prevType, prevChannel]) => {
-    if (!nextChannel) return
-
-    const typeChanged = nextType !== prevType
-    const channelChanged = nextChannel !== prevChannel
-
-    if (typeChanged || channelChanged) {
-      if (!props.config.latestVersion || channelChanged) {
-        debounceCheckUpdate(false, false, 300)
-      }
-    }
-  },
-  { immediate: true },
-)
-
-onUnmounted(() => {
-  if (checkUpdateTimer) {
-    clearTimeout(checkUpdateTimer)
-    checkUpdateTimer = undefined
-  }
-})
-
 defineExpose({
   checkUpdate,
-  debounceCheckUpdate,
 })
 </script>

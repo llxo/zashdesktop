@@ -195,8 +195,7 @@ import {
   ArrowUturnLeftIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import type { CoreType } from './coreSources'
+import { computed, onMounted, ref, watch } from 'vue'
 import { validateConfigFileName } from './coreUtils'
 
 const props = defineProps<{

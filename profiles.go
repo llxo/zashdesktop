@@ -91,11 +91,6 @@ func (s *CoreService) profileItemToConfig(item persistedProfileItem, behavior sh
 	applySharedBehavior(&config, behavior)
 	config.CorePath = s.corePathFor(config.CoreType, config.Channel)
 	config.Installed = fileExists(config.CorePath)
-	if cached, ok := s.getCachedCoreVersion(config.CoreType, config.Channel); ok {
-		config.Version = cached.version
-		config.VersionDetail = cached.detail
-		config.InstalledVersion = cached.version
-	}
 	return config
 }
 
@@ -158,7 +153,6 @@ func (s *CoreService) commitConfigUpdate(config CoreConfig) (CoreConfig, error) 
 		return CoreConfig{}, err
 	}
 	s.applyRuntimeState(&config)
-	s.notifyStateChangeLocked()
 	return config, nil
 }
 
