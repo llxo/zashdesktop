@@ -66,7 +66,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 const isConnecting = computed(() => {
-  return backendProbe.value?.status === 'connecting'
+  return backendProbe.value?.status === 'probing'
 })
 
 const handleConfigureBackend = () => {
