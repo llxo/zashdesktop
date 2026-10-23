@@ -127,7 +127,11 @@ const handleCoreStateChanged = () => {
 
 const handleVisibilityChange = () => {
   if (!document.hidden) {
-    void loadConfig()
+    setTimeout(() => {
+      if (!document.hidden) {
+        void loadConfig()
+      }
+    }, 80)
   }
 }
 

@@ -341,7 +341,7 @@ type App struct {
 	saveTimer             *time.Timer
 	saveMu                sync.Mutex
 	freezeTimer           *time.Timer
-	suspendedWebView2PIDs []uint32
+	suspendedTargets      []suspendedTarget
 	isWebView2Suspended   bool
 	isFreezing            bool
 	freezeDone            chan struct{}
@@ -368,10 +368,10 @@ func (a *App) resumeWebView2Locked() (resumed bool, waitChan <-chan struct{}) {
 		waitChan = a.freezeDone
 	}
 	if a.isWebView2Suspended {
-		pids := a.suspendedWebView2PIDs
-		a.suspendedWebView2PIDs = nil
+		targets := a.suspendedTargets
+		a.suspendedTargets = nil
 		a.isWebView2Suspended = false
-		resumeWebView2Processes(pids)
+		resumeWebView2Processes(targets)
 		resumed = true
 	}
 	return resumed, waitChan
@@ -558,7 +558,7 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		a.freezeDone = done
 		a.mu.Unlock()
 
-		pids := suspendWebView2Processes()
+		targets := suspendWebView2Processes()
 
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -567,13 +567,13 @@ func (a *App) releaseWindow(e *application.WindowEvent) {
 		close(done)
 		if a.window == nil || a.quitting || a.forceClose || a.needResume {
 			a.needResume = false
-			if len(pids) > 0 {
-				resumeWebView2Processes(pids)
+			if len(targets) > 0 {
+				resumeWebView2Processes(targets)
 			}
 			return
 		}
-		a.suspendedWebView2PIDs = pids
-		if len(pids) > 0 {
+		a.suspendedTargets = targets
+		if len(targets) > 0 {
 			a.isWebView2Suspended = true
 		}
 

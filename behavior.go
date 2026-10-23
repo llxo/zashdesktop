@@ -635,15 +635,20 @@ func getProcessThreadIDs(pid uint32) []uint32 {
 	return threadIDs
 }
 
-func suspendProcessThreads(pid uint32) bool {
+type suspendedTarget struct {
+	pid  uint32
+	tids []uint32
+}
+
+func suspendProcessThreads(pid uint32) []uint32 {
 	if procSuspendThread.Find() != nil {
-		return false
+		return nil
 	}
 	tids := getProcessThreadIDs(pid)
 	if len(tids) == 0 {
-		return false
+		return nil
 	}
-	count := 0
+	var suspended []uint32
 	for _, tid := range tids {
 		hThread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, tid)
 		if err != nil {
@@ -652,39 +657,16 @@ func suspendProcessThreads(pid uint32) bool {
 		r, _, _ := procSuspendThread.Call(uintptr(hThread))
 		windows.CloseHandle(hThread)
 		if int32(r) != -1 {
-			count++
+			suspended = append(suspended, tid)
 		}
 	}
-	return count > 0
+	return suspended
 }
 
-func resumeProcessThreads(pid uint32) bool {
-	if procResumeThread.Find() != nil {
-		return false
-	}
-	tids := getProcessThreadIDs(pid)
-	if len(tids) == 0 {
-		return false
-	}
-	count := 0
-	for _, tid := range tids {
-		hThread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, tid)
-		if err != nil {
-			continue
-		}
-		r, _, _ := procResumeThread.Call(uintptr(hThread))
-		windows.CloseHandle(hThread)
-		if int32(r) != -1 {
-			count++
-		}
-	}
-	return count > 0
-}
-
-func suspendWebView2Processes() []uint32 {
+func suspendWebView2Processes() []suspendedTarget {
 	pids := findWebView2ProcessPIDs()
 	const access = windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_SET_QUOTA | windows.PROCESS_QUERY_LIMITED_INFORMATION
-	var suspended []uint32
+	var targets []suspendedTarget
 	for _, pid := range pids {
 		if h, err := windows.OpenProcess(access, false, pid); err == nil {
 			cmdLine := getProcessCommandLine(h)
@@ -692,9 +674,10 @@ func suspendWebView2Processes() []uint32 {
 			// 仅挂起沙盒渲染进程（--type=renderer，即唯一的 WebView2: zashdesktop），坚决放行主 Browser 进程、GPU 进程与 Utility 进程。
 			// 确保主 Browser 进程的 Windows 消息泵与 UIA 探针畅通无阻，从根本上杜绝任务管理器 IPC 超时死锁与全局降级。
 			if strings.Contains(cmdLine, "--type=renderer") {
-				if suspendProcessThreads(pid) {
-					suspended = append(suspended, pid)
-					debugLogf("window", "suspended webview2 renderer process via SuspendThread (pid=%d)", pid)
+				tids := suspendProcessThreads(pid)
+				if len(tids) > 0 {
+					targets = append(targets, suspendedTarget{pid: pid, tids: tids})
+					debugLogf("window", "suspended webview2 renderer process via SuspendThread (pid=%d, %d threads)", pid, len(tids))
 					// 定向工作集修剪：仅对已挂起的沙盒渲染进程修剪物理工作集，坚决放行主 Browser 进程、GPU 进程与主程序自身
 					trimProcessWorkingSet(h)
 				} else {
@@ -704,19 +687,26 @@ func suspendWebView2Processes() []uint32 {
 			windows.CloseHandle(h)
 		}
 	}
-	return suspended
+	return targets
 }
 
-func resumeWebView2Processes(pids []uint32) {
-	if len(pids) == 0 {
+func resumeWebView2Processes(targets []suspendedTarget) {
+	if len(targets) == 0 || procResumeThread.Find() != nil {
 		return
 	}
-	for _, pid := range pids {
-		if resumeProcessThreads(pid) {
-			debugLogf("window", "resumed webview2 renderer process via ResumeThread (pid=%d)", pid)
-		} else {
-			debugLogf("window", "failed to resume webview2 renderer threads (pid=%d)", pid)
+	for _, target := range targets {
+		resumed := 0
+		// 精准恢复已记录的线程句柄，彻底免除唤醒路径上的全系统线程快照枚举
+		for _, tid := range target.tids {
+			if hThread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, tid); err == nil {
+				r, _, _ := procResumeThread.Call(uintptr(hThread))
+				windows.CloseHandle(hThread)
+				if int32(r) != -1 {
+					resumed++
+				}
+			}
 		}
+		debugLogf("window", "fast-resumed webview2 renderer process via ResumeThread (pid=%d, %d/%d threads)", target.pid, resumed, len(target.tids))
 	}
 }
 

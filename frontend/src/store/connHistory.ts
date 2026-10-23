@@ -172,10 +172,14 @@ const onVisibilityChange = () => {
       refreshTimer = null
     }
   } else {
-    // 页面切回前台：立即获取最新数据并恢复定时器
+    // 页面切回前台：错峰延迟 80ms 获取最新数据，让出首帧渲染算力消除唤醒微顿挫
     if (activeTypeRef) {
-      fetchDimensionHistory(activeTypeRef.value, activeRangeRef?.value)
-      setupTimer()
+      setTimeout(() => {
+        if (typeof document !== 'undefined' && !document.hidden && activeTypeRef) {
+          fetchDimensionHistory(activeTypeRef.value, activeRangeRef?.value)
+          setupTimer()
+        }
+      }, 80)
     }
   }
 }
