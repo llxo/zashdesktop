@@ -698,6 +698,7 @@ const zh = {
   coreRun: '运行核心',
   coreRunStatus: '运行状态',
   coreRunning: '运行中',
+  coreStarting: '启动中',
   coreStopped: '已停止',
   coreRunArgs: '命令行参数',
   coreStart: '启动',

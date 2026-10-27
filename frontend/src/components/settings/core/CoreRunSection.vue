@@ -13,9 +13,21 @@
         <div class="flex flex-1 items-center justify-end">
           <span
             class="badge badge-sm"
-            :class="config.running ? 'badge-success' : 'badge-ghost'"
+            :class="
+              config.running
+                ? 'badge-success'
+                : config.starting
+                  ? 'badge-warning'
+                  : 'badge-ghost'
+            "
           >
-            {{ config.running ? $t('coreRunning') : $t('coreStopped') }}
+            {{
+              config.running
+                ? $t('coreRunning')
+                : config.starting
+                  ? $t('coreStarting')
+                  : $t('coreStopped')
+            }}
           </span>
         </div>
       </div>
@@ -31,7 +43,7 @@
           type="text"
           :aria-label="$t('coreRunArgs')"
           :placeholder="defaultRunArgsPlaceholder"
-          :disabled="config.running || isStarting || isStopping || isRestarting || isSavingRunArgs"
+          :disabled="config.running || config.starting || isStarting || isStopping || isRestarting || isSavingRunArgs"
           @input="isRunArgsDirty = true"
           @change="saveRunArgs"
           @keydown.enter.prevent="saveRunArgs"
@@ -45,7 +57,7 @@
         </span>
         <div class="flex flex-1 items-center justify-end gap-2">
           <button
-            v-if="!config.running"
+            v-if="!config.running && !config.starting"
             class="btn btn-primary btn-sm min-w-16"
             :disabled="
               isStarting || isStopping || isRestarting || !config.installed || isOtherCoreRunning
@@ -65,7 +77,7 @@
           <button
             v-else
             class="btn btn-sm text-error min-w-16"
-            :disabled="isStarting || isStopping || isRestarting"
+            :disabled="isStopping || isRestarting"
             @click="stopCore"
           >
             <span
@@ -81,7 +93,7 @@
           <button
             class="btn btn-sm min-w-16"
             :disabled="
-              isStarting || isStopping || isRestarting || !config.installed || isOtherCoreRunning
+              isStarting || isStopping || isRestarting || config.starting || !config.installed || isOtherCoreRunning
             "
             @click="restartCore"
           >
@@ -157,7 +169,9 @@ const isOtherCoreRunning = computed(
   () => Boolean(props.config.runningCore && props.config.runningCore !== props.coreType),
 )
 
-const showCoreLogError = computed(() => !props.config.running && Boolean(props.config.coreLogError))
+const showCoreLogError = computed(
+  () => !props.config.running && !props.config.starting && Boolean(props.config.coreLogError),
+)
 
 watch(
   () => props.config.runArgs,
@@ -212,7 +226,7 @@ const startCore = async () => {
     if (next) {
       emit('update:config', next)
     }
-    if (next && !next.running && next.coreLogError) {
+    if (next && !next.running && !next.starting && next.coreLogError) {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {
@@ -223,7 +237,7 @@ const startCore = async () => {
 }
 
 const stopCore = async () => {
-  if (isStopping.value || !props.config.running) return
+  if (isStopping.value || (!props.config.running && !props.config.starting)) return
   isStopping.value = true
   try {
     const next = await CoreService.StopCore()
@@ -250,7 +264,7 @@ const restartCore = async () => {
     if (next) {
       emit('update:config', next)
     }
-    if (next && !next.running && next.coreLogError) {
+    if (next && !next.running && !next.starting && next.coreLogError) {
       showNotification({ content: 'coreStartFailed', type: 'alert-error', timeout: 5000 })
     }
   } catch (error) {

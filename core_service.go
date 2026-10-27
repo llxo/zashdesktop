@@ -46,6 +46,7 @@ type CoreConfig struct {
 	ConfigURL         string `json:"configURL"`
 	ConfigFileName    string `json:"configFileName"`
 	Running           bool   `json:"running"`
+	Starting          bool   `json:"starting"`
 	RunningCore       string `json:"runningCore"`
 	PID               int    `json:"pid"`
 	LogPath           string `json:"logPath"`
@@ -97,12 +98,14 @@ type CoreService struct {
 	process            *exec.Cmd
 	processDone        chan struct{}
 	processCoreType    string
+	processReady       bool
 	// inheritedProcess: 上次应用退出时保留运行（stopCoreOnExit 为 false）的核心进程，新应用启动后接管
 	inheritedProcess   *os.Process
 	inheritedCoreType  string
 	stateLogged        bool
 	lastRunningCore    string
 	lastRunningPID     int
+	lastRunningReady   bool
 	runningClashAPIURL    string
 	runningClashAPIHost   string
 	runningClashAPIPort   string
@@ -640,11 +643,10 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	}(s.applicationPath)
 
 	if config.ClashAPIPort != "" {
-		ready := waitForPortReady(config.ClashAPIHost, config.ClashAPIPort, 300*time.Millisecond, done)
-		debugLogf("core", "clash API port readiness check: host=%s port=%s ready=%t", config.ClashAPIHost, config.ClashAPIPort, ready)
-		if !ready {
-			go s.pollPortReadyAsync(config.ClashAPIHost, config.ClashAPIPort, done)
-		}
+		s.processReady = false
+		go s.pollPortReadyAsync(command, config.ClashAPIHost, config.ClashAPIPort, done)
+	} else {
+		s.processReady = true
 	}
 
 	s.applyRuntimeState(&config)
@@ -652,56 +654,62 @@ func (s *CoreService) startCore(rawArgs, rawCoreType string, isPanelStart bool) 
 	return config, nil
 }
 
-func (s *CoreService) pollPortReadyAsync(host, port string, done chan struct{}) {
+func (s *CoreService) pollPortReadyAsync(cmd *exec.Cmd, host, port string, done chan struct{}) {
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
 	target := net.JoinHostPort(host, port)
-	for {
-		select {
-		case <-done:
-			return
-		default:
-		}
-		conn, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			debugLogf("core", "clash API port became ready asynchronously: host=%s port=%s", host, port)
-			s.notifyStateChange()
-			return
-		}
-		select {
-		case <-done:
-			return
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-}
 
-func waitForPortReady(host, port string, timeout time.Duration, done chan struct{}) bool {
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	target := net.JoinHostPort(host, port)
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		select {
-		case <-done:
-			return false
-		default:
-		}
-		conn, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
+	checkReady := func() bool {
+		conn, err := net.DialTimeout("tcp", target, 80*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			return true
 		}
+		return false
+	}
+
+	if checkReady() {
+		s.mu.Lock()
+		if s.process == cmd {
+			s.processReady = true
+			debugLogf("core", "clash API port ready immediately: host=%s port=%s", host, port)
+			s.syncTrafficCollectorTargetLocked()
+			s.mu.Unlock()
+			s.notifyStateChange()
+		} else {
+			s.mu.Unlock()
+		}
+		return
+	}
+
+	timeout := time.After(60 * time.Second)
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
 		select {
 		case <-done:
-			return false
-		case <-time.After(50 * time.Millisecond):
+			return
+		case <-timeout:
+			coreDebugf("clash API port polling timed out after 60s: host=%s port=%s", host, port)
+			return
+		case <-ticker.C:
+			if checkReady() {
+				s.mu.Lock()
+				if s.process == cmd {
+					s.processReady = true
+					debugLogf("core", "clash API port became ready asynchronously: host=%s port=%s", host, port)
+					s.syncTrafficCollectorTargetLocked()
+					s.mu.Unlock()
+					s.notifyStateChange()
+				} else {
+					s.mu.Unlock()
+				}
+				return
+			}
 		}
 	}
-	return false
 }
 
 func (s *CoreService) StopCore() (CoreConfig, error) {
@@ -1038,6 +1046,7 @@ func (s *CoreService) waitForCore(command *exec.Cmd, logFile *os.File, done chan
 		s.process = nil
 		s.processDone = nil
 		s.processCoreType = ""
+		s.processReady = false
 		s.clearRunningClashAPILocked()
 	}
 
@@ -1093,30 +1102,44 @@ func (s *CoreService) applyRuntimeState(config *CoreConfig) {
 
 	runningCore := s.runningCoreTypeLocked()
 	runningPID := 0
+	isStarting := false
 	if runningCore != "" {
 		if s.process != nil && s.processCoreType == runningCore {
 			runningPID = s.process.Process.Pid
+			if !s.processReady {
+				isStarting = true
+			}
 		} else if s.inheritedProcess != nil && s.inheritedCoreType == runningCore {
 			runningPID = s.inheritedProcess.Pid
 		}
 	}
 
 	config.RunningCore = runningCore
-	config.Running = runningCore != "" && runningCore == config.CoreType
-	if config.Running {
+	isCurrentCore := runningCore != "" && runningCore == config.CoreType
+	if isCurrentCore {
+		if isStarting {
+			config.Starting = true
+			config.Running = false
+		} else {
+			config.Starting = false
+			config.Running = true
+		}
 		config.PID = runningPID
 	} else {
+		config.Starting = false
+		config.Running = false
 		config.PID = 0
 	}
 
 	config.UpdateAvailable = isCoreUpdateAvailable(config.LatestVersion, config.Version, config.Channel, config.CoreType)
-	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running
+	config.CoreLogError = s.coreLogError[config.CoreType] && !config.Running && !config.Starting
 
-	if !s.stateLogged || s.lastRunningCore != runningCore || s.lastRunningPID != runningPID {
-		coreDebugf("runtime state changed: running=%t pid=%d type=%s", runningCore != "", runningPID, runningCore)
+	if !s.stateLogged || s.lastRunningCore != runningCore || s.lastRunningPID != runningPID || s.lastRunningReady != s.processReady {
+		coreDebugf("runtime state changed: running=%t starting=%t pid=%d type=%s", config.Running, config.Starting, runningPID, runningCore)
 		s.stateLogged = true
 		s.lastRunningCore = runningCore
 		s.lastRunningPID = runningPID
+		s.lastRunningReady = s.processReady
 	}
 
 	if config.Running {

@@ -113,7 +113,7 @@ const probeBackend = async (backend: Backend) => {
     } catch (e) {
       lastError = e
       if (attempt < 2 && activeBackend.value?.uuid === backend.uuid) {
-        await new Promise((resolve) => setTimeout(resolve, 150))
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
     }
   }

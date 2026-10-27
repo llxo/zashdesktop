@@ -46,6 +46,7 @@ const emptyCoreConfig = (type: CoreType): CoreConfig => ({
   configURL: '',
   configFileName: type === 'mihomo' ? 'config.yaml' : 'config.json',
   running: false,
+  starting: false,
   runningCore: '',
   pid: 0,
   logPath: '',
@@ -131,8 +132,10 @@ watch(
     }
     // 保持实时权威的核心运行状态，避免过期快照导致按钮状态来回跳变
     config.runningCore = currentRunningCore
-    config.running = Boolean(currentRunningCore && currentRunningCore === nextType)
-    config.pid = config.running ? currentRunningPID : 0
+    const isCurrent = Boolean(currentRunningCore && currentRunningCore === nextType)
+    config.running = isCurrent ? Boolean(cached?.running) : false
+    config.starting = isCurrent ? Boolean(cached?.starting) : false
+    config.pid = (config.running || config.starting) ? currentRunningPID : 0
     void loadConfig()
   },
 )

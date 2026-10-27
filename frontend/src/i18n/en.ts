@@ -704,6 +704,7 @@ const en = {
   coreRun: 'Run Core',
   coreRunStatus: 'Status',
   coreRunning: 'Running',
+  coreStarting: 'Starting',
   coreStopped: 'Stopped',
   coreRunArgs: 'CLI arguments',
   coreStart: 'Start',

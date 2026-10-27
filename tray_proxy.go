@@ -82,7 +82,7 @@ func (a *App) refreshTrayProxyGroups(ctx context.Context) {
 		}
 	}
 
-	coreFingerprint := fmt.Sprintf("%t:%t:%s", coreConfig.Running, coreConfig.Installed, coreConfig.CoreType)
+	coreFingerprint := fmt.Sprintf("%t:%t:%t:%s", coreConfig.Running, coreConfig.Starting, coreConfig.Installed, coreConfig.CoreType)
 
 	var groups []trayProxy
 	var responseHash string
@@ -208,6 +208,10 @@ func (a *App) setTrayMenu(coreConfig CoreConfig, groups []trayProxy) {
 		restartItem.SetEnabled(coreConfig.Installed)
 		restartItem.OnClick(func(*application.Context) {
 			go a.trayRestartCore()
+		})
+	} else if coreConfig.Starting {
+		menu.Add(i18n.StopCore).OnClick(func(*application.Context) {
+			go a.trayStopCore()
 		})
 	} else {
 		startItem := menu.Add(i18n.StartCore)

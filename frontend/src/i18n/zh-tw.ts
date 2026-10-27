@@ -690,6 +690,7 @@ const zhTW: LANG_MESSAGE = {
   coreRun: '執行核心',
   coreRunStatus: '執行狀態',
   coreRunning: '執行中',
+  coreStarting: '啟動中',
   coreStopped: '已停止',
   coreRunArgs: '命令列參數',
   coreStart: '啟動',

@@ -706,6 +706,7 @@ const ru: LANG_MESSAGE = {
   coreRun: 'Запуск ядра',
   coreRunStatus: 'Статус',
   coreRunning: 'Работает',
+  coreStarting: 'Запуск',
   coreStopped: 'Остановлен',
   coreRunArgs: 'Параметры запуска',
   coreStart: 'Запустить',

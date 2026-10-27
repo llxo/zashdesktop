@@ -89,6 +89,7 @@
             :aria-label="$t('coreActiveConfig')"
             :disabled="
               config.running ||
+              config.starting ||
               isSelectingConfigFile ||
               isDeletingConfigFile ||
               isUndoingDelete
@@ -124,6 +125,7 @@
             type="button"
             :disabled="
               config.running ||
+              config.starting ||
               isSelectingConfigFile ||
               isDeletingConfigFile ||
               isUndoingDelete ||
@@ -148,6 +150,7 @@
             type="button"
             :disabled="
               config.running ||
+              config.starting ||
               isSelectingConfigFile ||
               isDeletingConfigFile ||
               isUndoingDelete
